@@ -10,11 +10,11 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.1.1 — Camara FPS basica
+//! ## Estado actual: v0.1.2 — Primer cubo
 //!
-//! * Una ventana de 1280x720 que se limpia a un azul cielo.
-//! * Camara FPS movible: WASD para andar, Espacio/Shift para subir/bajar.
-//! * Captura del raton (pointer lock) al hacer click; Escape libera o sale.
+//! * Camara FPS movible: WASD + raton (pointer lock), Espacio/Shift vertical.
+//! * Un cubo 3D con color por cara, transformado por la matriz MVP.
+//! * Pipeline de wgpu con shader WGSL, z-buffer (Depth32Float) y uniforms.
 //! * Movimiento independiente del framerate (delta time).
 //!
 //! ## Organizacion del codigo

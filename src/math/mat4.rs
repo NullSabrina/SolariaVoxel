@@ -82,6 +82,59 @@ impl Mat4 {
             [-s.dot(eye), -u.dot(eye), f.dot(eye), 1.0],
         )
     }
+
+    /// Matriz de traslacion: desplaza el origen a `t`.
+    pub fn translation(t: Vec3) -> Self {
+        Self::from_cols(
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [t.x, t.y, t.z, 1.0],
+        )
+    }
+
+    /// Rotacion de `angle` radianes sobre el eje X (mano derecha).
+    pub fn rotation_x(angle: f32) -> Self {
+        let (s, c) = angle.sin_cos();
+        Self::from_cols(
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, c, s, 0.0],
+            [0.0, -s, c, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        )
+    }
+
+    /// Rotacion de `angle` radianes sobre el eje Y.
+    pub fn rotation_y(angle: f32) -> Self {
+        let (s, c) = angle.sin_cos();
+        Self::from_cols(
+            [c, 0.0, -s, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [s, 0.0, c, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        )
+    }
+
+    /// Rotacion de `angle` radianes sobre el eje Z.
+    pub fn rotation_z(angle: f32) -> Self {
+        let (s, c) = angle.sin_cos();
+        Self::from_cols(
+            [c, s, 0.0, 0.0],
+            [-s, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        )
+    }
+
+    /// Transforma un punto (asume `w = 1`). Util para tests y calculos en CPU.
+    pub fn transform_point(&self, p: Vec3) -> Vec3 {
+        let c = &self.cols;
+        Vec3::new(
+            c[0][0] * p.x + c[1][0] * p.y + c[2][0] * p.z + c[3][0],
+            c[0][1] * p.x + c[1][1] * p.y + c[2][1] * p.z + c[3][1],
+            c[0][2] * p.x + c[1][2] * p.y + c[2][2] * p.z + c[3][2],
+        )
+    }
 }
 
 /// Producto de matrices: `a * b` aplica primero `b` y luego `a`, como en
@@ -113,6 +166,29 @@ mod tests {
         let m = Mat4::perspective_rh(1.0, 1.6, 0.1, 1000.0);
         assert_eq!(m * Mat4::IDENTITY, m);
         assert_eq!(Mat4::IDENTITY * m, m);
+    }
+
+    #[test]
+    fn traslacion_mueve_el_origen() {
+        let m = Mat4::translation(Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(m.transform_point(Vec3::ZERO), Vec3::new(1.0, 2.0, 3.0));
+    }
+
+    #[test]
+    fn rotacion_y_de_90_gira_mas_x_hacia_menos_z() {
+        let m = Mat4::rotation_y(std::f32::consts::FRAC_PI_2);
+        let p = m.transform_point(Vec3::X);
+        let expected = Vec3::new(0.0, 0.0, -1.0);
+        assert!((p - expected).length() < 1e-5, "giro dio {p:?}");
+    }
+
+    #[test]
+    fn rotacion_inversa_compone_identidad() {
+        let m = Mat4::rotation_y(0.7) * Mat4::rotation_y(-0.7);
+        let expected = Mat4::IDENTITY.to_cols_array();
+        for (a, b) in m.to_cols_array().iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-5, "elemento {a} != {b}");
+        }
     }
 
     #[test]

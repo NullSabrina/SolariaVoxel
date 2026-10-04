@@ -10,9 +10,8 @@
 //! * [`Input`] acumula el estado de teclado y raton.
 //! * [`Renderer`] dibuja. [`Camera`] dice desde donde miramos y se mueve.
 //!
-//! En v0.1.1 anadimos camara FPS: WASD para andar, Espacio/Shift para subir y
-//! bajar, y captura del raton (pointer lock) al hacer click. Escape libera el
-//! cursor; si ya esta libre, cierra la app.
+//! v0.1.1 anadio la camara FPS (WASD + pointer lock). v0.1.2 anade el dibujado
+//! de un cubo: cada frame le pasamos al renderer la matriz de la camara.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -226,8 +225,11 @@ impl ApplicationHandler for App {
 
                 self.update(dt);
 
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.render();
+                // Dibujamos con la matriz de la camara actual (proyeccion * vista).
+                if let (Some(renderer), Some(camera)) =
+                    (self.renderer.as_mut(), self.camera.as_ref())
+                {
+                    renderer.render(&camera.view_projection());
                 }
             }
 

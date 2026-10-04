@@ -4,10 +4,16 @@
 //! la escena, los chunks...) no sepa NADA de wgpu: solo habla con [`Renderer`].
 //! Si algun dia cambiamos de API grafica, este es el unico modulo que cambia.
 //!
-//! En v0.1.0 el renderer solo sabe hacer una cosa: adquirir el frame, limpiar
-//! la pantalla a un color (el "cielo") y presentarlo. En v0.1.2 anadira el
-//! pipeline, los buffers y el dibujado de geometria.
+//! Piezas del render:
+//! * [`renderer`] — duena de los recursos de GPU y del bucle de un frame.
+//! * [`pipeline`] — como se dibuja (shader, vertices, z-buffer, uniforms).
+//! * [`mesh`] — la geometria (vertices + indices) subida a la GPU.
+//!
+//! En v0.1.2 el renderer ya dibuja un cubo 3D con z-buffer sobre el cielo.
 
+mod color;
+mod mesh;
+mod pipeline;
 mod renderer;
 
 pub use renderer::{Renderer, RendererError};

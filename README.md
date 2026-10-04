@@ -8,13 +8,13 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.1.1` — Camara FPS basica
+## Estado actual: `v0.1.2` — Primer cubo
 
-- Ventana de 1280x720, limpiada a un azul cielo (sRGB correcto).
-- Camara FPS **movible**: WASD para andar, Espacio/Shift para subir/bajar.
-- Captura del raton (pointer lock) al hacer click; mirar con el raton.
-- Movimiento independiente del framerate (delta time) y con `dt` limitado.
-- Suite de tests de matematica, camara e input (16 tests).
+- Camara FPS movible: WASD + raton (pointer lock), Espacio/Shift vertical.
+- Un **cubo 3D** con color por cara, colocado delante de la camara.
+- Pipeline de wgpu: shader WGSL, uniforms (matriz MVP) y **z-buffer**.
+- Geometria generada a mano (24 vertices / 36 indices) y subida a la GPU.
+- Suite de tests de matematica, camara e input (20 tests).
 
 ## Requisitos
 
@@ -52,7 +52,10 @@ src/
 │   ├── input.rs     Estado de teclado y raton (ejes de movimiento, delta).
 │   └── window.rs    Atributos de la ventana (tamano, titulo).
 ├── render/
-│   └── renderer.rs  Envoltura sobre wgpu: superficie, device, cola, clear.
+│   ├── renderer.rs  Envoltura sobre wgpu: superficie, device, z-buffer, frame.
+│   ├── pipeline.rs  Pipeline: shader WGSL, layout de vertices, uniforms MVP.
+│   ├── mesh.rs      Vertices + indices y su subida a la GPU (cubo).
+│   └── scene.wgsl   Shader del cubo (vertex + fragment).
 ├── scene/
 │   └── camera.rs    Camara FPS (posicion, yaw/pitch, matrices).
 └── math/

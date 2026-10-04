@@ -127,6 +127,47 @@ controles. `KeyCode::KeyW` significa "la tecla que esta donde la W", no la letra
 
 ---
 
+## v0.1.2 — Primer cubo
+
+### 2026-10-04 — `bytemuck` para convertir structs a bytes
+
+**Decision.** Anadimos `bytemuck` (con `derive`) y marcamos `Vertex`/`Uniforms`
+como `Pod` con `#[repr(C)]`.
+
+**Motivo.** Subir vertices y uniforms a la GPU exige reinterpretar memoria como
+bytes. `bytemuck` lo hace sin `unsafe` manual y falla en compilacion si el
+struct tiene padding inesperado. Escribirlo a mano seria mas fragil.
+
+### 2026-10-04 — Z-buffer desde el principio
+
+**Decision.** El primer pipeline ya incluye una textura de profundidad
+(`Depth32Float`) y `DepthStencilState`.
+
+**Motivo.** Sin z-buffer, las caras traseras del cubo se dibujarian encima de
+las delanteras y el resultado seria incorrecto. Es mas barato meterlo ahora que
+retrofitearlo cuando ya hay muchos objetos.
+
+### 2026-10-04 — Back-face culling desactivado (por ahora)
+
+**Decision.** `cull_mode: None`; no descartamos caras traseras todavia.
+
+**Motivo.** El z-buffer ya resuelve la oclusion, y asi no dependemos del orden
+(CCW/CW) de los vertices, que es una fuente clasica de errores. Lo activaremos
+al hacer meshing de chunks, donde el ahorro si importa.
+
+### 2026-10-04 — MVP en un solo uniform; el renderer es duena del modelo
+
+**Decision.** El uniform contiene una unica matriz `mvp`. La `App` pasa al
+renderer la `view_projection` de la camara; el renderer la multiplica por su
+propia matriz `model` del cubo.
+
+**Motivo.** Mantiene la camara fuera del renderer (la `scene`/`App` manda la
+vista) y, a la vez, cada objeto puede tener su `model`. Cuando haya muchos
+objetos moveremos el `model` a datos por instancia; el `mvp` es suficiente para
+un objeto.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

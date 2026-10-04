@@ -1,6 +1,6 @@
 [package]
 name = "solaria_voxel"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.87"
 description = "Solaria Voxel - motor de voxeles en Rust construido desde cero (ventana + wgpu)"
@@ -19,6 +19,11 @@ license = "MIT OR Apache-2.0"
 pollster = "1.0.1"
 wgpu = "30.0.1"
 winit = "0.30.13"
+
+# bytemuck nos deja convertir structs (#[repr(C)]) a bytes y viceversa sin
+# unsafe manual. Lo usamos para subir vertices y uniforms a la GPU y para
+# declarar los pods que wgpu necesita.
+bytemuck = { version = "1.25", features = ["derive"] }
 
 # ---------------------------------------------------------------------------
 # Perfiles de compilacion.
