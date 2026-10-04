@@ -141,9 +141,9 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Camara FPS: mirando el terreno desde fuera.
-        let mut camera = Camera::new(Vec3::new(0.0, 80.0, 40.0));
-        camera.pitch_deg = -15.0; // inclinada hacia abajo, hacia el terreno
+        // Camara FPS: elevada y cerca del borde para ver la rejilla 3x3.
+        let mut camera = Camera::new(Vec3::new(0.0, 100.0, 30.0));
+        camera.pitch_deg = -38.0;
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
         camera.update_view();
@@ -231,7 +231,10 @@ impl ApplicationHandler for App {
                 if let (Some(renderer), Some(camera)) =
                     (self.renderer.as_mut(), self.camera.as_ref())
                 {
-                    renderer.render(&camera.view_projection());
+                    let view_projection = camera.view_projection();
+                    let position = camera.position;
+                    renderer.update_streaming(position);
+                    renderer.render(&view_projection);
                 }
             }
 

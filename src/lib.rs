@@ -10,13 +10,13 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.3.0 — Generacion de terreno
+//! ## Estado actual: v0.3.1 — Mundo infinito (visual)
 //!
-//! * [`world::TerrainGenerator`]: altura procedural con ruido Perlin (crate
-//!   `noise`), deterministica por semilla.
-//! * Superficie de hierba, subsuelo de tierra y piedra por profundidad.
-//! * Columnas de 16x16x384 divididas en secciones de 16^3; solo se dibujan las
-//!   no vacias.
+//! * Rejilla de **3x3 columnas** centrada en el jugador; el mundo se extiende
+//!   mas alla de una sola columna.
+//! * *Streaming* por columnas: al cruzar a otra columna de chunks se recarga la
+//!   rejilla a su alrededor.
+//! * Terreno procedural con ruido Perlin, deterministico por semilla.
 //! * Atlas de texturas procedural, camara FPS y z-buffer.
 //!
 //! ## Organizacion del codigo

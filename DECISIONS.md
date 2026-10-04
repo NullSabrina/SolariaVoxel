@@ -263,6 +263,38 @@ varias columnas con coordenadas globales, y el mundo empezara a extenderse.
 
 ---
 
+## v0.3.1 — Mundo infinito (visual)
+
+### 2026-10-04 — Streaming por columnas disparado por el jugador
+
+**Decision.** El `Renderer` guarda el centro de la rejilla cargada; cuando el
+jugador cruza a otra columna (`posicion / 16`), regenera toda la rejilla 3x3.
+Sin cache todavia.
+
+**Motivo.** Version "visual" minima que demuestra el sistema de streaming sin
+complicar el renderer con un pool de meshes y generacion en hilos (eso es
+v0.5.1). Al alejarse, el terreno se genera en la nueva zona.
+
+### 2026-10-04 — Posiciones en coordenadas de mundo (sin modelo por columna)
+
+**Decision.** El mesher recibe un `origin` y escribe las posiciones ya en
+coordenadas de mundo; todas las secciones comparten la misma matriz `view_projection`.
+
+**Motivo.** Evita una matriz `model` por malla (que exigiria un buffer de
+instancias o reescribir uniform por draw). Para voxeles, que apenas se mueven,
+posicionar la geometria en el mundo es lo mas simple y rapido.
+
+### 2026-10-04 — Rejilla 3x3 con regeneracion completa (sin cache)
+
+**Decision.** Al cambiar de columna se descartan las mallas antiguas y se
+regeneran las 9. No hay cache de columnas ya generadas.
+
+**Motivo.** Es el paso "visual" de la guia; la cache y el pool de chunks llegan
+en v0.5.1. Regenerar 9 columnas es rapido hoy (unos cientos de ms) y mantiene el
+codigo legible.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

@@ -8,12 +8,12 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.3.0` — Generacion de terreno
+## Estado actual: `v0.3.1` — Mundo infinito (visual)
 
-- **Terreno procedural** con ruido Perlin (crate `noise`), deterministico por
-  semilla. Altura en `48..96` con relieve de baja y alta frecuencia.
-- Superficie de hierba, subsuelo de tierra y piedra por profundidad.
-- Columnas de 16x16x384 divididas en secciones; solo se dibujan las no vacias.
+- **Rejilla 3x3 de columnas** alrededor del jugador (el mundo se extiende).
+- **Streaming**: al cruzar a otra columna de chunks, se regenera la rejilla
+  centrada en el jugador (sin cache todavia).
+- Terreno procedural con ruido Perlin, deterministico por semilla.
 - Camara FPS movible, z-buffer, atlas de texturas y pipeline de wgpu.
 - Suite de tests (38 tests).
 

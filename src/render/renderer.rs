@@ -62,6 +62,11 @@ fn sky_color() -> wgpu::Color {
     }
 }
 
+/// Resultado de construir la geometria de una rejilla de columnas.
+struct ColumnMeshes {
+    meshes: Vec<Mesh>,
+}
+
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
     /// La superficie sobre la que presentamos (atada a la ventana).
@@ -81,6 +86,13 @@ pub struct Renderer {
     /// El pipeline de dibujo y una malla por seccion con geometria.
     pipeline: ScenePipeline,
     meshes: Vec<Mesh>,
+
+    /// Semilla del mundo (para regenerar el terreno al hacer streaming).
+    seed: u32,
+    /// Distancia de carga en chunks, en cada direccion (1 = rejilla 3x3).
+    view_radius: i32,
+    /// Centro de la ultima rejilla generada, en coordenadas de chunk.
+    loaded_center: (i32, i32),
 
     /// Color con el que limpiamos el color buffer cada frame.
     clear_color: wgpu::Color,
@@ -138,34 +150,13 @@ impl Renderer {
 
         surface.configure(&device, &config);
 
-        // 6. Z-buffer, pipeline, y el mundo: generamos una columna de ejemplo y
-        //    la convertimos en una malla por seccion no vacia.
+        // 6. Z-buffer, pipeline y mundo.
         let (depth_texture, depth_view) = Self::create_depth(&device, &config);
         let pipeline = ScenePipeline::new(&device, &queue, config.format, Self::DEPTH_FORMAT);
 
-        let generator = TerrainGenerator::new(13_371);
-        let column = generator.generate_column(0, 0);
-        // Centramos la columna (x,z en 0..16) en el origen horizontal.
-        let sections = mesh_column(&column, [-8.0, 0.0, -8.0]);
-        let total_triangles: usize = sections.iter().map(|s| s.indices.len() / 3).sum();
-        println!(
-            "[world] terreno (semilla {}): {} de {} secciones, {} triangulos",
-            generator.seed(),
-            sections.len(),
-            crate::world::SECTION_COUNT,
-            total_triangles
-        );
-        let meshes: Vec<Mesh> = sections
-            .iter()
-            .map(|s| {
-                Mesh::new(
-                    &device,
-                    &format!("section_{}", s.section),
-                    &s.vertices,
-                    &s.indices,
-                )
-            })
-            .collect();
+        let seed = 13_371;
+        let view_radius = 1; // 1 => rejilla 3x3 de columnas
+        let meshes = Self::build_column_meshes(&device, seed, (0, 0), view_radius);
 
         let info = adapter.get_info();
         println!("[render] GPU: {} | backend: {:?}", info.name, info.backend);
@@ -182,9 +173,75 @@ impl Renderer {
             depth_texture,
             depth_view,
             pipeline,
-            meshes,
+            meshes: meshes.meshes,
+            seed,
+            view_radius,
+            loaded_center: (0, 0),
             clear_color: sky_color(),
         })
+    }
+
+    /// Genera la geometria de todas las columnas de una rejilla centrada en
+    /// `center` (coordenadas de chunk), con radio `radius` (1 => 3x3).
+    fn build_column_meshes(
+        device: &wgpu::Device,
+        seed: u32,
+        center: (i32, i32),
+        radius: i32,
+    ) -> ColumnMeshes {
+        let generator = TerrainGenerator::new(seed);
+        let mut meshes = Vec::new();
+        let mut triangles = 0usize;
+        let mut columns = 0usize;
+
+        for cz in (center.1 - radius)..=(center.1 + radius) {
+            for cx in (center.0 - radius)..=(center.0 + radius) {
+                let world_x = cx * crate::world::CHUNK_SIZE as i32;
+                let world_z = cz * crate::world::CHUNK_SIZE as i32;
+                let column = generator.generate_column(world_x, world_z);
+                // Las posiciones del mesher son locales (0..16); colocamos la
+                // columna en su sitio del mundo con `origin`.
+                let origin = [world_x as f32, 0.0, world_z as f32];
+                let sections = mesh_column(&column, origin);
+                columns += 1;
+                for s in sections {
+                    triangles += s.indices.len() / 3;
+                    meshes.push(Mesh::new(
+                        device,
+                        &format!("col_{cx}_{cz}_sec_{}", s.section),
+                        &s.vertices,
+                        &s.indices,
+                    ));
+                }
+            }
+        }
+
+        println!(
+            "[world] rejilla {}x{} (semilla {seed}): {columns} columnas, {triangles} triangulos",
+            radius * 2 + 1,
+            radius * 2 + 1,
+        );
+        ColumnMeshes { meshes }
+    }
+
+    /// Recarga el mundo si el jugador ha cruzado a otra columna de chunks.
+    /// (v0.3.1: recarga toda la rejilla de golpe.)
+    pub fn update_streaming(&mut self, player: crate::math::Vec3) {
+        let cs = crate::world::CHUNK_SIZE as f32;
+        let chunk = (
+            (player.x / cs).floor() as i32,
+            (player.z / cs).floor() as i32,
+        );
+        if chunk == self.loaded_center {
+            return;
+        }
+        self.loaded_center = chunk;
+        // Libera las mallas antiguas (se destruyen al soltar el Vec) y genera
+        // las nuevas. Sin cache todavia: se regeneran todas.
+        self.meshes.clear();
+        let built = Self::build_column_meshes(&self.device, self.seed, chunk, self.view_radius);
+        self.meshes = built.meshes;
+        println!("[world] streaming -> centro de chunk {chunk:?}");
     }
 
     /// Crea (o recrea) la textura de profundidad para el tamano actual.
