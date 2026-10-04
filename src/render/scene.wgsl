@@ -24,11 +24,13 @@ var atlas_sampler: sampler;
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
+    @location(2) light: f32,
 };
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
+    @location(1) light: f32,
 };
 
 @vertex
@@ -36,11 +38,16 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     output.clip_position = uniforms.mvp * vec4<f32>(input.position, 1.0);
     output.uv = input.uv;
+    output.light = input.light;
     return output;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // Lee el pixel del atlas correspondiente a este vertice de la cara.
-    return textureSample(atlas, atlas_sampler, input.uv);
+    let tex = textureSample(atlas, atlas_sampler, input.uv);
+    // Iluminacion: la luz de cielo (0..1) modula el color. Un minimo (0.15)
+    // evita que las zonas a oscuras queden totalmente negras e ilegibles.
+    let ambient = 0.15;
+    let shade = ambient + (1.0 - ambient) * input.light;
+    return vec4<f32>(tex.rgb * shade, tex.a);
 }

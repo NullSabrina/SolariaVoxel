@@ -551,6 +551,46 @@ implementamos, pero queda anotado para el futuro.
 
 ---
 
+## v0.6.0 — Iluminacion basica
+
+### 2026-10-04 — Skylight "columnar" simple, no flood-fill 3D todavia
+
+**Decision.** `Column::compute_skylight` marca 15 las celdas a cielo abierto
+(por encima de la primera cosa solida de su columna vertical) y 0 el resto. No
+propaga la luz lateralmente.
+
+**Motivo.** Da el 90% del efecto con 10% del codigo: superficie iluminada,
+subsuelo oscuro. El flood fill 3D (que iluminaria cuevas cercanas a la
+superficie y suavizaria bordes) es v0.6.1/v0.6.2; el metodo esta aislado para
+sustituirlo sin tocar el mesher ni el shader.
+
+### 2026-10-04 — Luz por vertice, normalizada 0..1
+
+**Decision.** `Vertex` gana `light: f32` (0..1). El mesher la calcula desde la
+celda de aire frente a la cara y la incluye en `FaceKey` (para no fusionar caras
+con distinta luz). El shader aplica `ambient + (1-ambient)*light`.
+
+**Motivo.** Iluminacion barata (sin lighting de pantalla), suave entre caras por
+interpolacion, y sin coste de memoria por bloque en la GPU. El mínimo ambiental
+(0.15) evita que la oscuridad deje zonas ilegibles.
+
+### 2026-10-04 — La luz se recomputa al editar
+
+**Decision.** `World::set_block` recalcula la skylight de la columna editada.
+
+**Motivo.** Si rompes el techo de una cueva, tiene que entrar luz. Recomputar una
+columna (16x16x384) es barato. La propagacion incremental (solo lo afectado) es
+v0.12.1; por ahora recomputar la columna entera es correcto y simple.
+
+### 2026-10-04 — Memoria de la luz: 1 byte por celda (de momento)
+
+**Decision.** La luz se guarda como `Vec<u8>` de 16x16x384 = ~98 KB por columna.
+
+**Motivo.** Simple y suficiente con 81 columnas (~8 MB). En v0.11.x/v0.12.x
+pasara a 4 bits por celda (mitad) o a una textura de luz.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

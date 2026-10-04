@@ -63,9 +63,16 @@ impl Chunk {
     }
 }
 
+/// Niveles de luz, de 0 (oscuridad) a 15 (cielo despejado).
+pub const MAX_LIGHT: u8 = 15;
+
 /// Una columna del mundo: `SECTION_COUNT` secciones apiladas.
 pub struct Column {
     sections: [Chunk; SECTION_COUNT],
+    /// Luz de cielo por bloque (0..15), en el mismo orden que los bloques.
+    /// Guardamos `u8` por celda: 16x16x384 = ~98 KB por columna. En v0.12.x
+    /// pasaremos a un buffer de 4 bits por celda (mitad de memoria).
+    light: Vec<u8>,
 }
 
 impl Column {
@@ -73,7 +80,70 @@ impl Column {
     pub fn empty() -> Self {
         Self {
             sections: array::from_fn(|_| Chunk::empty()),
+            light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
         }
+    }
+
+    /// Indice plano de la luz.
+    #[inline]
+    fn light_index(x: usize, y: usize, z: usize) -> usize {
+        (y * CHUNK_SIZE + z) * CHUNK_SIZE + x
+    }
+
+    /// Luz de cielo en una posicion (0..15).
+    #[inline]
+    pub fn light_at(&self, x: usize, y: usize, z: usize) -> u8 {
+        self.light[Self::light_index(x, y, z)]
+    }
+
+    /// Ajusta la luz de cielo en una posicion.
+    #[inline]
+    pub fn set_light(&mut self, x: usize, y: usize, z: usize, level: u8) {
+        self.light[Self::light_index(x, y, z)] = level.min(MAX_LIGHT);
+    }
+
+    /// Calcula la **luz de cielo** de toda la columna.
+    ///
+    /// En v0.6.0 es una version simplificada (sin propagacion lateral aun):
+    /// * Un bloque no solido **a cielo abierto** (por encima de la primera cosa
+    ///   solida de su columna vertical) recibe luz 15.
+    /// * Todo lo que queda bajo la superficie recibe 0.
+    ///
+    /// Esto ya da el efecto buscado (superficie iluminada, subsuelo a oscuras).
+    /// La propagacion suave de la luz por las caras (flood fill 3D) y la luz de
+    /// bloque (antorchas) llegan en v0.6.1/v0.6.2. Por eso el metodo esta
+    /// separado: mas adelante lo sustituimos sin tocar el resto.
+    pub fn compute_skylight(&mut self) {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                // `open` sigue siendo true mientras no encontremos solido.
+                let mut open = true;
+                let mut y = WORLD_HEIGHT;
+                while y > 0 {
+                    y -= 1;
+                    let block = self.get(x, y, z);
+                    if block.is_solid() {
+                        open = false;
+                    }
+                    let level = if open { MAX_LIGHT } else { 0 };
+                    self.set_light(x, y, z, level);
+                }
+            }
+        }
+    }
+
+    /// Luz de cielo en coordenadas que pueden salirse de la columna. Fuera
+    /// devolvemos 0 (oscuridad).
+    #[inline]
+    pub fn light_or_zero(&self, x: i32, y: i32, z: i32) -> u8 {
+        if x < 0 || y < 0 || z < 0 {
+            return 0;
+        }
+        let (x, y, z) = (x as usize, y as usize, z as usize);
+        if x >= CHUNK_SIZE || z >= CHUNK_SIZE || y >= WORLD_HEIGHT {
+            return 0;
+        }
+        self.light_at(x, y, z)
     }
 
     /// Lee un bloque con `y` global (0..WORLD_HEIGHT).
@@ -208,6 +278,27 @@ mod tests {
         assert!(!column.sections[0].is_empty());
         assert!(!column.sections[1].is_empty());
         assert!(column.sections[2].is_empty());
+    }
+
+    #[test]
+    fn la_skylight_ilumina_la_superficie_y_oscurece_el_subsuelo() {
+        let mut column = Column::empty();
+        // Suelo en y=0..4; aire por encima.
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                for y in 0..4 {
+                    column.set(x, y, z, Block::Stone);
+                }
+            }
+        }
+        column.compute_skylight();
+        // El aire sobre el suelo esta a cielo abierto -> luz 15.
+        assert_eq!(column.light_at(0, 4, 0), MAX_LIGHT);
+        assert_eq!(column.light_at(0, WORLD_HEIGHT - 1, 0), MAX_LIGHT);
+        // Bajo el suelo no llega el cielo -> 0.
+        assert_eq!(column.light_at(0, 3, 0), 0);
+        // El propio bloque solido tambien queda a 0.
+        assert_eq!(column.light_at(0, 0, 0), 0);
     }
 
     #[test]

@@ -32,6 +32,9 @@ use crate::render::mesh::Vertex;
 struct FaceKey {
     block: u8,
     face: Face,
+    /// Luz de cielo de la celda de aire que hay delante de la cara (0..15).
+    /// Incluirla en la clave evita fusionar caras con distinta iluminacion.
+    light: u8,
 }
 
 /// Genera la malla de una columna entera con greedy meshing.
@@ -40,7 +43,8 @@ struct FaceKey {
 /// `origin`). `origin` desplaza la columna (0..16) a su sitio del mundo.
 pub fn greedy_column(column: &Column, origin: [f32; 3]) -> (Vec<Vertex>, Vec<u32>) {
     let query = |x: i32, y: i32, z: i32| column.get_or_air(x, y, z);
-    greedy_range(&query, 0, WORLD_HEIGHT, origin)
+    let light = |x: i32, y: i32, z: i32| column.light_or_zero(x, y, z);
+    greedy_range(&query, &light, 0, WORLD_HEIGHT, origin)
 }
 
 /// Greedy meshing de una seccion concreta (16 capas).
@@ -50,23 +54,24 @@ pub fn greedy_section(
     origin: [f32; 3],
 ) -> (Vec<Vertex>, Vec<u32>) {
     let query = |x: i32, y: i32, z: i32| column.get_or_air(x, y, z);
-    greedy_section_query(&query, section, origin)
+    let light = |x: i32, y: i32, z: i32| column.light_or_zero(x, y, z);
+    greedy_section_query(&query, &light, section, origin)
 }
 
-/// Greedy meshing de una seccion usando una consulta de bloque **externa**.
+/// Greedy meshing de una seccion usando consultas de bloque y luz **externas**.
 ///
-/// `query(x, y, z)` debe devolver el bloque en coordenadas **locales** de la
-/// columna, pero puede consultar fuera de ella (0..16) para ver el vecino. Asi
-/// el mesher sabe que al otro lado del borde hay terreno y **no dibuja muros
-/// internos** entre chunks. Es la clave de v0.5.1.
+/// `query(x, y, z)` devuelve el bloque en coordenadas **locales** de la columna
+/// (puede mirar fuera, 0..16, para el vecino: eso es lo que evita los muros
+/// internos). `light(x, y, z)` devuelve la luz de cielo 0..15 de esa celda.
 pub fn greedy_section_query(
     query: &dyn Fn(i32, i32, i32) -> Block,
+    light: &dyn Fn(i32, i32, i32) -> u8,
     section: usize,
     origin: [f32; 3],
 ) -> (Vec<Vertex>, Vec<u32>) {
     let y_start = section * CHUNK_SIZE;
     let y_end = (y_start + CHUNK_SIZE).min(WORLD_HEIGHT);
-    greedy_range(query, y_start, y_end, origin)
+    greedy_range(query, light, y_start, y_end, origin)
 }
 
 /// Nucleo del greedy meshing sobre el rango vertical `[y_start, y_end)`.
@@ -81,6 +86,7 @@ pub fn greedy_section_query(
 /// horizontales, y el "alto" del rectangulo nunca cruza el limite de seccion.
 fn greedy_range(
     query: &dyn Fn(i32, i32, i32) -> Block,
+    light: &dyn Fn(i32, i32, i32) -> u8,
     y_start: usize,
     y_end: usize,
     origin: [f32; 3],
@@ -113,7 +119,7 @@ fn greedy_range(
             for (v, _) in (0..v_hi).enumerate() {
                 let world_v = v_range.0 + v;
                 for (u, u_mask_col) in mask.iter_mut().enumerate() {
-                    u_mask_col[v] = mask_value(query, face, u, world_v, c);
+                    u_mask_col[v] = mask_value(query, light, face, u, world_v, c);
                 }
             }
 
@@ -181,6 +187,7 @@ fn greedy_range(
 /// * Para caras +Y/-Y: `u` recorre el eje X, `v` el eje Z, `c` el eje Y.
 fn mask_value(
     query: &dyn Fn(i32, i32, i32) -> Block,
+    light: &dyn Fn(i32, i32, i32) -> u8,
     face: Face,
     u: usize,
     v: usize,
@@ -199,13 +206,17 @@ fn mask_value(
     }
     let (ox, oy, oz) = face.offset();
     // El vecino puede estar fuera de la columna (otro chunk): la query decide.
-    let neighbor = query(x as i32 + ox, y as i32 + oy, z as i32 + oz);
+    let (nx, ny, nz) = (x as i32 + ox, y as i32 + oy, z as i32 + oz);
+    let neighbor = query(nx, ny, nz);
     if neighbor.is_solid() {
         return None; // cara oculta (o vecino en otro chunk)
     }
+    // La luz que recibe esta cara es la de la celda de aire de delante.
+    let level = light(nx, ny, nz);
     Some(FaceKey {
         block: block.id(),
         face,
+        light: level,
     })
 }
 
@@ -288,9 +299,12 @@ fn emit_quad(
 
     let base = vertices.len() as u32;
     for (corner, uv) in corners.iter().zip(uvs.iter()) {
-        vertices.push(Vertex::new(
+        // Luz normalizada 0..1 (la cara recibe la luz de la celda de delante).
+        let light = key.light as f32 / super::chunk::MAX_LIGHT as f32;
+        vertices.push(Vertex::with_light(
             [corner[0] + ox, corner[1] + oy, corner[2] + oz],
             *uv,
+            light,
         ));
     }
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);

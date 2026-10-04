@@ -245,10 +245,12 @@ impl Renderer {
         // mirando la columna vecina si hace falta.
         let query =
             |x: i32, y: i32, z: i32| -> Block { self.world.get_block([base_x + x, y, base_z + z]) };
+        let light =
+            |x: i32, y: i32, z: i32| -> u8 { self.world.light_at([base_x + x, y, base_z + z]) };
 
         let mut out: ColumnMeshes = std::array::from_fn(|_| None);
         for (section, slot) in out.iter_mut().enumerate() {
-            let (v, i) = greedy::greedy_section_query(&query, section, origin);
+            let (v, i) = greedy::greedy_section_query(&query, &light, section, origin);
             if !v.is_empty() {
                 *slot = Some(Mesh::new(
                     &self.device,

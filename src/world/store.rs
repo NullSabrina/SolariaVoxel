@@ -130,7 +130,21 @@ impl World {
         // Toda columna editada se guarda; registramos su chunk.
         self.modified
             .insert(pos, ChunkRecord::from_column(column, TERRAIN_SECTION));
+        // La luz depende de que haya techo o no: la recalculamos.
+        self.recompute_light(pos);
         true
+    }
+
+    /// Luz de cielo de una celda (0..15), en coordenadas de mundo.
+    pub fn light_at(&self, world: [i32; 3]) -> u8 {
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return 0;
+        }
+        let (pos, local) = Self::world_to_local(world);
+        match self.columns.get(&pos) {
+            Some(column) => column.light_at(local[0], local[1], local[2]),
+            None => 0,
+        }
     }
 
     /// ¿Esta el chunk en `pos` modificado por el jugador?
@@ -152,7 +166,16 @@ impl World {
         if let Some(record) = self.modified.get(&pos) {
             apply_record(&mut column, record);
         }
+        // Calculamos la luz de cielo tras generar/restaurar la columna.
+        column.compute_skylight();
         self.columns.insert(pos, column);
+    }
+
+    /// Recalcula la luz de cielo de una columna cargada (tras editarla).
+    fn recompute_light(&mut self, pos: ChunkPos) {
+        if let Some(column) = self.columns.get_mut(&pos) {
+            column.compute_skylight();
+        }
     }
 
     /// Actualiza el conjunto de columnas cargadas alrededor del jugador:

@@ -8,15 +8,16 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.5.2` — Compresion de chunks (LZ4)
+## Estado actual: `v0.6.0` — Iluminacion basica
 
-- **Compresion LZ4** de los chunks al guardar (formato v2). Un chunk de terreno
-  pasa de 4096 a ~**31 bytes** (ratio ~**x130**), porque hay mucho aire.
-- **Migrador v1 -> v2**: los mundos antiguos se comprimen automaticamente al
-  cargarlos.
-- Sobre v0.5.1: mundo en memoria + streaming y sin muros internos.
+- **Luz de cielo**: lo que esta a cielo abierto se ve a pleno sol; bajo la
+  superficie (cuevas, caras inferiores) queda a oscuras. Se recalcula al editar.
+- La luz va **por vertice** y el shader modula el color del atlas (con un
+  minimo ambiental para que la oscuridad sea legible).
+- Sobre v0.5.2: compresion LZ4 + migrador de formato. Sobre v0.5.1: mundo en
+  memoria + streaming sin muros internos.
 - Sobre v0.4.x: romper/colocar, greedy meshing, colisiones.
-- Suite de tests (62 tests).
+- Suite de tests (63 tests).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

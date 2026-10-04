@@ -10,13 +10,13 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.5.2 — Compresion de chunks (LZ4)
+//! ## Estado actual: v0.6.0 — Iluminacion basica
 //!
-//! * [`world::save::ChunkRecord`] comprime los bloques con **LZ4** (formato v2).
-//!   Un chunk de terreno pasa de 4096 a ~31 bytes (**x130**).
-//! * [`world::save::MigrationChain`] incluye el migrador **v1 -> v2** (comprime
-//!   los chunks antiguos al cargarlos).
-//! * Sobre v0.5.1: mundo en memoria + streaming y sin muros internos.
+//! * **Luz de cielo** por columna (`Column::compute_skylight`): lo que esta a
+//!   cielo abierto recibe luz 15; bajo la superficie, 0. Se recalcula al editar.
+//! * La luz viaja **por vertice** hacia el shader, que modula el color (con un
+//!   minimo ambiental para que la oscuridad sea legible).
+//! * Sobre v0.5.2: compresion LZ4, mundo en memoria + streaming.
 //! * v0.4.x: raycast, greedy meshing, romper/colocar.
 //!
 //! ## Organizacion del codigo
