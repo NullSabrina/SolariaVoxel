@@ -1,0 +1,295 @@
+//! # `World` (en el modulo `store`) — el mundo en memoria
+//!
+//! En v0.3.x el "mundo" no existia como tal: el `Renderer` guardaba **una**
+//! columna (la central) y las vecinas eran mallas generadas y tiradas. Eso
+//! tenia dos consecuencias que se veian feo:
+//!
+//! 1. Al cruzar de chunk se **regeneraba** todo desde la semilla.
+//! 2. Los bordes entre columnas se mesheaban como si fueran aire, asi que
+//!    aparecian **muros internos** en los saltos de altura.
+//!
+//! Aqui esta la solucion: un [`World`] que mantiene cargadas las columnas
+//! alrededor del jugador, con **cache** (una columna ya generada no se vuelve a
+//! generar) y consulta de vecinos a traves de fronteras de chunk. El mesher
+//! ahora puede preguntar "¿que hay al otro lado?" y no dibuja muros internos.
+//!
+//! Nota: de momento la generacion es **sincrona** (en el hilo principal). La
+//! generacion en hilos con `rayon` es el objetivo de v0.5.1 completo; aqui
+//! dejamos la estructura lista (cola de peticiones) para anadirla encima.
+
+use std::collections::HashMap;
+
+use super::block::Block;
+use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
+use super::save::{ChunkPos, ChunkRecord};
+use super::terrain::TerrainGenerator;
+
+/// Un mundo vivo: columnas cargadas + cache + generador.
+pub struct World {
+    /// Generador de terreno (deterministico por semilla).
+    generator: TerrainGenerator,
+    /// Columnas cargadas, por posicion de chunk.
+    columns: HashMap<ChunkPos, Column>,
+    /// Posiciones de las columnas que el jugador ha **modificado** (para
+    /// guardarlas y porque no hay que regenerarlas).
+    modified: HashMap<ChunkPos, ChunkRecord>,
+    /// Distancia de carga en chunks (radio, no diametro).
+    view_radius: i32,
+    /// Ultimo centro de carga (para no recalcular si no cambio).
+    last_center: Option<ChunkPos>,
+}
+
+impl World {
+    /// Crea un mundo para una semilla, restaurando los chunks editados que se
+    /// hayan cargado de disco.
+    pub fn new(seed: u32, view_radius: i32, restored: Vec<(ChunkPos, ChunkRecord)>) -> Self {
+        let mut world = Self {
+            generator: TerrainGenerator::new(seed),
+            columns: HashMap::new(),
+            modified: HashMap::new(),
+            view_radius,
+            last_center: None,
+        };
+        // Las columnas restauradas se marcan como modificadas y se aplican
+        // encima del terreno generado cuando se carguen.
+        for (pos, record) in restored {
+            world.modified.insert(pos, record);
+        }
+        world
+    }
+
+    /// La semilla del mundo.
+    pub fn seed(&self) -> u32 {
+        self.generator.seed()
+    }
+
+    /// Radio de carga actual.
+    pub fn view_radius(&self) -> i32 {
+        self.view_radius
+    }
+
+    /// Coordenadas de mundo (en bloques) del origen de un chunk.
+    pub fn chunk_origin(pos: ChunkPos) -> [f32; 3] {
+        [
+            (pos.x * CHUNK_SIZE as i32) as f32,
+            0.0,
+            (pos.z * CHUNK_SIZE as i32) as f32,
+        ]
+    }
+
+    /// Convierte una posicion de mundo (bloques) a su chunk + coordenadas
+    /// locales.
+    pub fn world_to_local(world: [i32; 3]) -> (ChunkPos, [usize; 3]) {
+        let pos = ChunkPos::new(
+            world[0].div_euclid(CHUNK_SIZE as i32),
+            world[2].div_euclid(CHUNK_SIZE as i32),
+        );
+        let local = [
+            world[0].rem_euclid(CHUNK_SIZE as i32) as usize,
+            world[1] as usize,
+            world[2].rem_euclid(CHUNK_SIZE as i32) as usize,
+        ];
+        (pos, local)
+    }
+
+    /// ¿Esta cargada la columna en `pos`?
+    pub fn is_loaded(&self, pos: ChunkPos) -> bool {
+        self.columns.contains_key(&pos)
+    }
+
+    /// Lee un bloque en coordenadas de mundo. Devuelve `Air` si la columna no
+    /// esta cargada o `y` esta fuera del mundo.
+    pub fn get_block(&self, world: [i32; 3]) -> Block {
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return Block::Air;
+        }
+        let (pos, local) = Self::world_to_local(world);
+        match self.columns.get(&pos) {
+            Some(column) => column.get(local[0], local[1], local[2]),
+            // Fuera de lo cargado: tratamos como aire (no hay bloque).
+            None => Block::Air,
+        }
+    }
+
+    /// ¿Hay bloque solido en estas coordenadas de mundo?
+    pub fn is_solid(&self, world: [i32; 3]) -> bool {
+        self.get_block(world).is_solid()
+    }
+
+    /// Escribe un bloque en coordenadas de mundo. Marca el chunk como
+    /// modificado. Devuelve `true` si se pudo (la columna debe estar cargada).
+    pub fn set_block(&mut self, world: [i32; 3], block: Block) -> bool {
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return false;
+        }
+        let (pos, local) = Self::world_to_local(world);
+        let Some(column) = self.columns.get_mut(&pos) else {
+            return false;
+        };
+        column.set(local[0], local[1], local[2], block);
+        // Toda columna editada se guarda; registramos su chunk.
+        self.modified
+            .insert(pos, ChunkRecord::from_column(column, TERRAIN_SECTION));
+        true
+    }
+
+    /// ¿Esta el chunk en `pos` modificado por el jugador?
+    pub fn is_modified(&self, pos: ChunkPos) -> bool {
+        self.modified.contains_key(&pos)
+    }
+
+    /// Itera las posiciones de las columnas cargadas.
+    pub fn loaded_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.columns.keys().copied()
+    }
+
+    /// Carga una columna: usa la version modificada si existe, si no, la genera.
+    fn load_column(&mut self, pos: ChunkPos) {
+        let origin = Self::chunk_origin(pos);
+        let mut column = self
+            .generator
+            .generate_column(origin[0] as i32, origin[2] as i32);
+        if let Some(record) = self.modified.get(&pos) {
+            apply_record(&mut column, record);
+        }
+        self.columns.insert(pos, column);
+    }
+
+    /// Actualiza el conjunto de columnas cargadas alrededor del jugador:
+    /// carga las que faltan y **descarga** las que quedan fuera del radio.
+    ///
+    /// Devuelve `(cargadas, descargadas)` para que el renderer sepa que mallas
+    /// hay que regenerar. No hace nada si el centro no cambio.
+    pub fn update_streaming(&mut self, player_pos: [f32; 3]) -> StreamChange {
+        let center = ChunkPos::new(
+            (player_pos[0] / CHUNK_SIZE as f32).floor() as i32,
+            (player_pos[2] / CHUNK_SIZE as f32).floor() as i32,
+        );
+        if self.last_center == Some(center) {
+            return StreamChange::default();
+        }
+        self.last_center = Some(center);
+
+        // 1. Descargar lo que quede fuera del radio.
+        let mut unloaded = Vec::new();
+        self.columns.retain(|pos, _| {
+            let inside = (pos.x - center.x).abs() <= self.view_radius
+                && (pos.z - center.z).abs() <= self.view_radius;
+            if !inside {
+                unloaded.push(*pos);
+            }
+            inside
+        });
+
+        // 2. Cargar lo que falte.
+        let mut loaded = Vec::new();
+        for dz in -self.view_radius..=self.view_radius {
+            for dx in -self.view_radius..=self.view_radius {
+                let pos = ChunkPos::new(center.x + dx, center.z + dz);
+                if !self.columns.contains_key(&pos) {
+                    self.load_column(pos);
+                    loaded.push(pos);
+                }
+            }
+        }
+
+        StreamChange { loaded, unloaded }
+    }
+
+    /// Devuelve un clon de la columna (para meshearla sin prestar `self`).
+    pub fn column(&self, pos: ChunkPos) -> Option<&Column> {
+        self.columns.get(&pos)
+    }
+
+    /// Todos los registros modificados, para guardar el mundo.
+    pub fn modified_records(&self) -> &HashMap<ChunkPos, ChunkRecord> {
+        &self.modified
+    }
+}
+
+/// Seccion que contiene la superficie del terreno (y 64..80).
+pub const TERRAIN_SECTION: usize = 4;
+
+/// Aplica los bloques de un `ChunkRecord` a una columna.
+pub fn apply_record(column: &mut Column, record: &ChunkRecord) {
+    let y0 = TERRAIN_SECTION * CHUNK_SIZE;
+    let mut i = 0usize;
+    for y in y0..(y0 + CHUNK_SIZE).min(WORLD_HEIGHT) {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                if let Some(&id) = record.blocks.get(i) {
+                    column.set(x, y, z, Block::from_u8(id));
+                }
+                i += 1;
+            }
+        }
+    }
+}
+
+/// Cambios producidos por un tick de streaming.
+#[derive(Default)]
+pub struct StreamChange {
+    pub loaded: Vec<ChunkPos>,
+    pub unloaded: Vec<ChunkPos>,
+}
+
+impl StreamChange {
+    /// ¿Hubo algun cambio?
+    pub fn is_empty(&self) -> bool {
+        self.loaded.is_empty() && self.unloaded.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cargar_y_editar_en_cualquier_columna() {
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([0.0, 64.0, 0.0]);
+        // 3x3 = 9 columnas cargadas.
+        assert_eq!(world.loaded_positions().count(), 9);
+
+        // Editamos un bloque en una columna vecina (chunk 1,0).
+        let target = [CHUNK_SIZE as i32 + 2, 70, 3];
+        assert!(!world.is_solid(target));
+        assert!(world.set_block(target, Block::Stone));
+        assert!(world.is_solid(target));
+        assert!(world.is_modified(ChunkPos::new(1, 0)));
+    }
+
+    #[test]
+    fn descarga_las_columnas_lejanas() {
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([0.0, 64.0, 0.0]);
+        assert!(world.is_loaded(ChunkPos::new(0, 0)));
+        // Nos movemos 5 chunks en X; (0,0) queda muy lejos.
+        world.update_streaming([(CHUNK_SIZE * 5) as f32, 64.0, 0.0]);
+        assert!(!world.is_loaded(ChunkPos::new(0, 0)));
+        assert!(world.is_loaded(ChunkPos::new(5, 0)));
+    }
+
+    #[test]
+    fn las_ediciones_sobreviven_a_descargar_y_recargar() {
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([0.0, 64.0, 0.0]);
+        let target = [2, 70, 3];
+        world.set_block(target, Block::Stone);
+        // Nos alejamos (se descarga) y volvemos.
+        world.update_streaming([(CHUNK_SIZE * 5) as f32, 64.0, 0.0]);
+        world.update_streaming([0.0, 64.0, 0.0]);
+        assert!(
+            world.is_solid(target),
+            "la edicion deberia persistir en memoria"
+        );
+    }
+
+    #[test]
+    fn world_to_local_maneja_coordenadas_negativas() {
+        let (pos, local) = World::world_to_local([-1, 5, -17]);
+        assert_eq!(pos, ChunkPos::new(-1, -2));
+        assert_eq!(local[0], CHUNK_SIZE - 1); // -1 mod 16
+        assert_eq!(local[2], CHUNK_SIZE - 1); // -17 mod 16
+    }
+}

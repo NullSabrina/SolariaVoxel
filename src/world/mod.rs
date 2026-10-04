@@ -17,6 +17,7 @@ pub mod greedy;
 pub mod mesher;
 pub mod raycast;
 pub mod save;
+pub mod store;
 pub mod terrain;
 
 pub use block::{Block, Face};
@@ -27,4 +28,5 @@ pub use save::{
     ChunkPos, ChunkRecord, FORMAT_VERSION, GENERATOR_VERSION, MigrationChain, SaveError,
     WorldHeader, WorldMigrator, WorldSave, load_and_migrate,
 };
+pub use store::{StreamChange, World};
 pub use terrain::TerrainGenerator;

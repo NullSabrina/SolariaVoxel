@@ -1,17 +1,18 @@
 //! El [`Renderer`]: duena de todos los recursos de GPU.
 //!
-//! Flujo de un frame en wgpu (el mismo que seguiremos siempre, cada vez con
-//! mas pasos entre medias):
+//! Desde v0.5.1 el mundo vive en [`crate::world::World`] (columnas en memoria
+//! con cache) y el renderer mantiene una **malla por (columna, seccion)**. Al
+//! hacer streaming solo se construyen/liberan las mallas de las columnas que
+//! entran o salen, en lugar de regenerar todo.
 //!
-//! 1. Actualizar los uniforms (la matriz MVP de la camara).
-//! 2. `surface.get_current_texture()` -> pide a la ventana la textura del frame.
-//! 3. `texture.create_view()` -> una "vista" sobre esa textura.
-//! 4. `device.create_command_encoder()` -> un cuaderno de ordenes.
-//! 5. `encoder.begin_render_pass(...)` -> limpiamos color y profundidad y
-//!    dibujamos el cubo.
-//! 6. `queue.submit(...)` -> la GPU ejecuta las ordenes.
-//! 7. `queue.present(frame)` -> se muestra el frame en la ventana.
+//! Flujo de un frame:
+//! 1. `world.update_streaming(...)` -> carga/descarga columnas; si hay cambios,
+//!    el renderer reconstruye solo las mallas afectadas.
+//! 2. Actualizar uniforms (matriz de la camara).
+//! 3. Adquirir textura, render pass (limpiar + dibujar mallas + resaltado) y
+//!    presentar.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -23,19 +24,15 @@ use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
 use crate::world::{
-    Block, CHUNK_SIZE, ChunkRecord, Column, RayHit, TerrainGenerator, greedy, raycast,
+    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, World, greedy, raycast,
 };
 
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
 pub enum RendererError {
-    /// No se pudo crear la superficie a partir de la ventana.
     Surface(wgpu::CreateSurfaceError),
-    /// No se encontro una GPU compatible con la superficie.
     Adapter(wgpu::RequestAdapterError),
-    /// La GPU no pudo crear el dispositivo logico.
     Device(wgpu::RequestDeviceError),
-    /// La superficie no ofrece ninguna configuracion valida.
     NoSurfaceConfig,
 }
 
@@ -65,90 +62,45 @@ fn sky_color() -> wgpu::Color {
     }
 }
 
-/// Seccion que contiene la superficie del terreno (y 64..80). Es la que se
-/// guarda/carga en v0.5.0; mas adelante se guardaran todas las modificadas.
-pub const TERRAIN_SECTION: usize = 4;
-
-/// Aplica los bloques de un `ChunkRecord` a la columna (restaura de disco).
-fn apply_chunk_record(column: &mut Column, record: &ChunkRecord) {
-    let y0 = TERRAIN_SECTION * CHUNK_SIZE;
-    let mut i = 0usize;
-    for y in y0..(y0 + CHUNK_SIZE).min(crate::world::WORLD_HEIGHT) {
-        for z in 0..CHUNK_SIZE {
-            for x in 0..CHUNK_SIZE {
-                if let Some(&id) = record.blocks.get(i) {
-                    column.set(x, y, z, Block::from_u8(id));
-                }
-                i += 1;
-            }
-        }
-    }
-}
+/// Mallas de una columna: una `Option<Mesh>` por seccion.
+type ColumnMeshes = [Option<Mesh>; SECTION_COUNT];
 
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
-    /// La superficie sobre la que presentamos (atada a la ventana).
     surface: wgpu::Surface<'static>,
-    /// El dispositivo logico: la "GPU virtual" con la que creamos recursos.
     device: wgpu::Device,
-    /// La cola: por donde se envian los comandos y se presentan los frames.
     queue: wgpu::Queue,
-    /// Configuracion de la superficie (tamano, formato, modo de presentacion).
     config: wgpu::SurfaceConfiguration,
 
-    /// Z-buffer: guarda la profundidad de cada pixel para que lo de delante
-    /// tape a lo de detras.
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
 
-    /// El pipeline de dibujo y sus mallas. `meshes[section]` es `Some` si esa
-    /// seccion de la columna central tiene geometria (permite regenerar una
-    /// sola al romper/colocar un bloque).
     pipeline: ScenePipeline,
-    center_meshes: Vec<Option<Mesh>>,
-    /// Mallas de las columnas vecinas (solo lectura: no se editan).
-    neighbor_meshes: Vec<Mesh>,
-    /// Pipeline y malla del resaltado del bloque apuntado.
     highlight_pipeline: HighlightPipeline,
     highlight_mesh: Option<Mesh>,
 
-    /// Semilla del mundo (para regenerar el terreno al hacer streaming).
-    seed: u32,
-    /// Distancia de carga en chunks, en cada direccion (1 = rejilla 3x3).
-    view_radius: i32,
-    /// Centro de la ultima rejilla generada, en coordenadas de chunk.
-    loaded_center: (i32, i32),
-    /// La columna del chunk central: la unica editable y consultable. Las
-    /// columnas vecinas solo se dibujan.
-    center_column: Column,
+    /// El mundo en memoria.
+    world: World,
+    /// Mallas por columna: se recrean al entrar/salir columnas del radio.
+    meshes: HashMap<ChunkPos, Box<ColumnMeshes>>,
 
-    /// Color con el que limpiamos el color buffer cada frame.
     clear_color: wgpu::Color,
 }
 
 impl Renderer {
-    /// Formato del z-buffer. `Depth32Float` es el estandar y esta en todas partes.
     const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    /// Inicializa wgpu sobre `window` con una semilla y un chunk central ya
-    /// editado (si se cargo de disco). Si `center_record` es `None`, se genera
-    /// el terreno desde la semilla.
+    /// Inicializa wgpu y el mundo. `restored` son los chunks cargados de disco.
     pub fn new(
         window: Arc<Window>,
         seed: u32,
-        center_record: Option<&ChunkRecord>,
+        restored: Vec<(ChunkPos, ChunkRecord)>,
     ) -> Result<Self, RendererError> {
         let size = window.inner_size();
-
-        // 1. El "Instance" es el punto de entrada a wgpu: enumera backends.
         let instance = wgpu::Instance::default();
-
-        // 2. La superficie conecta wgpu con la ventana.
         let surface = instance
             .create_surface(window)
             .map_err(RendererError::Surface)?;
-
-        // 3. Elegimos un adaptador fisico (la GPU real).
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
@@ -156,22 +108,17 @@ impl Renderer {
             ..Default::default()
         }))
         .map_err(RendererError::Adapter)?;
-
-        // 4. Creamos el dispositivo logico y su cola.
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("solaria.device"),
             ..Default::default()
         }))
         .map_err(RendererError::Device)?;
 
-        // 5. Configuramos la superficie.
         let width = size.width.max(1);
         let height = size.height.max(1);
         let mut config = surface
             .get_default_config(&adapter, width, height)
             .ok_or(RendererError::NoSurfaceConfig)?;
-
-        // Preferimos un formato sRGB si esta disponible.
         if let Some(srgb) = surface
             .get_capabilities(&adapter)
             .formats
@@ -181,10 +128,8 @@ impl Renderer {
         {
             config.format = srgb;
         }
-
         surface.configure(&device, &config);
 
-        // 6. Z-buffer, pipelines y mundo.
         let (depth_texture, depth_view) = Self::create_depth(&device, &config);
         let pipeline = ScenePipeline::new(&device, &queue, config.format, Self::DEPTH_FORMAT);
         let highlight_pipeline = HighlightPipeline::new(
@@ -194,27 +139,18 @@ impl Renderer {
             Self::DEPTH_FORMAT,
         );
 
-        let view_radius = 3; // 3 => rejilla 7x7 de columnas
-        // Columna central: generada desde la semilla, o restaurada de disco.
-        let mut center_column = TerrainGenerator::new(seed).generate_column(0, 0);
-        if let Some(record) = center_record {
-            apply_chunk_record(&mut center_column, record);
-            println!(
-                "[world] chunk central restaurado de disco ({} bloques)",
-                record.blocks.len()
-            );
+        // Mundo con radio 4 (9x9 = 81 columnas), con los chunks restaurados.
+        let view_radius = 4;
+        let restored_count = restored.len();
+        let world = World::new(seed, view_radius, restored);
+        if restored_count > 0 {
+            println!("[world] {restored_count} chunks restaurados de disco");
         }
-        let (center_meshes, neighbor_meshes) =
-            Self::build_world_meshes(&device, seed, (0, 0), view_radius, Some(&center_column));
 
         let info = adapter.get_info();
         println!("[render] GPU: {} | backend: {:?}", info.name, info.backend);
-        println!(
-            "[render] superficie: {}x{} | formato: {:?}",
-            config.width, config.height, config.format
-        );
 
-        Ok(Self {
+        let mut renderer = Self {
             surface,
             device,
             queue,
@@ -222,232 +158,17 @@ impl Renderer {
             depth_texture,
             depth_view,
             pipeline,
-            center_meshes,
-            neighbor_meshes,
             highlight_pipeline,
             highlight_mesh: None,
-            seed,
-            view_radius,
-            loaded_center: (0, 0),
-            center_column,
+            world,
+            meshes: HashMap::new(),
             clear_color: sky_color(),
-        })
-    }
-
-    /// Genera la geometria de la rejilla. Devuelve `(mallas_del_centro,
-    /// mallas_vecinas)`: la del centro por seccion (`Option`, para poder
-    /// regenerar una sola), y las demas todas juntas (no editables).
-    fn build_world_meshes(
-        device: &wgpu::Device,
-        seed: u32,
-        center: (i32, i32),
-        radius: i32,
-        center_column: Option<&Column>,
-    ) -> (Vec<Option<Mesh>>, Vec<Mesh>) {
-        use crate::world::SECTION_COUNT;
-
-        let generator = TerrainGenerator::new(seed);
-        // La columna central se construye seccion a seccion. Si nos pasan una ya
-        // editada (cargada de disco), la usamos tal cual.
-        let generated;
-        let center_column = match center_column {
-            Some(c) => c,
-            None => {
-                generated = generator
-                    .generate_column(center.0 * CHUNK_SIZE as i32, center.1 * CHUNK_SIZE as i32);
-                &generated
-            }
         };
-        let center_origin = [
-            (center.0 * CHUNK_SIZE as i32) as f32,
-            0.0,
-            (center.1 * CHUNK_SIZE as i32) as f32,
-        ];
-        let mut center_meshes: Vec<Option<Mesh>> = (0..SECTION_COUNT).map(|_| None).collect();
-        for (section, slot) in center_meshes.iter_mut().enumerate() {
-            let (v, i) = greedy::greedy_section(center_column, section, center_origin);
-            if !v.is_empty() {
-                *slot = Some(Mesh::new(device, &format!("center_sec_{section}"), &v, &i));
-            }
-        }
-
-        // Las demas columnas de la rejilla, como mallas sueltas (greedy).
-        let mut neighbor_meshes = Vec::new();
-        let mut triangles = 0usize;
-        for cz in (center.1 - radius)..=(center.1 + radius) {
-            for cx in (center.0 - radius)..=(center.0 + radius) {
-                if (cx, cz) == center {
-                    continue;
-                }
-                let world_x = cx * CHUNK_SIZE as i32;
-                let world_z = cz * CHUNK_SIZE as i32;
-                let column = generator.generate_column(world_x, world_z);
-                let origin = [world_x as f32, 0.0, world_z as f32];
-                let (v, i) = greedy::greedy_column(&column, origin);
-                triangles += i.len() / 3;
-                neighbor_meshes.push(Mesh::new(device, &format!("col_{cx}_{cz}"), &v, &i));
-            }
-        }
-
-        println!(
-            "[world] rejilla {}x{} (semilla {seed}, greedy): centro {} secciones, vecinas {triangles} triangulos",
-            radius * 2 + 1,
-            radius * 2 + 1,
-            center_meshes.iter().filter(|m| m.is_some()).count(),
-        );
-        (center_meshes, neighbor_meshes)
+        // Carga inicial del mundo alrededor del origen.
+        renderer.sync_streaming(Vec3::new(0.0, 64.0, 0.0));
+        Ok(renderer)
     }
 
-    /// Regenera la malla de **una seccion** de la columna central (tras editar
-    /// un bloque). Si la seccion queda vacia, se libera su malla.
-    fn refresh_center_section(&mut self, section: usize) {
-        let origin = [
-            (self.loaded_center.0 * CHUNK_SIZE as i32) as f32,
-            0.0,
-            (self.loaded_center.1 * CHUNK_SIZE as i32) as f32,
-        ];
-        let (v, i) = greedy::greedy_section(&self.center_column, section, origin);
-        self.center_meshes[section] = if v.is_empty() {
-            None
-        } else {
-            Some(Mesh::new(
-                &self.device,
-                &format!("center_sec_{section}"),
-                &v,
-                &i,
-            ))
-        };
-    }
-
-    /// Recarga el mundo si el jugador ha cruzado a otra columna de chunks.
-    /// (v0.4.0: recarga toda la rejilla de golpe; la cache llega en v0.5.1.)
-    pub fn update_streaming(&mut self, player: Vec3) {
-        let cs = CHUNK_SIZE as f32;
-        let chunk = (
-            (player.x / cs).floor() as i32,
-            (player.z / cs).floor() as i32,
-        );
-        if chunk == self.loaded_center {
-            return;
-        }
-        self.loaded_center = chunk;
-        self.center_column = TerrainGenerator::new(self.seed)
-            .generate_column(chunk.0 * CHUNK_SIZE as i32, chunk.1 * CHUNK_SIZE as i32);
-        let (center_meshes, neighbor_meshes) = Self::build_world_meshes(
-            &self.device,
-            self.seed,
-            chunk,
-            self.view_radius,
-            Some(&self.center_column),
-        );
-        self.center_meshes = center_meshes;
-        self.neighbor_meshes = neighbor_meshes;
-        println!("[world] streaming -> centro de chunk {chunk:?}");
-    }
-
-    /// Lanza un rayo desde `origin` en direccion `dir` y devuelve el primer
-    /// bloque solido golpeado del chunk central (o `None`).
-    pub fn raycast(&self, origin: Vec3, dir: Vec3, max_distance: f32) -> Option<RayHit> {
-        let base_x = self.loaded_center.0 * CHUNK_SIZE as i32;
-        let base_z = self.loaded_center.1 * CHUNK_SIZE as i32;
-        // Convertimos de coordenadas de mundo a coordenadas de voxel del chunk.
-        let is_solid = |vx: i32, vy: i32, vz: i32| -> bool {
-            let lx = vx - base_x;
-            let lz = vz - base_z;
-            if !(0..CHUNK_SIZE as i32).contains(&lx)
-                || !(0..CHUNK_SIZE as i32).contains(&lz)
-                || vy < 0
-                || vy >= crate::world::WORLD_HEIGHT as i32
-            {
-                return false;
-            }
-            self.center_column
-                .get(lx as usize, vy as usize, lz as usize)
-                .is_solid()
-        };
-        raycast(origin, dir, max_distance, is_solid)
-    }
-
-    /// Cambia el bloque en coordenadas de voxel del chunk central y regenera la
-    /// seccion afectada. Devuelve `true` si se pudo editar.
-    pub fn set_block(&mut self, voxel: [i32; 3], block: Block) -> bool {
-        let lx = voxel[0] - self.loaded_center.0 * CHUNK_SIZE as i32;
-        let lz = voxel[2] - self.loaded_center.1 * CHUNK_SIZE as i32;
-        let y = voxel[1];
-        if !(0..CHUNK_SIZE as i32).contains(&lx)
-            || !(0..CHUNK_SIZE as i32).contains(&lz)
-            || y < 0
-            || y >= crate::world::WORLD_HEIGHT as i32
-        {
-            return false;
-        }
-        self.center_column
-            .set(lx as usize, y as usize, lz as usize, block);
-        let section = y as usize / CHUNK_SIZE;
-        self.refresh_center_section(section);
-        // Si el bloque esta en el borde inferior/superior de la seccion, la cara
-        // vecina tambien puede cambiar; regeneramos la seccion contigua.
-        if (y as usize).is_multiple_of(CHUNK_SIZE) && section > 0 {
-            self.refresh_center_section(section - 1);
-        }
-        if y as usize % CHUNK_SIZE == CHUNK_SIZE - 1 && section + 1 < crate::world::SECTION_COUNT {
-            self.refresh_center_section(section + 1);
-        }
-        true
-    }
-
-    /// Actualiza la caja de resaltado del bloque `hit` (o la quita si `None`).
-    pub fn set_highlight(&mut self, hit: Option<RayHit>) {
-        self.highlight_mesh = hit.map(|h| {
-            let (v, i) = cube_edges(
-                h.block[0] as f32 + 0.5,
-                h.block[1] as f32 + 0.5,
-                h.block[2] as f32 + 0.5,
-                0.002,
-            );
-            Mesh::new(&self.device, "highlight", &v, &i)
-        });
-    }
-
-    /// La semilla del mundo.
-    pub fn seed(&self) -> u32 {
-        self.seed
-    }
-
-    /// Volca la columna central actual como un registro guardable. Se usa al
-    /// salir para persistir las ediciones del jugador.
-    pub fn snapshot_center(&self) -> ChunkRecord {
-        // Guardamos la seccion que contiene el terreno; en v0.5.0 el jugador
-        // edita sobre todo alrededor de la superficie (seccion 4 = y 64..80).
-        ChunkRecord::from_column(&self.center_column, TERRAIN_SECTION)
-    }
-
-    /// Devuelve el bloque en un punto del **chunk central**, o `None` si esta
-    /// fuera de esa columna. Es la base para la deteccion de suelo.
-    pub fn block_at(&self, world: crate::math::Vec3) -> Option<crate::world::Block> {
-        if world.y < 0.0 {
-            return None;
-        }
-        // Coordenadas locales dentro del chunk central (0..16).
-        let local_x = world.x - (self.loaded_center.0 * crate::world::CHUNK_SIZE as i32) as f32;
-        let local_z = world.z - (self.loaded_center.1 * crate::world::CHUNK_SIZE as i32) as f32;
-        if local_x < 0.0
-            || local_z < 0.0
-            || local_x >= crate::world::CHUNK_SIZE as f32
-            || local_z >= crate::world::CHUNK_SIZE as f32
-        {
-            return None;
-        }
-        let xi = local_x as usize;
-        let zi = local_z as usize;
-        let yi = world.y as usize;
-        if yi >= crate::world::WORLD_HEIGHT {
-            return None;
-        }
-        Some(self.center_column.get(xi, yi, zi))
-    }
-
-    /// Crea (o recrea) la textura de profundidad para el tamano actual.
     fn create_depth(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
@@ -470,7 +191,7 @@ impl Renderer {
         (texture, view)
     }
 
-    /// Ajusta la superficie y el z-buffer al nuevo tamano de la ventana.
+    /// Ajusta la superficie y el z-buffer al nuevo tamano de ventana.
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
@@ -478,19 +199,143 @@ impl Renderer {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
-        let (depth_texture, depth_view) = Self::create_depth(&self.device, &self.config);
-        self.depth_texture = depth_texture;
-        self.depth_view = depth_view;
+        let (t, v) = Self::create_depth(&self.device, &self.config);
+        self.depth_texture = t;
+        self.depth_view = v;
     }
 
-    /// Dibuja y presenta un frame. `view_projection` es la matriz de la camara
-    /// (proyeccion * vista); el renderer le aplica la transformacion del cubo.
+    /// Actualiza el streaming del mundo y sincroniza las mallas: libera las de
+    /// las columnas descargadas y construye las de las nuevas.
+    pub fn sync_streaming(&mut self, player_pos: Vec3) {
+        let change = self
+            .world
+            .update_streaming([player_pos.x, player_pos.y, player_pos.z]);
+        if change.is_empty() {
+            return;
+        }
+        // Liberar mallas de columnas descargadas.
+        for pos in &change.unloaded {
+            self.meshes.remove(pos);
+        }
+        // Construir mallas de columnas nuevas.
+        for pos in &change.loaded {
+            let meshes = self.build_column_meshes(*pos);
+            self.meshes.insert(*pos, Box::new(meshes));
+        }
+        if !change.loaded.is_empty() || !change.unloaded.is_empty() {
+            println!(
+                "[world] streaming: +{} -{} columnas ({} cargadas)",
+                change.loaded.len(),
+                change.unloaded.len(),
+                self.meshes.len()
+            );
+        }
+    }
+
+    /// Construye las mallas de todas las secciones de una columna, consultando
+    /// los **vecinos** (para no dibujar muros internos entre chunks).
+    fn build_column_meshes(&self, pos: ChunkPos) -> ColumnMeshes {
+        let origin = World::chunk_origin(pos);
+        // Geometria ya en coordenadas de mundo.
+        let base_x = pos.x * CHUNK_SIZE as i32;
+        let base_z = pos.z * CHUNK_SIZE as i32;
+
+        // Consulta de bloque: recibe coordenadas **locales** de la columna (que
+        // pueden salirse a -1 o 16) y devuelve el bloque del mundo en ese punto,
+        // mirando la columna vecina si hace falta.
+        let query =
+            |x: i32, y: i32, z: i32| -> Block { self.world.get_block([base_x + x, y, base_z + z]) };
+
+        let mut out: ColumnMeshes = std::array::from_fn(|_| None);
+        for (section, slot) in out.iter_mut().enumerate() {
+            let (v, i) = greedy::greedy_section_query(&query, section, origin);
+            if !v.is_empty() {
+                *slot = Some(Mesh::new(
+                    &self.device,
+                    &format!("col_{}_{}_sec_{section}", pos.x, pos.z),
+                    &v,
+                    &i,
+                ));
+            }
+        }
+        out
+    }
+
+    /// Reconstruye las mallas de la columna afectada (y sus vecinas, porque la
+    /// cara del borde cambia) tras editar un bloque.
+    fn refresh_around(&mut self, pos: ChunkPos) {
+        let neighbors = [
+            pos,
+            ChunkPos::new(pos.x + 1, pos.z),
+            ChunkPos::new(pos.x - 1, pos.z),
+            ChunkPos::new(pos.x, pos.z + 1),
+            ChunkPos::new(pos.x, pos.z - 1),
+        ];
+        for n in neighbors {
+            if self.world.is_loaded(n) {
+                let m = self.build_column_meshes(n);
+                self.meshes.insert(n, Box::new(m));
+            }
+        }
+    }
+
+    /// ¿Hay bloque solido en este punto del mundo (coordenadas en bloques)?
+    pub fn is_solid_at(&self, point: Vec3) -> bool {
+        self.world.is_solid([
+            point.x.floor() as i32,
+            point.y.floor() as i32,
+            point.z.floor() as i32,
+        ])
+    }
+
+    /// Lanza un rayo y devuelve el primer bloque solido golpeado (cualquier
+    /// columna cargada).
+    pub fn raycast(&self, origin: Vec3, dir: Vec3, max_distance: f32) -> Option<RayHit> {
+        let is_solid = |x: i32, y: i32, z: i32| -> bool { self.world.is_solid([x, y, z]) };
+        raycast(origin, dir, max_distance, is_solid)
+    }
+
+    /// Cambia un bloque (coordenadas de mundo) y regenera las mallas afectadas.
+    pub fn set_block(&mut self, voxel: [i32; 3], block: Block) -> bool {
+        if !self.world.set_block(voxel, block) {
+            return false;
+        }
+        let (pos, _) = World::world_to_local(voxel);
+        self.refresh_around(pos);
+        true
+    }
+
+    /// Actualiza el wireframe del bloque apuntado.
+    pub fn set_highlight(&mut self, hit: Option<RayHit>) {
+        self.highlight_mesh = hit.map(|h| {
+            let (v, i) = cube_edges(
+                h.block[0] as f32 + 0.5,
+                h.block[1] as f32 + 0.5,
+                h.block[2] as f32 + 0.5,
+                0.002,
+            );
+            Mesh::new(&self.device, "highlight", &v, &i)
+        });
+    }
+
+    /// Volca TODAS las columnas modificadas, para guardar el mundo.
+    pub fn snapshot_modified(&self) -> Vec<(ChunkPos, ChunkRecord)> {
+        self.world
+            .modified_records()
+            .iter()
+            .map(|(pos, rec)| (*pos, rec.clone()))
+            .collect()
+    }
+
+    /// Semilla del mundo.
+    pub fn seed(&self) -> u32 {
+        self.world.seed()
+    }
+
+    /// Dibuja y presenta un frame.
     pub fn render(&mut self, view_projection: &Mat4) {
-        // 1. Uniforms: la matriz de la camara (el mundo ya esta en coordenadas
-        //    de mundo, no hace falta modelo por objeto).
         self.pipeline.update_mvp(&self.queue, view_projection);
 
-        // 2. Pedir la textura del frame.
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) => f,
             wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
@@ -504,20 +349,15 @@ impl Renderer {
                 return;
             }
         };
-
-        // 3. Vista sobre la textura de color.
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-
-        // 4. Cuaderno de ordenes.
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("solaria.encoder"),
             });
 
-        // 5. Render pass: limpiar color + profundidad y dibujar el cubo.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("solaria.scene_pass"),
@@ -533,8 +373,6 @@ impl Renderer {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        // 1.0 = profundidad maxima (el fondo); la geometria
-                        // escribe valores mas pequenos y por eso la vemos.
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
@@ -545,24 +383,20 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            // 1. La escena: secciones del centro + columnas vecinas.
             pass.set_pipeline(self.pipeline.pipeline());
             pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
-            for mesh in self.center_meshes.iter().flatten() {
-                mesh.draw(&mut pass);
-            }
-            for mesh in &self.neighbor_meshes {
-                mesh.draw(&mut pass);
+            for column in self.meshes.values() {
+                for mesh in column.iter().flatten() {
+                    mesh.draw(&mut pass);
+                }
             }
 
-            // 2. El resaltado del bloque apuntado (wireframe naranja).
             if let Some(highlight) = self.highlight_mesh.as_ref() {
                 pass.set_pipeline(self.highlight_pipeline.pipeline());
                 highlight.draw(&mut pass);
             }
         }
 
-        // 6 y 7. Enviar y presentar.
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(frame);
     }

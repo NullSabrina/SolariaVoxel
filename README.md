@@ -8,15 +8,17 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.5.0` — Versionado y guardado del mundo
+## Estado actual: `v0.5.1` — Streaming de chunks (mundo en memoria)
 
-- **Persistencia**: el mundo se **guarda al salir** en `world.vf` y se **carga
-  al arrancar**. Tus bloques rotos/colocados ya **no se pierden**.
-- **Versionado**: `WorldHeader` (formato, generador, motor, semilla, fecha) y
-  `ChunkRecord` versionado por chunk. Serializacion binaria con **bincode**.
-- **Migradores** encadenados por version de formato (con tests).
-- Sobre v0.4.x: romper/colocar, greedy meshing, colisiones, terreno Perlin.
-- Suite de tests (57 tests).
+- **Mundo en memoria** (`World`): rejilla de columnas (9x9, radio 4) con
+  **cache**. Al moverse, carga las nuevas y descarga las lejanas, sin regenerar
+  todo.
+- **Sin muros internos**: el mesher mira la columna vecina, asi que el terreno
+  se ve **continuo** entre chunks.
+- **Ediciones en cualquier columna** y persistencia de **todos** los chunks
+  modificados (no solo el central).
+- Sobre v0.5.0: versionado + bincode. Y v0.4.x: romper/colocar, greedy meshing.
+- Suite de tests (61 tests).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -78,7 +80,8 @@ src/
 │   ├── mesher.rs    Meshing naive con face culling (referencia).
 │   ├── greedy.rs    Greedy meshing (fusiona caras; el que se usa).
 │   ├── raycast.rs   Raycast de voxeles (que bloque se apunta).
-│   └── save.rs      Versionado + guardado/carga del mundo (bincode).
+│   ├── save.rs      Versionado + guardado/carga del mundo (bincode).
+│   └── store.rs     World: columnas en memoria + streaming por radio.
 └── math/
     ├── vec3.rs      Vector de 3 componentes.
     └── mat4.rs      Matriz 4x4 column-major (perspectiva, look-at).

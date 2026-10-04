@@ -142,13 +142,10 @@ impl App {
             camera.walk(forward, right, 0.0, dt);
         }
 
-        // Fisica vertical. La consulta de solido ignora la componente Y del
-        // punto (ya la elige el controlador): solo usamos x/z para localizar el
-        // bloque dentro del chunk central.
+        // Fisica vertical. La consulta de solido mira el mundo en coordenadas de
+        // bloque (cualquier columna cargada).
         let world = renderer;
-        let is_solid = move |point: Vec3| -> bool {
-            world.block_at(point).map(|b| b.is_solid()).unwrap_or(false)
-        };
+        let is_solid = move |point: Vec3| -> bool { world.is_solid_at(point) };
 
         // En modo vuelo, Espacio/Shift suben/bajan; en modo normal Space salta.
         let shift = self.input.is_pressed(winit::keyboard::KeyCode::ShiftLeft)
@@ -189,7 +186,8 @@ impl App {
         self.update_selection();
     }
 
-    /// Guarda el mundo a disco (semilla + chunk central editado). Solo una vez.
+    /// Guarda el mundo a disco (semilla + TODOS los chunks editados). Solo una
+    /// vez por ejecucion.
     fn save_world(&mut self) {
         if self.world_saved {
             return;
@@ -201,12 +199,16 @@ impl App {
         let mut save = crate::world::WorldSave::new(self.seed, self.world_header.created_at);
         // Conservamos las versiones del header original.
         save.header = self.world_header.clone();
-        save.set_chunk(
-            crate::world::ChunkPos::new(0, 0),
-            renderer.snapshot_center(),
-        );
+        // Volcamos todas las columnas que el jugador ha modificado.
+        for (pos, record) in renderer.snapshot_modified() {
+            save.set_chunk(pos, record);
+        }
         match save.save_to(&world_path()) {
-            Ok(()) => println!("[world] guardado en {:?}", world_path()),
+            Ok(()) => println!(
+                "[world] guardado en {:?} ({} chunks editados)",
+                world_path(),
+                save.chunks.len()
+            ),
             Err(e) => eprintln!("[world] no se pudo guardar: {e}"),
         }
     }
@@ -268,27 +270,35 @@ impl ApplicationHandler for App {
             }
         };
 
-        // Cargamos el mundo de disco si existe (semilla + chunk central editado).
+        // Cargamos el mundo de disco si existe (semilla + chunks editados).
         let path = world_path();
-        let (seed, record, header) = match crate::world::load_and_migrate(&path) {
+        let (seed, restored, header) = match crate::world::load_and_migrate(&path) {
             Ok(save) => {
-                let rec = save.chunks.get(&crate::world::ChunkPos::new(0, 0)).cloned();
+                let restored: Vec<_> = save
+                    .chunks
+                    .iter()
+                    .map(|(pos, rec)| (*pos, rec.clone()))
+                    .collect();
                 println!(
                     "[world] mundo cargado: semilla {} | formato v{} | {} chunks",
                     save.header.seed,
                     save.header.format_version,
                     save.chunks.len()
                 );
-                (save.header.seed, rec, save.header)
+                (save.header.seed, restored, save.header)
             }
             Err(e) => {
                 println!("[world] sin mundo previo ({e}); se crea uno nuevo (semilla 13371)");
                 let seed = 13_371;
-                (seed, None, crate::world::WorldHeader::new(seed, now_unix()))
+                (
+                    seed,
+                    Vec::new(),
+                    crate::world::WorldHeader::new(seed, now_unix()),
+                )
             }
         };
 
-        match Renderer::new(window.clone(), seed, record.as_ref()) {
+        match Renderer::new(window.clone(), seed, restored) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
                 eprintln!("[engine] no se pudo iniciar el renderer: {e}");
@@ -301,15 +311,15 @@ impl ApplicationHandler for App {
 
         // Camara FPS: en el centro del chunk, a ras de suelo. La fisica la
         // posara sobre el terreno antes del primer frame.
-        let mut camera = Camera::new(Vec3::new(8.0, 100.0, 8.0));
-        camera.pitch_deg = -35.0;
+        let mut camera = Camera::new(Vec3::new(8.0, 78.0, 8.0));
+        camera.pitch_deg = -8.0;
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
         camera.update_view();
         // Coloca la camara sobre el primer bloque solido bajo ella.
         {
             let world = self.renderer.as_ref().unwrap();
-            let is_solid = |p: Vec3| world.block_at(p).map(|b| b.is_solid()).unwrap_or(false);
+            let is_solid = |p: Vec3| world.is_solid_at(p);
             self.player.settle(&mut camera, is_solid);
         }
         println!("[engine] jugador posado en y={:.2}", camera.position.y);
@@ -421,7 +431,7 @@ impl ApplicationHandler for App {
                 {
                     let view_projection = camera.view_projection();
                     let position = camera.position;
-                    renderer.update_streaming(position);
+                    renderer.sync_streaming(position);
                     renderer.render(&view_projection);
                 }
             }

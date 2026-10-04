@@ -10,15 +10,14 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.5.0 — Versionado y guardado del mundo
+//! ## Estado actual: v0.5.1 — Streaming de chunks (mundo en memoria)
 //!
-//! * [`world::save`]: `WorldHeader` (formato, generador, motor, semilla, fecha)
-//!   y `ChunkRecord` (versionado por chunk).
-//! * Serializacion binaria con `bincode`; el mundo se **guarda al salir** y se
-//!   **carga al arrancar**, conservando las ediciones del jugador.
-//! * [`world::save::MigrationChain`]: migradores encadenados por version de
-//!   formato, con tests (v0 -> v1) y rechazo explicito de formatos futuros.
-//! * Sobre v0.4.x: raycast, resaltado, romper/colocar, greedy meshing.
+//! * [`world::World`]: columnas cargadas en memoria con **cache**, streaming
+//!   alrededor del jugador (carga/descarga) y ediciones de cualquier columna.
+//! * El mesher consulta al **vecino** a traves de los bordes: ya **no hay muros
+//!   internos** entre chunks; el mundo se ve continuo.
+//! * El guardado persiste **todos** los chunks modificados (no solo el central).
+//! * Sobre v0.5.0: versionado + bincode; y v0.4.x: raycast, greedy, edicion.
 //!
 //! ## Organizacion del codigo
 //!

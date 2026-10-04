@@ -19,7 +19,7 @@
 //! cara lateral distinta a la de arriba) NO se fusionan.
 
 use super::atlas::tile_uv_rect;
-use super::block::Face;
+use super::block::{Block, Face};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 use crate::render::mesh::Vertex;
 
@@ -39,7 +39,8 @@ struct FaceKey {
 /// Devuelve `(vertices, indices)` en **coordenadas de mundo** (ya sumado
 /// `origin`). `origin` desplaza la columna (0..16) a su sitio del mundo.
 pub fn greedy_column(column: &Column, origin: [f32; 3]) -> (Vec<Vertex>, Vec<u32>) {
-    greedy_range(column, 0, WORLD_HEIGHT, origin)
+    let query = |x: i32, y: i32, z: i32| column.get_or_air(x, y, z);
+    greedy_range(&query, 0, WORLD_HEIGHT, origin)
 }
 
 /// Greedy meshing de una seccion concreta (16 capas).
@@ -48,9 +49,24 @@ pub fn greedy_section(
     section: usize,
     origin: [f32; 3],
 ) -> (Vec<Vertex>, Vec<u32>) {
+    let query = |x: i32, y: i32, z: i32| column.get_or_air(x, y, z);
+    greedy_section_query(&query, section, origin)
+}
+
+/// Greedy meshing de una seccion usando una consulta de bloque **externa**.
+///
+/// `query(x, y, z)` debe devolver el bloque en coordenadas **locales** de la
+/// columna, pero puede consultar fuera de ella (0..16) para ver el vecino. Asi
+/// el mesher sabe que al otro lado del borde hay terreno y **no dibuja muros
+/// internos** entre chunks. Es la clave de v0.5.1.
+pub fn greedy_section_query(
+    query: &dyn Fn(i32, i32, i32) -> Block,
+    section: usize,
+    origin: [f32; 3],
+) -> (Vec<Vertex>, Vec<u32>) {
     let y_start = section * CHUNK_SIZE;
     let y_end = (y_start + CHUNK_SIZE).min(WORLD_HEIGHT);
-    greedy_range(column, y_start, y_end, origin)
+    greedy_range(query, y_start, y_end, origin)
 }
 
 /// Nucleo del greedy meshing sobre el rango vertical `[y_start, y_end)`.
@@ -64,7 +80,7 @@ pub fn greedy_section(
 /// Por eso el rango vertical acota `v` en caras verticales y `c` en las
 /// horizontales, y el "alto" del rectangulo nunca cruza el limite de seccion.
 fn greedy_range(
-    column: &Column,
+    query: &dyn Fn(i32, i32, i32) -> Block,
     y_start: usize,
     y_end: usize,
     origin: [f32; 3],
@@ -97,7 +113,7 @@ fn greedy_range(
             for (v, _) in (0..v_hi).enumerate() {
                 let world_v = v_range.0 + v;
                 for (u, u_mask_col) in mask.iter_mut().enumerate() {
-                    u_mask_col[v] = mask_value(column, face, u, world_v, c);
+                    u_mask_col[v] = mask_value(query, face, u, world_v, c);
                 }
             }
 
@@ -163,7 +179,13 @@ fn greedy_range(
 /// * Para caras +X/-X: `u` recorre el eje Z, `v` el eje Y, `c` el eje X.
 /// * Para caras +Z/-Z: `u` recorre el eje X, `v` el eje Y, `c` el eje Z.
 /// * Para caras +Y/-Y: `u` recorre el eje X, `v` el eje Z, `c` el eje Y.
-fn mask_value(column: &Column, face: Face, u: usize, v: usize, c: usize) -> Option<FaceKey> {
+fn mask_value(
+    query: &dyn Fn(i32, i32, i32) -> Block,
+    face: Face,
+    u: usize,
+    v: usize,
+    c: usize,
+) -> Option<FaceKey> {
     // Coordenadas del voxel segun la cara.
     let (x, y, z) = match face {
         Face::PosX | Face::NegX => (c, v, u),
@@ -171,14 +193,15 @@ fn mask_value(column: &Column, face: Face, u: usize, v: usize, c: usize) -> Opti
         Face::PosY | Face::NegY => (u, c, v),
     };
 
-    let block = column.get(x, y, z);
+    let block = query(x as i32, y as i32, z as i32);
     if !block.is_solid() {
         return None;
     }
     let (ox, oy, oz) = face.offset();
-    let neighbor = column.get_or_air(x as i32 + ox, y as i32 + oy, z as i32 + oz);
+    // El vecino puede estar fuera de la columna (otro chunk): la query decide.
+    let neighbor = query(x as i32 + ox, y as i32 + oy, z as i32 + oz);
     if neighbor.is_solid() {
-        return None; // cara oculta
+        return None; // cara oculta (o vecino en otro chunk)
     }
     Some(FaceKey {
         block: block.id(),

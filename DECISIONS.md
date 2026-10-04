@@ -477,6 +477,49 @@ evita la doble escritura que vimos en la prueba.
 
 ---
 
+## v0.5.1 — Streaming de chunks
+
+### 2026-10-04 — `World` con cache de columnas y streaming por radio
+
+**Decision.** Introducimos `world::store::World`: `HashMap<ChunkPos, Column>`
+con las columnas cargadas, mas `modified: HashMap<ChunkPos, ChunkRecord>`. El
+streaming (`update_streaming`) carga/descarga segun el radio. No se regenera
+nada que ya este cargado.
+
+**Motivo.** Resuelve los dos problemas de v0.3.x: (1) al cruzar de chunk ya no
+se regenera todo; (2) las columnas existen, asi que el mesher puede consultar
+vecinos. Las ediciones se guardan en `modified`, que tambien hace de cache.
+
+### 2026-10-04 — El mesher recibe una consulta de bloque (`greedy_section_query`)
+
+**Decision.** `greedy_range`/`mask_value` reciben un `query(x,y,z) -> Block` en
+coordenadas locales, **pero que puede mirar fuera** de la columna.
+
+**Motivo.** Es lo que elimina los muros internos: al calcular la cara de un voxel
+en el borde, la consulta devuelve el bloque del chunk vecino y oculta la cara si
+tambien es solido. Mantiene el greedy puro y testeable.
+
+### 2026-10-04 — El renderer cachea mallas por (columna, seccion)
+
+**Decision.** `meshes: HashMap<ChunkPos, [Option<Mesh>; 24]>`. Al entrar/salir
+columnas se construyen/liberan solo esas mallas.
+
+**Motivo.** Meshear 81 columnas cada frame seria inviable. Con la cache, el
+coste solo aparece al cruzar de chunk. De paso, editar un bloque regenera la
+columna y sus 4 vecinas (su cara de borde tambien cambia).
+
+### 2026-10-04 — Generacion sincrona todavia
+
+**Decision.** La generacion de columnas sigue en el hilo principal; no usamos
+`rayon` aun.
+
+**Motivo.** Con radio 4 (81 columnas) la generacion inicial tarda decimas de
+segundo y luego solo se generan las nuevas al cruzar de chunk. La generacion en
+hilos + cola de peticiones (lo que pedia la guia) queda para cuando el radio sea
+mayor; la estructura (`StreamChange`) ya esta preparada.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```
