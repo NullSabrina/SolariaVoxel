@@ -6,4 +6,4 @@
 
 mod controller;
 
-pub use controller::PlayerController;
+pub use controller::{EYE_HEIGHT, PLAYER_HEIGHT, PLAYER_RADIUS, PlayerController};

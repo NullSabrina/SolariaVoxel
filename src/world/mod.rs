@@ -14,9 +14,11 @@ pub mod atlas;
 pub mod block;
 pub mod chunk;
 pub mod mesher;
+pub mod raycast;
 pub mod terrain;
 
 pub use block::{Block, Face};
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};
-pub use mesher::{SectionMesh, mesh_column};
+pub use mesher::{SectionMesh, mesh_column, mesh_section};
+pub use raycast::{RayHit, raycast};
 pub use terrain::TerrainGenerator;

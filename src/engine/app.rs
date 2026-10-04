@@ -45,6 +45,8 @@ pub struct App {
     mouse_locked: bool,
     /// Modo vuelo (F): sin gravedad, para explorar.
     flying: bool,
+    /// Bloque apuntado por la camara en el ultimo frame (y su cara).
+    selection: Option<crate::world::RayHit>,
     /// Marca de tiempo del frame anterior, para calcular el `dt`.
     last_frame: Option<Instant>,
 }
@@ -141,6 +143,68 @@ impl App {
         player.update(camera, is_solid, fly_up, flying, jump && !flying, dt);
         self.player = player;
     }
+
+    /// Raycast desde el ojo del jugador en la direccion en que mira y actualiza
+    /// el resaltado del bloque apuntado.
+    fn update_selection(&mut self) {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let Some(camera) = self.camera.as_ref() else {
+            return;
+        };
+        let hit = renderer.raycast(camera.position, camera.forward(), 6.0);
+        renderer.set_highlight(hit);
+        self.selection = hit;
+    }
+
+    /// Rompe el bloque apuntado (si lo hay).
+    fn break_block(&mut self) {
+        let Some(hit) = self.selection else {
+            return;
+        };
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_block(hit.block, crate::world::Block::Air);
+            println!("[edit] bloque roto en {:?}", hit.block);
+        }
+        self.update_selection();
+    }
+
+    /// Coloca un bloque en el aire contiguo al apuntado (si lo hay y no choca
+    /// con el jugador).
+    fn place_block(&mut self) {
+        let Some(hit) = self.selection else {
+            return;
+        };
+        let (ox, oy, oz) = hit.face.offset();
+        let target = [hit.block[0] + ox, hit.block[1] + oy, hit.block[2] + oz];
+
+        // Evitamos colocar un bloque dentro del propio jugador.
+        if let Some(camera) = self.camera.as_ref() {
+            if block_overlaps_player(target, camera.position) {
+                return;
+            }
+        }
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_block(target, crate::world::Block::Stone);
+            println!("[edit] bloque colocado en {target:?}");
+        }
+        self.update_selection();
+    }
+}
+
+/// ¿El bloque `voxel` ocupa el espacio del jugador (pies..cabeza)?
+fn block_overlaps_player(voxel: [i32; 3], eye: Vec3) -> bool {
+    use crate::player::{EYE_HEIGHT, PLAYER_HEIGHT, PLAYER_RADIUS};
+    let (bx, by, bz) = (voxel[0] as f32, voxel[1] as f32, voxel[2] as f32);
+    let feet = eye.y - EYE_HEIGHT;
+    // El jugador se aproxima por una columna de radio PLAYER_RADIUS.
+    let overlaps_xz = (bx + 1.0 > eye.x - PLAYER_RADIUS)
+        && (bx < eye.x + PLAYER_RADIUS)
+        && (bz + 1.0 > eye.z - PLAYER_RADIUS)
+        && (bz < eye.z + PLAYER_RADIUS);
+    let overlaps_y = (by + 1.0 > feet) && (by < feet + PLAYER_HEIGHT);
+    overlaps_xz && overlaps_y
 }
 
 impl ApplicationHandler for App {
@@ -175,7 +239,7 @@ impl ApplicationHandler for App {
         // Camara FPS: en el centro del chunk, a ras de suelo. La fisica la
         // posara sobre el terreno antes del primer frame.
         let mut camera = Camera::new(Vec3::new(8.0, 100.0, 8.0));
-        camera.pitch_deg = -10.0;
+        camera.pitch_deg = -35.0;
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
         camera.update_view();
@@ -235,16 +299,24 @@ impl ApplicationHandler for App {
                 }
             }
 
-            // Click izquierdo: captura el cursor si no lo estaba.
+            // Botones del raton.
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
-                button: MouseButton::Left,
+                button,
                 ..
-            } => {
-                if !self.mouse_locked {
-                    self.lock_mouse();
+            } => match button {
+                // Click izquierdo: captura el cursor; si ya esta capturado, rompe.
+                MouseButton::Left => {
+                    if self.mouse_locked {
+                        self.break_block();
+                    } else {
+                        self.lock_mouse();
+                    }
                 }
-            }
+                // Click derecho: coloca (solo con el cursor capturado).
+                MouseButton::Right if self.mouse_locked => self.place_block(),
+                _ => {}
+            },
 
             // Si perdemos el foco (alt-tab), liberamos el cursor para no
             // dejarlo atrapado.
@@ -276,6 +348,7 @@ impl ApplicationHandler for App {
                 let dt = dt.clamp(0.0, 0.1);
 
                 self.update(dt);
+                self.update_selection();
 
                 // Dibujamos con la matriz de la camara actual (proyeccion * vista).
                 if let (Some(renderer), Some(camera)) =

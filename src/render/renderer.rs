@@ -17,11 +17,14 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
-use crate::math::Mat4;
+use crate::math::{Mat4, Vec3};
 use crate::render::color::srgb_to_linear;
+use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
-use crate::world::{Column, TerrainGenerator, mesh_column};
+use crate::world::{
+    Block, CHUNK_SIZE, Column, RayHit, TerrainGenerator, mesh_column, mesh_section, raycast,
+};
 
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
@@ -62,11 +65,6 @@ fn sky_color() -> wgpu::Color {
     }
 }
 
-/// Resultado de construir la geometria de una rejilla de columnas.
-struct ColumnMeshes {
-    meshes: Vec<Mesh>,
-}
-
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
     /// La superficie sobre la que presentamos (atada a la ventana).
@@ -83,9 +81,16 @@ pub struct Renderer {
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
 
-    /// El pipeline de dibujo y una malla por seccion con geometria.
+    /// El pipeline de dibujo y sus mallas. `meshes[section]` es `Some` si esa
+    /// seccion de la columna central tiene geometria (permite regenerar una
+    /// sola al romper/colocar un bloque).
     pipeline: ScenePipeline,
-    meshes: Vec<Mesh>,
+    center_meshes: Vec<Option<Mesh>>,
+    /// Mallas de las columnas vecinas (solo lectura: no se editan).
+    neighbor_meshes: Vec<Mesh>,
+    /// Pipeline y malla del resaltado del bloque apuntado.
+    highlight_pipeline: HighlightPipeline,
+    highlight_mesh: Option<Mesh>,
 
     /// Semilla del mundo (para regenerar el terreno al hacer streaming).
     seed: u32,
@@ -93,8 +98,8 @@ pub struct Renderer {
     view_radius: i32,
     /// Centro de la ultima rejilla generada, en coordenadas de chunk.
     loaded_center: (i32, i32),
-    /// La columna del chunk central, para consultar bloques (colisiones,
-    /// raycast...). Las columnas vecinas no se guardan en v0.3.2.
+    /// La columna del chunk central: la unica editable y consultable. Las
+    /// columnas vecinas solo se dibujan.
     center_column: Column,
 
     /// Color con el que limpiamos el color buffer cada frame.
@@ -153,14 +158,21 @@ impl Renderer {
 
         surface.configure(&device, &config);
 
-        // 6. Z-buffer, pipeline y mundo.
+        // 6. Z-buffer, pipelines y mundo.
         let (depth_texture, depth_view) = Self::create_depth(&device, &config);
         let pipeline = ScenePipeline::new(&device, &queue, config.format, Self::DEPTH_FORMAT);
+        let highlight_pipeline = HighlightPipeline::new(
+            &device,
+            pipeline.layout(),
+            config.format,
+            Self::DEPTH_FORMAT,
+        );
 
         let seed = 13_371;
         let view_radius = 3; // 3 => rejilla 7x7 de columnas
-        let meshes = Self::build_column_meshes(&device, seed, (0, 0), view_radius);
-        // Guardamos la columna central para las consultas de bloques.
+        let (center_meshes, neighbor_meshes) =
+            Self::build_world_meshes(&device, seed, (0, 0), view_radius);
+        // Guardamos la columna central (la unica editable) para las consultas.
         let center_column = TerrainGenerator::new(seed).generate_column(0, 0);
 
         let info = adapter.get_info();
@@ -178,7 +190,10 @@ impl Renderer {
             depth_texture,
             depth_view,
             pipeline,
-            meshes: meshes.meshes,
+            center_meshes,
+            neighbor_meshes,
+            highlight_pipeline,
+            highlight_mesh: None,
             seed,
             view_radius,
             loaded_center: (0, 0),
@@ -187,32 +202,54 @@ impl Renderer {
         })
     }
 
-    /// Genera la geometria de todas las columnas de una rejilla centrada en
-    /// `center` (coordenadas de chunk), con radio `radius` (1 => 3x3).
-    fn build_column_meshes(
+    /// Genera la geometria de la rejilla. Devuelve `(mallas_del_centro,
+    /// mallas_vecinas)`: la del centro por seccion (`Option`, para poder
+    /// regenerar una sola), y las demas todas juntas (no editables).
+    fn build_world_meshes(
         device: &wgpu::Device,
         seed: u32,
         center: (i32, i32),
         radius: i32,
-    ) -> ColumnMeshes {
-        let generator = TerrainGenerator::new(seed);
-        let mut meshes = Vec::new();
-        let mut triangles = 0usize;
-        let mut columns = 0usize;
+    ) -> (Vec<Option<Mesh>>, Vec<Mesh>) {
+        use crate::world::SECTION_COUNT;
 
+        let generator = TerrainGenerator::new(seed);
+        // La columna central la construimos seccion a seccion.
+        let center_column =
+            generator.generate_column(center.0 * CHUNK_SIZE as i32, center.1 * CHUNK_SIZE as i32);
+        let center_origin = [
+            (center.0 * CHUNK_SIZE as i32) as f32,
+            0.0,
+            (center.1 * CHUNK_SIZE as i32) as f32,
+        ];
+        let mut center_meshes: Vec<Option<Mesh>> = (0..SECTION_COUNT).map(|_| None).collect();
+        for (section, slot) in center_meshes.iter_mut().enumerate() {
+            let m = mesh_section(&center_column, section, center_origin);
+            if !m.vertices.is_empty() {
+                *slot = Some(Mesh::new(
+                    device,
+                    &format!("center_sec_{section}"),
+                    &m.vertices,
+                    &m.indices,
+                ));
+            }
+        }
+
+        // Las demas columnas de la rejilla, como mallas sueltas.
+        let mut neighbor_meshes = Vec::new();
+        let mut triangles = 0usize;
         for cz in (center.1 - radius)..=(center.1 + radius) {
             for cx in (center.0 - radius)..=(center.0 + radius) {
-                let world_x = cx * crate::world::CHUNK_SIZE as i32;
-                let world_z = cz * crate::world::CHUNK_SIZE as i32;
+                if (cx, cz) == center {
+                    continue;
+                }
+                let world_x = cx * CHUNK_SIZE as i32;
+                let world_z = cz * CHUNK_SIZE as i32;
                 let column = generator.generate_column(world_x, world_z);
-                // Las posiciones del mesher son locales (0..16); colocamos la
-                // columna en su sitio del mundo con `origin`.
                 let origin = [world_x as f32, 0.0, world_z as f32];
-                let sections = mesh_column(&column, origin);
-                columns += 1;
-                for s in sections {
+                for s in mesh_column(&column, origin) {
                     triangles += s.indices.len() / 3;
-                    meshes.push(Mesh::new(
+                    neighbor_meshes.push(Mesh::new(
                         device,
                         &format!("col_{cx}_{cz}_sec_{}", s.section),
                         &s.vertices,
@@ -223,17 +260,39 @@ impl Renderer {
         }
 
         println!(
-            "[world] rejilla {}x{} (semilla {seed}): {columns} columnas, {triangles} triangulos",
+            "[world] rejilla {}x{} (semilla {seed}): centro {} secciones, vecinas {triangles} triangulos",
             radius * 2 + 1,
             radius * 2 + 1,
+            center_meshes.iter().filter(|m| m.is_some()).count(),
         );
-        ColumnMeshes { meshes }
+        (center_meshes, neighbor_meshes)
+    }
+
+    /// Regenera la malla de **una seccion** de la columna central (tras editar
+    /// un bloque). Si la seccion queda vacia, se libera su malla.
+    fn refresh_center_section(&mut self, section: usize) {
+        let origin = [
+            (self.loaded_center.0 * CHUNK_SIZE as i32) as f32,
+            0.0,
+            (self.loaded_center.1 * CHUNK_SIZE as i32) as f32,
+        ];
+        let m = mesh_section(&self.center_column, section, origin);
+        self.center_meshes[section] = if m.vertices.is_empty() {
+            None
+        } else {
+            Some(Mesh::new(
+                &self.device,
+                &format!("center_sec_{section}"),
+                &m.vertices,
+                &m.indices,
+            ))
+        };
     }
 
     /// Recarga el mundo si el jugador ha cruzado a otra columna de chunks.
-    /// (v0.3.1: recarga toda la rejilla de golpe.)
-    pub fn update_streaming(&mut self, player: crate::math::Vec3) {
-        let cs = crate::world::CHUNK_SIZE as f32;
+    /// (v0.4.0: recarga toda la rejilla de golpe; la cache llega en v0.5.1.)
+    pub fn update_streaming(&mut self, player: Vec3) {
+        let cs = CHUNK_SIZE as f32;
         let chunk = (
             (player.x / cs).floor() as i32,
             (player.z / cs).floor() as i32,
@@ -242,16 +301,77 @@ impl Renderer {
             return;
         }
         self.loaded_center = chunk;
-        // Libera las mallas antiguas (se destruyen al soltar el Vec) y genera
-        // las nuevas. Sin cache todavia: se regeneran todas.
-        self.meshes.clear();
-        let built = Self::build_column_meshes(&self.device, self.seed, chunk, self.view_radius);
-        self.meshes = built.meshes;
-        // Actualiza la columna central (la que usan las colisiones).
-        let cs = crate::world::CHUNK_SIZE as i32;
-        self.center_column =
-            TerrainGenerator::new(self.seed).generate_column(chunk.0 * cs, chunk.1 * cs);
+        let (center_meshes, neighbor_meshes) =
+            Self::build_world_meshes(&self.device, self.seed, chunk, self.view_radius);
+        self.center_meshes = center_meshes;
+        self.neighbor_meshes = neighbor_meshes;
+        self.center_column = TerrainGenerator::new(self.seed)
+            .generate_column(chunk.0 * CHUNK_SIZE as i32, chunk.1 * CHUNK_SIZE as i32);
         println!("[world] streaming -> centro de chunk {chunk:?}");
+    }
+
+    /// Lanza un rayo desde `origin` en direccion `dir` y devuelve el primer
+    /// bloque solido golpeado del chunk central (o `None`).
+    pub fn raycast(&self, origin: Vec3, dir: Vec3, max_distance: f32) -> Option<RayHit> {
+        let base_x = self.loaded_center.0 * CHUNK_SIZE as i32;
+        let base_z = self.loaded_center.1 * CHUNK_SIZE as i32;
+        // Convertimos de coordenadas de mundo a coordenadas de voxel del chunk.
+        let is_solid = |vx: i32, vy: i32, vz: i32| -> bool {
+            let lx = vx - base_x;
+            let lz = vz - base_z;
+            if !(0..CHUNK_SIZE as i32).contains(&lx)
+                || !(0..CHUNK_SIZE as i32).contains(&lz)
+                || vy < 0
+                || vy >= crate::world::WORLD_HEIGHT as i32
+            {
+                return false;
+            }
+            self.center_column
+                .get(lx as usize, vy as usize, lz as usize)
+                .is_solid()
+        };
+        raycast(origin, dir, max_distance, is_solid)
+    }
+
+    /// Cambia el bloque en coordenadas de voxel del chunk central y regenera la
+    /// seccion afectada. Devuelve `true` si se pudo editar.
+    pub fn set_block(&mut self, voxel: [i32; 3], block: Block) -> bool {
+        let lx = voxel[0] - self.loaded_center.0 * CHUNK_SIZE as i32;
+        let lz = voxel[2] - self.loaded_center.1 * CHUNK_SIZE as i32;
+        let y = voxel[1];
+        if !(0..CHUNK_SIZE as i32).contains(&lx)
+            || !(0..CHUNK_SIZE as i32).contains(&lz)
+            || y < 0
+            || y >= crate::world::WORLD_HEIGHT as i32
+        {
+            return false;
+        }
+        self.center_column
+            .set(lx as usize, y as usize, lz as usize, block);
+        let section = y as usize / CHUNK_SIZE;
+        self.refresh_center_section(section);
+        // Si el bloque esta en el borde inferior/superior de la seccion, la cara
+        // vecina tambien puede cambiar; regeneramos la seccion contigua.
+        if (y as usize).is_multiple_of(CHUNK_SIZE) && section > 0 {
+            self.refresh_center_section(section - 1);
+        }
+        if y as usize % CHUNK_SIZE == CHUNK_SIZE - 1 && section + 1 < crate::world::SECTION_COUNT {
+            self.refresh_center_section(section + 1);
+        }
+        true
+    }
+
+    /// Actualiza la caja de resaltado del bloque `hit` (o la quita si `None`).
+    pub fn set_highlight(&mut self, hit: Option<RayHit>) {
+        self.highlight_mesh = hit.map(|h| {
+            let (v, i) = cube_edges(
+                h.block[0] as f32 + 0.5,
+                h.block[1] as f32 + 0.5,
+                h.block[2] as f32 + 0.5,
+                0.002,
+            );
+            Mesh::new(&self.device, "highlight", &v, &i)
+        });
     }
 
     /// Devuelve el bloque en un punto del **chunk central**, o `None` si esta
@@ -377,11 +497,20 @@ impl Renderer {
                 multiview_mask: None,
             });
 
+            // 1. La escena: secciones del centro + columnas vecinas.
             pass.set_pipeline(self.pipeline.pipeline());
             pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
-            // Una llamada de dibujo por seccion no vacia.
-            for mesh in &self.meshes {
+            for mesh in self.center_meshes.iter().flatten() {
                 mesh.draw(&mut pass);
+            }
+            for mesh in &self.neighbor_meshes {
+                mesh.draw(&mut pass);
+            }
+
+            // 2. El resaltado del bloque apuntado (wireframe naranja).
+            if let Some(highlight) = self.highlight_mesh.as_ref() {
+                pass.set_pipeline(self.highlight_pipeline.pipeline());
+                highlight.draw(&mut pass);
             }
         }
 

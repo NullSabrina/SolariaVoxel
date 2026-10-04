@@ -68,6 +68,43 @@ pub fn mesh_column(column: &Column, origin: [f32; 3]) -> Vec<SectionMesh> {
         .collect()
 }
 
+/// Genera la malla de **una sola seccion**. Es lo que usaremos para regenerar
+/// rapido el trozo afectado al romper o colocar un bloque (v0.4.0), sin rehacer
+/// las 24 secciones de la columna.
+pub fn mesh_section(column: &Column, section: usize, origin: [f32; 3]) -> SectionMesh {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    let y_start = section * CHUNK_SIZE;
+    let y_end = (y_start + CHUNK_SIZE).min(WORLD_HEIGHT);
+
+    for y in y_start..y_end {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let block = column.get(x, y, z);
+                if !block.is_solid() {
+                    continue;
+                }
+                let (xi, yi, zi) = (x as i32, y as i32, z as i32);
+                for face in Face::ALL {
+                    let (ox, oy, oz) = face.offset();
+                    if column.get_or_air(xi + ox, yi + oy, zi + oz).is_solid() {
+                        continue;
+                    }
+                    let tile = block.face_tile(face);
+                    add_face(&mut vertices, &mut indices, origin, x, y, z, face, tile);
+                }
+            }
+        }
+    }
+
+    SectionMesh {
+        section,
+        vertices,
+        indices,
+    }
+}
+
 /// Emite una cara (4 vertices + 2 triangulos) de un voxel, ya desplazada por
 /// `origin`.
 #[allow(clippy::too_many_arguments)]

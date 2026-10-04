@@ -10,18 +10,22 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.3.2 — Colisiones basicas
+//! ## Estado actual: v0.4.0 — Romper y colocar bloques
 //!
-//! * [`player::PlayerController`]: gravedad, deteccion de suelo y salto.
-//! * El jugador se posa sobre el terreno al arrancar (no atraviesa el suelo).
-//! * Modo vuelo (tecla `F`) para explorar sin gravedad.
-//! * Rejilla 7x7 de columnas alrededor del jugador; terreno Perlin; camara FPS.
+//! * **Raycast** de voxeles (DDA de Amanatides-Woo) para saber que bloque se
+//!   mira y por que cara.
+//! * El bloque apuntado se **resalta** (wireframe naranja).
+//! * **Click izq** rompe; **click der** coloca (sin meterlo en el jugador).
+//! * Al editar, solo se regenera la **seccion** afectada.
+//! * Gravedad/suelo/salto, modo vuelo (F), terreno Perlin y camara FPS.
 //!
 //! ## Organizacion del codigo
 //!
 //! * [`engine`] — ciclo de vida de la app y bucle de eventos.
 //! * [`render`] — la capa de GPU (una fina envoltura sobre wgpu).
-//! * [`scene`] — que hay en el mundo (camara, y pronto entidades y chunks).
+//! * [`scene`] — que hay en el mundo (camara).
+//! * [`world`] — bloques, chunks, generacion, meshing y raycast.
+//! * [`player`] — fisica del jugador (gravedad, suelo, salto, vuelo).
 //! * [`math`] — matematicas 3D propias (`Vec3`, `Mat4`).
 //!
 //! ## Como se ejecuta

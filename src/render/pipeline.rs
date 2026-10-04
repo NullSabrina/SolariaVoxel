@@ -35,6 +35,10 @@ pub struct ScenePipeline {
     _atlas_texture: wgpu::Texture,
     _atlas_view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
+
+    /// Layout del pipeline, para que otros pipelines (el resaltado) compartan el
+    /// mismo bind group (uniform con la mvp).
+    layout: wgpu::PipelineLayout,
 }
 
 impl ScenePipeline {
@@ -178,6 +182,7 @@ impl ScenePipeline {
             _atlas_texture: atlas_texture,
             _atlas_view: atlas_view,
             _sampler: sampler,
+            layout: pipeline_layout,
         }
     }
 
@@ -242,5 +247,11 @@ impl ScenePipeline {
     #[inline]
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
+    }
+
+    /// Layout del pipeline, compartido con el pipeline de resaltado.
+    #[inline]
+    pub fn layout(&self) -> &wgpu::PipelineLayout {
+        &self.layout
     }
 }

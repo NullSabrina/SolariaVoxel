@@ -12,6 +12,7 @@
 //! En v0.1.2 el renderer ya dibuja un cubo 3D con z-buffer sobre el cielo.
 
 mod color;
+mod highlight;
 // `mesh` es pub(crate) porque el mesher del mundo (`crate::world::mesh_chunk`)
 // construye `Vertex`, el tipo de vertice que la GPU entiende.
 pub(crate) mod mesh;

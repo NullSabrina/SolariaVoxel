@@ -8,14 +8,16 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.3.2` — Colisiones basicas
+## Estado actual: `v0.4.0` — Romper y colocar bloques
 
-- **Gravedad y deteccion de suelo**: el jugador cae y se posa sobre el terreno
-  (no lo atraviesa). Incluye **salto** y subdivision de pasos a alta velocidad.
-- **Modo vuelo** (`F`): Espacio/Shift para subir/bajar sin gravedad.
-- **Rejilla 7x7 de columnas** (112x112 bloques) alrededor del jugador.
-- Terreno procedural con ruido Perlin, camara FPS, z-buffer y atlas.
-- Suite de tests (43 tests).
+- **Raycast de voxeles** (DDA de Amanatides-Woo): sabe que bloque miras y por
+  que cara.
+- El bloque apuntado se **resalta** con un wireframe naranja.
+- **Click izquierdo** rompe el bloque; **click derecho** coloca piedra al lado
+  (nunca dentro del jugador).
+- Al editar, solo se **regenera la seccion** afectada (rapido).
+- Ademas: gravedad/suelo/salto, modo vuelo (`F`), terreno Perlin, camara FPS.
+- Suite de tests (49 tests).
 
 ## Requisitos
 
@@ -32,7 +34,9 @@ La primera compilacion tarda unos minutos (compila `wgpu` y sus dependencias).
 Veras en consola la GPU y el formato de superficie elegidos.
 
 Controles:
-- **Click izquierdo**: captura el raton (mira con el raton).
+- **Click izquierdo** (sin captura): captura el raton.
+- **Click izquierdo** (capturado): **rompe** el bloque apuntado.
+- **Click derecho** (capturado): **coloca** un bloque al lado del apuntado.
 - **W / A / S / D**: andar. **Espacio**: saltar.
 - **F**: alterna modo vuelo (Espacio/Shift sube/baja).
 - **Escape**: libera el raton; si ya esta libre, cierra la aplicacion.
@@ -54,10 +58,12 @@ src/
 │   ├── input.rs     Estado de teclado y raton (ejes de movimiento, delta).
 │   └── window.rs    Atributos de la ventana (tamano, titulo).
 ├── render/
-│   ├── renderer.rs  Envoltura sobre wgpu: superficie, device, z-buffer, frame.
-│   ├── pipeline.rs  Pipeline: shader WGSL, layout de vertices, uniforms MVP.
-│   ├── mesh.rs      Vertices + indices y su subida a la GPU (cubo).
-│   └── scene.wgsl   Shader del cubo (vertex + fragment).
+│   ├── renderer.rs  Superficie, device, z-buffer, frame y edicion del mundo.
+│   ├── pipeline.rs  Pipeline de escena (shader, vertices, uniforms, atlas).
+│   ├── highlight.rs Pipeline del resaltado (wireframe del bloque apuntado).
+│   ├── mesh.rs      Vertices + indices y su subida a la GPU.
+│   ├── scene.wgsl   Shader de la escena (vertex + fragment).
+│   └── highlight.wgsl Shader del resaltado (color plano).
 ├── player/
 │   └── controller.rs Fisica del jugador: gravedad, suelo, salto, vuelo.
 ├── scene/
@@ -67,7 +73,8 @@ src/
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas procedural (pixels por codigo).
 │   ├── terrain.rs   Generacion de altura con ruido Perlin.
-│   └── mesher.rs    Columna -> geometria por seccion (face culling).
+│   ├── mesher.rs    Columna/seccion -> geometria (face culling).
+│   └── raycast.rs   Raycast de voxeles (que bloque se apunta).
 └── math/
     ├── vec3.rs      Vector de 3 componentes.
     └── mat4.rs      Matriz 4x4 column-major (perspectiva, look-at).

@@ -25,6 +25,12 @@ pub const JUMP_SPEED: f32 = 9.0;
 /// Altura del jugador: la camara va a `pies + EYE_HEIGHT`.
 pub const EYE_HEIGHT: f32 = 1.62;
 
+/// Altura total del jugador (para saber donde colisiona un bloque).
+pub const PLAYER_HEIGHT: f32 = 1.8;
+
+/// Radio del jugador en el plano horizontal (lo tratamos como un cilindro).
+pub const PLAYER_RADIUS: f32 = 0.3;
+
 /// El jugador resuelve la fisica vertical contra el mundo.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PlayerController {

@@ -1,6 +1,6 @@
 [package]
 name = "solaria_voxel"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.87"
 description = "Solaria Voxel - motor de voxeles en Rust construido desde cero (ventana + wgpu)"

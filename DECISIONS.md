@@ -335,6 +335,56 @@ todavia basicas. Es tambien el embrión del modo creativo.
 
 ---
 
+## v0.4.0 — Romper y colocar bloques
+
+### 2026-10-04 — Raycast con el algoritmo de Amanatides-Woo (DDA 3D)
+
+**Decision.** Recorremos la rejilla de voxeles eje a eje (DDA) en vez de dar
+pasitos finos muestreando puntos.
+
+**Motivo.** El DDA visita exactamente las celdas que el rayo atraviesa (sin
+saltarse ninguna ni repetir), es rapido y devuelve con precision la cara de
+entrada. Un muestreo a pasos fijos puede atravesar esquinas y es mas lento.
+
+### 2026-10-04 — El raycast y el mesher reciben `is_solid`/consultan la Column
+
+**Decision.** La funcion `raycast` recibe una closure `is_solid`; el `Renderer`
+la construye para el chunk central.
+
+**Motivo.** Igual que en el controlador: mantiene el algoritmo puro y testeable
+con un "suelo" plano, sin depender del mundo ni de wgpu.
+
+### 2026-10-04 — Solo se edita el chunk central
+
+**Decision.** Las 48 columnas vecinas son de solo lectura; el jugador solo puede
+romper/colocar en su chunk central (16x16).
+
+**Motivo.** Es el minimo que demuestra la interaccion. Editar cualquier columna
+exige que el `Renderer` guarde todas las columnas y sus mallas indexadas por
+seccion (v0.5.1, con el pool de chunks). El chunk central siempre esta donde el
+jugador, que es donde va a tocar.
+
+### 2026-10-04 — Resaltado con `LineList` y color plano (sin textura)
+
+**Decision.** El bloque apuntado se dibuja como 12 aristas (`PrimitiveTopology::
+LineList`) con un pipeline propio que comparte el bind group de la escena
+(misma matriz mvp) y pinta naranja.
+
+**Motivo.** Un wireframe de 24 indices es la forma mas barata y clara de resaltar
+una celda. Compartir el layout del pipeline evita duplicar el uniform y el bind
+group. `depth_write_enabled=false` + un poco de *bias* evitan el z-fighting con
+las caras del propio bloque.
+
+### 2026-10-04 — Regenerar solo la seccion afectada
+
+**Decision.** Al romper/colocar, `mesh_section` regenera unicamente la seccion
+editada (y la contigua si el bloque estaba en su borde).
+
+**Motivo.** Regenerar una seccion (4096 bloques) es milisegundos; regenerar las
+24 no. Es el primer paso hacia el meshing incremental de v0.12.2.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```
