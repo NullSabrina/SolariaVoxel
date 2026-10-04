@@ -1,1 +1,4 @@
 /target
+
+# Archivos de mundo generados en tiempo de ejecucion (datos, no codigo).
+*.vf
