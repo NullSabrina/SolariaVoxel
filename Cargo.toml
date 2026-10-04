@@ -1,0 +1,35 @@
+[package]
+name = "solaria_voxel"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+description = "Solaria Voxel - motor de voxeles en Rust construido desde cero (ventana + wgpu)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# ---------------------------------------------------------------------------
+# Capa de plataforma y GPU (NO es un motor de juego, es la capa minima de
+# bajo nivel sobre la que construimos el nuestro).
+#
+# - winit: crea la ventana y reparte los eventos del sistema operativo.
+# - wgpu:  abstrae Vulkan / Metal / Direct3D12 / OpenGL para dibujar.
+# - pollster: ejecuta los `Future` async de wgpu de forma bloqueante, para no
+#             tener que traer un runtime async completo (tokio) en v0.1.0.
+# ---------------------------------------------------------------------------
+pollster = "1.0.1"
+wgpu = "30.0.1"
+winit = "0.30.13"
+
+# ---------------------------------------------------------------------------
+# Perfiles de compilacion.
+#
+# Truco clasico en proyectos con wgpu: en modo `dev` queremos compilar TU codigo
+# rapido (para iterar) pero las DEPENDENCIAS optimizadas, porque una build de
+# wgpu sin optimizar puede ir a 3-5 FPS. `opt-level = 3` en "dev.package.*" solo
+# afecta a las dependencias, no a tu crate.
+# ---------------------------------------------------------------------------
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
