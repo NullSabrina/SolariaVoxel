@@ -16,5 +16,5 @@ pub mod chunk;
 pub mod mesher;
 
 pub use block::{Block, Face};
-pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
-pub use mesher::mesh_chunk;
+pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};
+pub use mesher::{SectionMesh, mesh_column};

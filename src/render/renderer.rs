@@ -17,11 +17,11 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
-use crate::math::{Mat4, Vec3};
+use crate::math::Mat4;
 use crate::render::color::srgb_to_linear;
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
-use crate::world::{Chunk, mesh_chunk};
+use crate::world::{Column, mesh_column};
 
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
@@ -78,11 +78,9 @@ pub struct Renderer {
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
 
-    /// El pipeline de dibujo y la malla del cubo.
+    /// El pipeline de dibujo y una malla por seccion con geometria.
     pipeline: ScenePipeline,
-    mesh: Mesh,
-    /// Transformacion del cubo en el mundo (posicion + rotacion fija).
-    model: Mat4,
+    meshes: Vec<Mesh>,
 
     /// Color con el que limpiamos el color buffer cada frame.
     clear_color: wgpu::Color,
@@ -140,23 +138,32 @@ impl Renderer {
 
         surface.configure(&device, &config);
 
-        // 6. Z-buffer, pipeline, y el mundo: generamos un chunk de ejemplo y lo
-        //    convertimos en malla (vertices + indices) para subirlo a la GPU.
+        // 6. Z-buffer, pipeline, y el mundo: generamos una columna de ejemplo y
+        //    la convertimos en una malla por seccion no vacia.
         let (depth_texture, depth_view) = Self::create_depth(&device, &config);
         let pipeline = ScenePipeline::new(&device, &queue, config.format, Self::DEPTH_FORMAT);
 
-        let chunk = Chunk::generate_demo();
-        let (vertices, indices) = mesh_chunk(&chunk);
+        let column = Column::generate_demo();
+        // Centramos la columna (x,z en 0..16) en el origen horizontal.
+        let sections = mesh_column(&column, [-8.0, 0.0, -8.0]);
+        let total_triangles: usize = sections.iter().map(|s| s.indices.len() / 3).sum();
         println!(
-            "[world] chunk demo: {} vertices, {} indices ({} triangulos)",
-            vertices.len(),
-            indices.len(),
-            indices.len() / 3
+            "[world] columna demo: {} de {} secciones con geometria, {} triangulos",
+            sections.len(),
+            crate::world::SECTION_COUNT,
+            total_triangles
         );
-        let mesh = Mesh::new(&device, "chunk", &vertices, &indices);
-
-        // 7. Centramos el chunk (ocupa x,z en 0..16) en el origen horizontal.
-        let model = Mat4::translation(Vec3::new(-8.0, 0.0, -8.0));
+        let meshes: Vec<Mesh> = sections
+            .iter()
+            .map(|s| {
+                Mesh::new(
+                    &device,
+                    &format!("section_{}", s.section),
+                    &s.vertices,
+                    &s.indices,
+                )
+            })
+            .collect();
 
         let info = adapter.get_info();
         println!("[render] GPU: {} | backend: {:?}", info.name, info.backend);
@@ -173,8 +180,7 @@ impl Renderer {
             depth_texture,
             depth_view,
             pipeline,
-            mesh,
-            model,
+            meshes,
             clear_color: sky_color(),
         })
     }
@@ -218,9 +224,9 @@ impl Renderer {
     /// Dibuja y presenta un frame. `view_projection` es la matriz de la camara
     /// (proyeccion * vista); el renderer le aplica la transformacion del cubo.
     pub fn render(&mut self, view_projection: &Mat4) {
-        // 1. Uniforms: modelo * vista * proyeccion.
-        self.pipeline
-            .update_mvp(&self.queue, &(*view_projection * self.model));
+        // 1. Uniforms: la matriz de la camara (el mundo ya esta en coordenadas
+        //    de mundo, no hace falta modelo por objeto).
+        self.pipeline.update_mvp(&self.queue, view_projection);
 
         // 2. Pedir la textura del frame.
         let frame = match self.surface.get_current_texture() {
@@ -279,7 +285,10 @@ impl Renderer {
 
             pass.set_pipeline(self.pipeline.pipeline());
             pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
-            self.mesh.draw(&mut pass);
+            // Una llamada de dibujo por seccion no vacia.
+            for mesh in &self.meshes {
+                mesh.draw(&mut pass);
+            }
         }
 
         // 6 y 7. Enviar y presentar.

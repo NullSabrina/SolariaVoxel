@@ -141,9 +141,9 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Camara FPS: situada para mirar el chunk de ejemplo desde fuera.
-        let mut camera = Camera::new(Vec3::new(0.0, 14.0, 30.0));
-        camera.pitch_deg = -14.0; // inclinada un poco hacia abajo
+        // Camara FPS: situada para mirar la columna de ejemplo desde fuera.
+        let mut camera = Camera::new(Vec3::new(0.0, 84.0, 52.0));
+        camera.pitch_deg = -18.0; // inclinada hacia abajo, hacia el terreno
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
         camera.update_view();

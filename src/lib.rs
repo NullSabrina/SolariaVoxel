@@ -10,13 +10,14 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.2.0 — Primer chunk estatico
+//! ## Estado actual: v0.2.1 — Mundo mas alto (sub-chunks)
 //!
-//! * Un [`world::Chunk`] de 16x16x16 bloques (`u8` por bloque) con terreno de
-//!   ejemplo y un arbol.
-//! * Meshing naive con *face culling*: solo se generan las caras que dan al aire.
-//! * Atlas de texturas procedural (8 tiles) y sampler *nearest*.
-//! * Camara FPS movible (WASD + raton) y z-buffer.
+//! * [`world::Column`]: una columna de 16x16x384 bloques, dividida en 24
+//!   [`world::Chunk`] de 16x16x16.
+//! * El mesher genera geometria por seccion y **solo dibuja las no vacias**
+//!   (la mayoria del aire no cuesta nada).
+//! * Face culling tambien a traves de los limites de seccion.
+//! * Atlas de texturas procedural, camara FPS y z-buffer.
 //!
 //! ## Organizacion del codigo
 //!
