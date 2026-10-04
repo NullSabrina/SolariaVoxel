@@ -426,6 +426,57 @@ cuando lleguen mas bloques. No es un fallo de geometria, es del atlas.
 
 ---
 
+## v0.5.0 — Versionado y guardado del mundo
+
+### 2026-10-04 — bincode 2 con derive nativo (no serde)
+
+**Decision.** Usamos `bincode 2` con sus derives `Encode`/`Decode` en lugar de
+serde.
+
+**Motivo.** bincode 2 tiene un derive propio mas directo y nos ahorra el paso
+por serde. Ademas, la version 3.0.0 de bincode en crates.io es una broma (solo
+contiene un `compile_error!`); fijamos la 2.x estable.
+
+### 2026-10-04 — Tres versiones distintas y desacopladas
+
+**Decision.** `FORMAT_VERSION` (layout binario), `GENERATOR_VERSION` (algoritmo
+de terreno) y `ENGINE_VERSION` (motor) se guardan por separado en el header, y
+cada `ChunkRecord` lleva su propia `format_version`.
+
+**Motivo.** La guia insiste en ello: un mundo puede seguir siendo legible aunque
+el generador cambie, y viceversa. Versionar por chunk permite migrar solo los
+que hagan falta.
+
+### 2026-10-04 — Guardar el chunk completo, no un diff
+
+**Decision.** Cada `ChunkRecord` guarda los 4096 bloques enteros (4 KB), no solo
+lo que cambio.
+
+**Motivo.** Simplicidad y robustez. Un diff ahorraria disco pero complica el
+formato y la migracion. El ahorro de espacio llega en v0.5.2 (LZ4) y v0.11.0
+(paleta).
+
+### 2026-10-04 — Solo se persiste el chunk central
+
+**Decision.** En v0.5.0 se guarda/carga unicamente el chunk central (la seccion
+de terreno) porque es el unico editable.
+
+**Motivo.** Es coherente con lo que ya existe. Cuando el mundo entero este en
+memoria (v0.5.1) y se pueda editar en cualquier columna, se guardaran todos los
+chunks modificados. El formato (`HashMap<ChunkPos, ChunkRecord>`) ya lo soporta
+sin cambios.
+
+### 2026-10-04 — `exiting` como red de seguridad, con flag anti-doble-guardado
+
+**Decision.** Se guarda en `CloseRequested`/Escape y tambien en `exiting`, pero
+con un flag `world_saved` para no escribir dos veces.
+
+**Motivo.** `exiting` se llama siempre al cerrar limpiamente, pero si el sistema
+cierra la ventana sin pasar por `CloseRequested`, perderiamos el mundo. El flag
+evita la doble escritura que vimos en la prueba.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

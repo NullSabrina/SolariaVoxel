@@ -47,8 +47,27 @@ pub struct App {
     flying: bool,
     /// Bloque apuntado por la camara en el ultimo frame (y su cara).
     selection: Option<crate::world::RayHit>,
+    /// Semilla del mundo (de la partida o cargada de disco).
+    seed: u32,
+    /// Ficha del mundo con su versionado, para actualizarla al guardar.
+    world_header: crate::world::WorldHeader,
+    /// Evita guardar dos veces (CloseRequested + exiting).
+    world_saved: bool,
     /// Marca de tiempo del frame anterior, para calcular el `dt`.
     last_frame: Option<Instant>,
+}
+
+/// Ruta del archivo de mundo por defecto (junto al ejecutable de trabajo).
+fn world_path() -> std::path::PathBuf {
+    std::path::PathBuf::from("world.vf")
+}
+
+/// Segundos desde el epoch de UNIX (para la fecha del header).
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Arranca el motor: crea el bucle de eventos y lo ejecuta.
@@ -170,6 +189,28 @@ impl App {
         self.update_selection();
     }
 
+    /// Guarda el mundo a disco (semilla + chunk central editado). Solo una vez.
+    fn save_world(&mut self) {
+        if self.world_saved {
+            return;
+        }
+        self.world_saved = true;
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        let mut save = crate::world::WorldSave::new(self.seed, self.world_header.created_at);
+        // Conservamos las versiones del header original.
+        save.header = self.world_header.clone();
+        save.set_chunk(
+            crate::world::ChunkPos::new(0, 0),
+            renderer.snapshot_center(),
+        );
+        match save.save_to(&world_path()) {
+            Ok(()) => println!("[world] guardado en {:?}", world_path()),
+            Err(e) => eprintln!("[world] no se pudo guardar: {e}"),
+        }
+    }
+
     /// Coloca un bloque en el aire contiguo al apuntado (si lo hay y no choca
     /// con el jugador).
     fn place_block(&mut self) {
@@ -227,7 +268,27 @@ impl ApplicationHandler for App {
             }
         };
 
-        match Renderer::new(window.clone()) {
+        // Cargamos el mundo de disco si existe (semilla + chunk central editado).
+        let path = world_path();
+        let (seed, record, header) = match crate::world::load_and_migrate(&path) {
+            Ok(save) => {
+                let rec = save.chunks.get(&crate::world::ChunkPos::new(0, 0)).cloned();
+                println!(
+                    "[world] mundo cargado: semilla {} | formato v{} | {} chunks",
+                    save.header.seed,
+                    save.header.format_version,
+                    save.chunks.len()
+                );
+                (save.header.seed, rec, save.header)
+            }
+            Err(e) => {
+                println!("[world] sin mundo previo ({e}); se crea uno nuevo (semilla 13371)");
+                let seed = 13_371;
+                (seed, None, crate::world::WorldHeader::new(seed, now_unix()))
+            }
+        };
+
+        match Renderer::new(window.clone(), seed, record.as_ref()) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
                 eprintln!("[engine] no se pudo iniciar el renderer: {e}");
@@ -235,6 +296,8 @@ impl ApplicationHandler for App {
                 return;
             }
         }
+        self.seed = seed;
+        self.world_header = header;
 
         // Camara FPS: en el centro del chunk, a ras de suelo. La fisica la
         // posara sobre el terreno antes del primer frame.
@@ -269,6 +332,7 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => {
                 println!("[engine] cerrando");
+                self.save_world();
                 event_loop.exit();
             }
 
@@ -283,6 +347,7 @@ impl ApplicationHandler for App {
                             if self.mouse_locked {
                                 self.unlock_mouse();
                             } else {
+                                self.save_world();
                                 event_loop.exit();
                             }
                         }
@@ -388,5 +453,11 @@ impl ApplicationHandler for App {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
+    }
+
+    /// Ultimo callback antes de cerrar. Guardamos por si no se paso por
+    /// `CloseRequested`/Escape (cierre desde el sistema).
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.save_world();
     }
 }

@@ -22,7 +22,9 @@ use crate::render::color::srgb_to_linear;
 use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
-use crate::world::{Block, CHUNK_SIZE, Column, RayHit, TerrainGenerator, greedy, raycast};
+use crate::world::{
+    Block, CHUNK_SIZE, ChunkRecord, Column, RayHit, TerrainGenerator, greedy, raycast,
+};
 
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
@@ -60,6 +62,26 @@ fn sky_color() -> wgpu::Color {
         g: srgb_to_linear(g) as f64,
         b: srgb_to_linear(b) as f64,
         a: 1.0,
+    }
+}
+
+/// Seccion que contiene la superficie del terreno (y 64..80). Es la que se
+/// guarda/carga en v0.5.0; mas adelante se guardaran todas las modificadas.
+pub const TERRAIN_SECTION: usize = 4;
+
+/// Aplica los bloques de un `ChunkRecord` a la columna (restaura de disco).
+fn apply_chunk_record(column: &mut Column, record: &ChunkRecord) {
+    let y0 = TERRAIN_SECTION * CHUNK_SIZE;
+    let mut i = 0usize;
+    for y in y0..(y0 + CHUNK_SIZE).min(crate::world::WORLD_HEIGHT) {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                if let Some(&id) = record.blocks.get(i) {
+                    column.set(x, y, z, Block::from_u8(id));
+                }
+                i += 1;
+            }
+        }
     }
 }
 
@@ -108,8 +130,14 @@ impl Renderer {
     /// Formato del z-buffer. `Depth32Float` es el estandar y esta en todas partes.
     const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    /// Inicializa wgpu sobre `window`.
-    pub fn new(window: Arc<Window>) -> Result<Self, RendererError> {
+    /// Inicializa wgpu sobre `window` con una semilla y un chunk central ya
+    /// editado (si se cargo de disco). Si `center_record` es `None`, se genera
+    /// el terreno desde la semilla.
+    pub fn new(
+        window: Arc<Window>,
+        seed: u32,
+        center_record: Option<&ChunkRecord>,
+    ) -> Result<Self, RendererError> {
         let size = window.inner_size();
 
         // 1. El "Instance" es el punto de entrada a wgpu: enumera backends.
@@ -166,12 +194,18 @@ impl Renderer {
             Self::DEPTH_FORMAT,
         );
 
-        let seed = 13_371;
         let view_radius = 3; // 3 => rejilla 7x7 de columnas
+        // Columna central: generada desde la semilla, o restaurada de disco.
+        let mut center_column = TerrainGenerator::new(seed).generate_column(0, 0);
+        if let Some(record) = center_record {
+            apply_chunk_record(&mut center_column, record);
+            println!(
+                "[world] chunk central restaurado de disco ({} bloques)",
+                record.blocks.len()
+            );
+        }
         let (center_meshes, neighbor_meshes) =
-            Self::build_world_meshes(&device, seed, (0, 0), view_radius);
-        // Guardamos la columna central (la unica editable) para las consultas.
-        let center_column = TerrainGenerator::new(seed).generate_column(0, 0);
+            Self::build_world_meshes(&device, seed, (0, 0), view_radius, Some(&center_column));
 
         let info = adapter.get_info();
         println!("[render] GPU: {} | backend: {:?}", info.name, info.backend);
@@ -208,13 +242,22 @@ impl Renderer {
         seed: u32,
         center: (i32, i32),
         radius: i32,
+        center_column: Option<&Column>,
     ) -> (Vec<Option<Mesh>>, Vec<Mesh>) {
         use crate::world::SECTION_COUNT;
 
         let generator = TerrainGenerator::new(seed);
-        // La columna central la construimos seccion a seccion.
-        let center_column =
-            generator.generate_column(center.0 * CHUNK_SIZE as i32, center.1 * CHUNK_SIZE as i32);
+        // La columna central se construye seccion a seccion. Si nos pasan una ya
+        // editada (cargada de disco), la usamos tal cual.
+        let generated;
+        let center_column = match center_column {
+            Some(c) => c,
+            None => {
+                generated = generator
+                    .generate_column(center.0 * CHUNK_SIZE as i32, center.1 * CHUNK_SIZE as i32);
+                &generated
+            }
+        };
         let center_origin = [
             (center.0 * CHUNK_SIZE as i32) as f32,
             0.0,
@@ -222,7 +265,7 @@ impl Renderer {
         ];
         let mut center_meshes: Vec<Option<Mesh>> = (0..SECTION_COUNT).map(|_| None).collect();
         for (section, slot) in center_meshes.iter_mut().enumerate() {
-            let (v, i) = greedy::greedy_section(&center_column, section, center_origin);
+            let (v, i) = greedy::greedy_section(center_column, section, center_origin);
             if !v.is_empty() {
                 *slot = Some(Mesh::new(device, &format!("center_sec_{section}"), &v, &i));
             }
@@ -288,12 +331,17 @@ impl Renderer {
             return;
         }
         self.loaded_center = chunk;
-        let (center_meshes, neighbor_meshes) =
-            Self::build_world_meshes(&self.device, self.seed, chunk, self.view_radius);
-        self.center_meshes = center_meshes;
-        self.neighbor_meshes = neighbor_meshes;
         self.center_column = TerrainGenerator::new(self.seed)
             .generate_column(chunk.0 * CHUNK_SIZE as i32, chunk.1 * CHUNK_SIZE as i32);
+        let (center_meshes, neighbor_meshes) = Self::build_world_meshes(
+            &self.device,
+            self.seed,
+            chunk,
+            self.view_radius,
+            Some(&self.center_column),
+        );
+        self.center_meshes = center_meshes;
+        self.neighbor_meshes = neighbor_meshes;
         println!("[world] streaming -> centro de chunk {chunk:?}");
     }
 
@@ -359,6 +407,19 @@ impl Renderer {
             );
             Mesh::new(&self.device, "highlight", &v, &i)
         });
+    }
+
+    /// La semilla del mundo.
+    pub fn seed(&self) -> u32 {
+        self.seed
+    }
+
+    /// Volca la columna central actual como un registro guardable. Se usa al
+    /// salir para persistir las ediciones del jugador.
+    pub fn snapshot_center(&self) -> ChunkRecord {
+        // Guardamos la seccion que contiene el terreno; en v0.5.0 el jugador
+        // edita sobre todo alrededor de la superficie (seccion 4 = y 64..80).
+        ChunkRecord::from_column(&self.center_column, TERRAIN_SECTION)
     }
 
     /// Devuelve el bloque en un punto del **chunk central**, o `None` si esta

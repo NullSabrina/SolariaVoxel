@@ -10,13 +10,15 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.4.1 — Greedy meshing
+//! ## Estado actual: v0.5.0 — Versionado y guardado del mundo
 //!
-//! * [`world::greedy`] fusiona caras contiguas del mismo material en
-//!   rectangulos grandes: una capa plana de 16x16 pasa de 256 caras a 1.
-//! * Se aplica a las columnas vecinas y a las secciones del centro; al editar se
-//!   regenera en greedy solo la seccion afectada.
-//! * Sobre v0.4.0: raycast + resaltado + romper/colocar, colisiones y terreno.
+//! * [`world::save`]: `WorldHeader` (formato, generador, motor, semilla, fecha)
+//!   y `ChunkRecord` (versionado por chunk).
+//! * Serializacion binaria con `bincode`; el mundo se **guarda al salir** y se
+//!   **carga al arrancar**, conservando las ediciones del jugador.
+//! * [`world::save::MigrationChain`]: migradores encadenados por version de
+//!   formato, con tests (v0 -> v1) y rechazo explicito de formatos futuros.
+//! * Sobre v0.4.x: raycast, resaltado, romper/colocar, greedy meshing.
 //!
 //! ## Organizacion del codigo
 //!
