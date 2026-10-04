@@ -13,6 +13,7 @@
 pub mod atlas;
 pub mod block;
 pub mod chunk;
+pub mod greedy;
 pub mod mesher;
 pub mod raycast;
 pub mod terrain;

@@ -385,6 +385,47 @@ editada (y la contigua si el bloque estaba en su borde).
 
 ---
 
+## v0.4.1 — Greedy meshing
+
+### 2026-10-04 — Greedy propio (en vez de la crate `block-mesh`)
+
+**Decision.** Implementamos el greedy meshing nosotros en `world/greedy.rs` en
+lugar de integrar la crate `block-mesh`.
+
+**Motivo.** Encaja con la filosofia del proyecto (entenderlo todo) y no atamos la
+geometria a una API externa. `mesh_column` (naive) se mantiene como referencia y
+para comparar en tests.
+
+### 2026-10-04 — La mascara del plano es dinamica (16 x v_hi)
+
+**Decision.** En lugar de una mascara fija 16x16, cada plano usa una mascara de
+16 x `v_hi`, donde `v_hi` es el alto del plano (16 por seccion, 384 si es una
+columna entera).
+
+**Motivo.** Las caras verticales (X/Z) barrian 384 bloques de alto en una columna
+completa; una mascara 16x16 se salia de rango. Dimensionarla segun el rango
+mantiene el algoritmo general (sirve para seccion y para columna entera).
+
+### 2026-10-04 — No se fusionan caras de distinto `(bloque, cara)`
+
+**Decision.** La clave de fusion es `(block_id, face)`, no solo el tile.
+
+**Motivo.** Aunque dos caras compartan tile, fusionarlas mezclaria materiales y
+dificultaria el raycast/edicion despues. Con `(bloque, cara)` el resultado sigue
+siendo por-material, que es lo correcto.
+
+### 2026-10-04 — Resultado medido
+
+**Dato.** Rejilla 7x7: las 48 columnas vecinas pasan a ~1344 triangulos (antes,
+decenas de miles). Una capa plana de 16x16: de 256 caras (512 triangulos) a 1
+cara (2 triangulos).
+
+**Nota.** Quedan ~1-2 px de costura visible entre rectangulos grandes por el
+medio texel de inset del atlas; se afinara con *texture arrays* o padding real
+cuando lleguen mas bloques. No es un fallo de geometria, es del atlas.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

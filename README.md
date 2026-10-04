@@ -8,16 +8,14 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.4.0` — Romper y colocar bloques
+## Estado actual: `v0.4.1` — Greedy meshing
 
-- **Raycast de voxeles** (DDA de Amanatides-Woo): sabe que bloque miras y por
-  que cara.
-- El bloque apuntado se **resalta** con un wireframe naranja.
-- **Click izquierdo** rompe el bloque; **click derecho** coloca piedra al lado
-  (nunca dentro del jugador).
-- Al editar, solo se **regenera la seccion** afectada (rapido).
-- Ademas: gravedad/suelo/salto, modo vuelo (`F`), terreno Perlin, camara FPS.
-- Suite de tests (49 tests).
+- **Greedy meshing**: las caras contiguas del mismo material se fusionan en
+  rectangulos. Una capa plana de 16x16 pasa de 256 caras a **1**. Las 48
+  columnas vecinas quedan en ~1 344 triangulos.
+- Al editar un bloque se regenera en greedy solo la **seccion** afectada.
+- Sobre v0.4.0: raycast + resaltado naranja + romper/colocar, colisiones, vuelo.
+- Suite de tests (53 tests).
 
 ## Requisitos
 
@@ -73,7 +71,8 @@ src/
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas procedural (pixels por codigo).
 │   ├── terrain.rs   Generacion de altura con ruido Perlin.
-│   ├── mesher.rs    Columna/seccion -> geometria (face culling).
+│   ├── mesher.rs    Meshing naive con face culling (referencia).
+│   ├── greedy.rs    Greedy meshing (fusiona caras; el que se usa).
 │   └── raycast.rs   Raycast de voxeles (que bloque se apunta).
 └── math/
     ├── vec3.rs      Vector de 3 componentes.

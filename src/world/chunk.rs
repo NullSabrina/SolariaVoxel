@@ -117,7 +117,7 @@ impl Column {
 
     /// Genera un terreno de ejemplo: colina a ~y=64 y un arbol.
     ///
-    /// *Placeholder* deterministico hasta v0.3.0 (ruido Perlin de verdad).
+    /// *Placeholder* deterministico. Los tests de meshing lo usan.
     pub fn generate_demo() -> Self {
         let mut column = Self::empty();
 

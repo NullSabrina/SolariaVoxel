@@ -10,14 +10,13 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.4.0 — Romper y colocar bloques
+//! ## Estado actual: v0.4.1 — Greedy meshing
 //!
-//! * **Raycast** de voxeles (DDA de Amanatides-Woo) para saber que bloque se
-//!   mira y por que cara.
-//! * El bloque apuntado se **resalta** (wireframe naranja).
-//! * **Click izq** rompe; **click der** coloca (sin meterlo en el jugador).
-//! * Al editar, solo se regenera la **seccion** afectada.
-//! * Gravedad/suelo/salto, modo vuelo (F), terreno Perlin y camara FPS.
+//! * [`world::greedy`] fusiona caras contiguas del mismo material en
+//!   rectangulos grandes: una capa plana de 16x16 pasa de 256 caras a 1.
+//! * Se aplica a las columnas vecinas y a las secciones del centro; al editar se
+//!   regenera en greedy solo la seccion afectada.
+//! * Sobre v0.4.0: raycast + resaltado + romper/colocar, colisiones y terreno.
 //!
 //! ## Organizacion del codigo
 //!

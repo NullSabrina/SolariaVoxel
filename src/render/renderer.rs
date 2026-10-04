@@ -22,9 +22,7 @@ use crate::render::color::srgb_to_linear;
 use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
-use crate::world::{
-    Block, CHUNK_SIZE, Column, RayHit, TerrainGenerator, mesh_column, mesh_section, raycast,
-};
+use crate::world::{Block, CHUNK_SIZE, Column, RayHit, TerrainGenerator, greedy, raycast};
 
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
@@ -224,18 +222,13 @@ impl Renderer {
         ];
         let mut center_meshes: Vec<Option<Mesh>> = (0..SECTION_COUNT).map(|_| None).collect();
         for (section, slot) in center_meshes.iter_mut().enumerate() {
-            let m = mesh_section(&center_column, section, center_origin);
-            if !m.vertices.is_empty() {
-                *slot = Some(Mesh::new(
-                    device,
-                    &format!("center_sec_{section}"),
-                    &m.vertices,
-                    &m.indices,
-                ));
+            let (v, i) = greedy::greedy_section(&center_column, section, center_origin);
+            if !v.is_empty() {
+                *slot = Some(Mesh::new(device, &format!("center_sec_{section}"), &v, &i));
             }
         }
 
-        // Las demas columnas de la rejilla, como mallas sueltas.
+        // Las demas columnas de la rejilla, como mallas sueltas (greedy).
         let mut neighbor_meshes = Vec::new();
         let mut triangles = 0usize;
         for cz in (center.1 - radius)..=(center.1 + radius) {
@@ -247,20 +240,14 @@ impl Renderer {
                 let world_z = cz * CHUNK_SIZE as i32;
                 let column = generator.generate_column(world_x, world_z);
                 let origin = [world_x as f32, 0.0, world_z as f32];
-                for s in mesh_column(&column, origin) {
-                    triangles += s.indices.len() / 3;
-                    neighbor_meshes.push(Mesh::new(
-                        device,
-                        &format!("col_{cx}_{cz}_sec_{}", s.section),
-                        &s.vertices,
-                        &s.indices,
-                    ));
-                }
+                let (v, i) = greedy::greedy_column(&column, origin);
+                triangles += i.len() / 3;
+                neighbor_meshes.push(Mesh::new(device, &format!("col_{cx}_{cz}"), &v, &i));
             }
         }
 
         println!(
-            "[world] rejilla {}x{} (semilla {seed}): centro {} secciones, vecinas {triangles} triangulos",
+            "[world] rejilla {}x{} (semilla {seed}, greedy): centro {} secciones, vecinas {triangles} triangulos",
             radius * 2 + 1,
             radius * 2 + 1,
             center_meshes.iter().filter(|m| m.is_some()).count(),
@@ -276,15 +263,15 @@ impl Renderer {
             0.0,
             (self.loaded_center.1 * CHUNK_SIZE as i32) as f32,
         ];
-        let m = mesh_section(&self.center_column, section, origin);
-        self.center_meshes[section] = if m.vertices.is_empty() {
+        let (v, i) = greedy::greedy_section(&self.center_column, section, origin);
+        self.center_meshes[section] = if v.is_empty() {
             None
         } else {
             Some(Mesh::new(
                 &self.device,
                 &format!("center_sec_{section}"),
-                &m.vertices,
-                &m.indices,
+                &v,
+                &i,
             ))
         };
     }
