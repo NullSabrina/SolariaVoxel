@@ -21,7 +21,7 @@ use crate::math::Mat4;
 use crate::render::color::srgb_to_linear;
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
-use crate::world::{Column, mesh_column};
+use crate::world::{TerrainGenerator, mesh_column};
 
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
@@ -143,12 +143,14 @@ impl Renderer {
         let (depth_texture, depth_view) = Self::create_depth(&device, &config);
         let pipeline = ScenePipeline::new(&device, &queue, config.format, Self::DEPTH_FORMAT);
 
-        let column = Column::generate_demo();
+        let generator = TerrainGenerator::new(13_371);
+        let column = generator.generate_column(0, 0);
         // Centramos la columna (x,z en 0..16) en el origen horizontal.
         let sections = mesh_column(&column, [-8.0, 0.0, -8.0]);
         let total_triangles: usize = sections.iter().map(|s| s.indices.len() / 3).sum();
         println!(
-            "[world] columna demo: {} de {} secciones con geometria, {} triangulos",
+            "[world] terreno (semilla {}): {} de {} secciones, {} triangulos",
+            generator.seed(),
             sections.len(),
             crate::world::SECTION_COUNT,
             total_triangles

@@ -226,6 +226,43 @@ consciente.
 
 ---
 
+## v0.3.0 — Generacion de terreno
+
+### 2026-10-04 — Ruido Perlin con dos octavas manuales (crate `noise`)
+
+**Decision.** La altura es `64 + base*20 + detalle*4`, con dos capas Perlin a
+distinta frecuencia (0.010 y 0.045). No usamos `Fbm`.
+
+**Motivo.** Dos capas simples dan relieve continuo (colinas + detalle) sin la
+complejidad de configurar fractales. Es facil de leer y de ajustar. Si mas
+adelante queremos mas octavas, se sustituye sin cambiar la interfaz publica.
+
+### 2026-10-04 — El generador es un tipo con semilla
+
+**Decision.** `TerrainGenerator::new(seed)` guarda la semilla y dos `Perlin`.
+
+**Motivo.** Determinismo (misma semilla = mismo mundo) y encaja con el
+versionado de generador que pide la guia para v0.5.0: podremos reconstruir el
+generador a partir de `(version, seed)` guardados en el header del mundo.
+
+### 2026-10-04 — Altura en `48..96` (dentro de la seccion 3)
+
+**Decision.** La altura queda en `48..96`, con la superficie cerca de `y=64`.
+
+**Motivo.** Mantiene el terreno bajo (menos secciones con geometria = menos
+dibujado) y dentro de la seccion 3, que es donde caera la camara. Cuando
+lleguen oceanos/cuevas subiremos el rango.
+
+### 2026-10-04 — `generate_demo` se elimina
+
+**Decision.** El terreno de ejemplo de v0.2.x se sustituye por el generador
+Perlin; la columna se genera con `TerrainGenerator::generate_column(0, 0)`.
+
+**Motivo.** Ya hay generacion "de verdad". En v0.3.1 esto pasara a generar
+varias columnas con coordenadas globales, y el mundo empezara a extenderse.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

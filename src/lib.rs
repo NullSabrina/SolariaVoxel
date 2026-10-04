@@ -10,13 +10,13 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.2.1 — Mundo mas alto (sub-chunks)
+//! ## Estado actual: v0.3.0 — Generacion de terreno
 //!
-//! * [`world::Column`]: una columna de 16x16x384 bloques, dividida en 24
-//!   [`world::Chunk`] de 16x16x16.
-//! * El mesher genera geometria por seccion y **solo dibuja las no vacias**
-//!   (la mayoria del aire no cuesta nada).
-//! * Face culling tambien a traves de los limites de seccion.
+//! * [`world::TerrainGenerator`]: altura procedural con ruido Perlin (crate
+//!   `noise`), deterministica por semilla.
+//! * Superficie de hierba, subsuelo de tierra y piedra por profundidad.
+//! * Columnas de 16x16x384 divididas en secciones de 16^3; solo se dibujan las
+//!   no vacias.
 //! * Atlas de texturas procedural, camara FPS y z-buffer.
 //!
 //! ## Organizacion del codigo

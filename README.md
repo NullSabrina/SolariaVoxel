@@ -8,15 +8,14 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.2.0` — Primer chunk estatico
+## Estado actual: `v0.3.0` — Generacion de terreno
 
-- Un **chunk** de 16x16x16 bloques (1 byte por bloque) con terreno de ejemplo
-  y un arbol.
-- **Meshing naive con face culling**: solo se generan las caras que dan al aire.
-- **Atlas de texturas** procedural (8 tiles: hierba, tierra, piedra, arena,
-  madera, hojas) y sampler *nearest*.
-- Camara FPS movible, z-buffer y pipeline de wgpu con uniforms.
-- Suite de tests (31 tests).
+- **Terreno procedural** con ruido Perlin (crate `noise`), deterministico por
+  semilla. Altura en `48..96` con relieve de baja y alta frecuencia.
+- Superficie de hierba, subsuelo de tierra y piedra por profundidad.
+- Columnas de 16x16x384 divididas en secciones; solo se dibujan las no vacias.
+- Camara FPS movible, z-buffer, atlas de texturas y pipeline de wgpu.
+- Suite de tests (38 tests).
 
 ## Requisitos
 
@@ -62,9 +61,10 @@ src/
 │   └── camera.rs    Camara FPS (posicion, yaw/pitch, matrices).
 ├── world/
 │   ├── block.rs     Tipos de bloque y su tile del atlas.
-│   ├── chunk.rs     Chunk 16^3 + generacion de terreno de ejemplo.
+│   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas procedural (pixels por codigo).
-│   └── mesher.rs    Chunk -> geometria (face culling).
+│   ├── terrain.rs   Generacion de altura con ruido Perlin.
+│   └── mesher.rs    Columna -> geometria por seccion (face culling).
 └── math/
     ├── vec3.rs      Vector de 3 componentes.
     └── mat4.rs      Matriz 4x4 column-major (perspectiva, look-at).
