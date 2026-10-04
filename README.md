@@ -8,16 +8,16 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.6.0` — Iluminacion basica
+## Estado actual: `v0.6.1` — Block light (antorchas)
 
-- **Luz de cielo**: lo que esta a cielo abierto se ve a pleno sol; bajo la
-  superficie (cuevas, caras inferiores) queda a oscuras. Se recalcula al editar.
-- La luz va **por vertice** y el shader modula el color del atlas (con un
-  minimo ambiental para que la oscuridad sea legible).
-- Sobre v0.5.2: compresion LZ4 + migrador de formato. Sobre v0.5.1: mundo en
-  memoria + streaming sin muros internos.
+- Bloque **antorcha**: no solido, se dibuja y **emite luz**. Se coloca con
+  **click derecho** (teclas **1/2/3** eligen piedra/madera/antorcha).
+- **Luz de bloque** con flood-fill (BFS que pierde 1 por paso y no atraviesa
+  solidos). La luz dibujada es `max(cielo, bloque)`, asi que una antorcha
+  ilumina una cueva a oscuras.
+- Sobre v0.6.0: luz de cielo. Sobre v0.5.x: LZ4, mundo en memoria + streaming.
 - Sobre v0.4.x: romper/colocar, greedy meshing, colisiones.
-- Suite de tests (63 tests).
+- Suite de tests (66 tests).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -39,7 +39,8 @@ Veras en consola la GPU y el formato de superficie elegidos.
 Controles:
 - **Click izquierdo** (sin captura): captura el raton.
 - **Click izquierdo** (capturado): **rompe** el bloque apuntado.
-- **Click derecho** (capturado): **coloca** un bloque al lado del apuntado.
+- **Click derecho** (capturado): **coloca** el bloque seleccionado al lado.
+- **1 / 2 / 3**: elige piedra / madera / antorcha.
 - **W / A / S / D**: andar. **Espacio**: saltar.
 - **F**: alterna modo vuelo (Espacio/Shift sube/baja).
 - **Escape**: libera el raton; si ya esta libre, cierra la aplicacion.

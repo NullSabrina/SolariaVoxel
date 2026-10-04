@@ -591,6 +591,52 @@ pasara a 4 bits por celda (mitad) o a una textura de luz.
 
 ---
 
+## v0.6.1 — Block light (antorchas)
+
+### 2026-10-04 — Flood-fill BFS para la luz de bloque
+
+**Decision.** `compute_block_light` usa una cola (BFS) desde cada emisor; la luz
+pierde 1 por paso y no atraviesa solidos.
+
+**Motivo.** BFS garantiza que cada celda se visita con su nivel **mas alto** la
+primera vez (a diferencia de DFS, que podria fijar un nivel bajo antes de
+encontrar un camino mejor). Es el algoritmo clasico de luz de Minecraft.
+
+### 2026-10-04 — Luz final = max(cielo, bloque)
+
+**Decision.** `combined_light` devuelve el maximo de las dos luces, y es lo que
+se manda al shader.
+
+**Motivo.** Coincide con Minecraft: una antorcha ilumina una cueva (bloque alto,
+cielo 0), pero no oscurece una zona ya iluminada por el sol.
+
+### 2026-10-04 — La antorcha es "visible no solida"
+
+**Decision.** `Block::is_solid` es false para la antorcha, pero existe
+`is_visible`; el mesher dibuja `is_solid || is_visible` y solo oculta caras
+contra vecinos **solidos**.
+
+**Motivo.** La antorcha no debe bloquear el movimiento ni tapar caras de los
+bloques vecinos, pero si debe dibujarse. Separar "solido" (colisiona/oculta) de
+"visible" (se dibuja) es lo que lo hace limpio.
+
+### 2026-10-04 — Antorcha como bloque completo (v0.6.1), no cruz de planos
+
+**Decision.** De momento la antorcha es un bloque de 1x1x1 con su tile; no una
+cruz de dos planos (el aspecto clasico).
+
+**Motivo.** Mantiene el mesher y el atlas simples. La representacion como cruz
+necesitaria geometria no cubica y un pase de transparencia. Queda para pulido.
+
+### 2026-10-04 — Modo demo por variable de entorno
+
+**Decision.** `SOLARIA_DEMO=1` coloca antorchas cerca del jugador al arrancar.
+
+**Motivo.** Permite capturar el efecto de la luz sin interactuar (yo no puedo
+hacer click en la app). No afecta al juego normal si la variable no esta.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

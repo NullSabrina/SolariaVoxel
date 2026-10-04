@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "solaria_voxel"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bincode",
  "bytemuck",

@@ -47,6 +47,8 @@ pub struct App {
     flying: bool,
     /// Bloque apuntado por la camara en el ultimo frame (y su cara).
     selection: Option<crate::world::RayHit>,
+    /// Bloque que se coloca con el click derecho (se cambia con las teclas 1-3).
+    selected_block: crate::world::Block,
     /// Semilla del mundo (de la partida o cargada de disco).
     seed: u32,
     /// Ficha del mundo con su versionado, para actualizarla al guardar.
@@ -243,8 +245,8 @@ impl App {
             }
         }
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.set_block(target, crate::world::Block::Stone);
-            println!("[edit] bloque colocado en {target:?}");
+            renderer.set_block(target, self.selected_block);
+            println!("[edit] colocado {:?} en {target:?}", self.selected_block);
         }
         self.update_selection();
     }
@@ -339,11 +341,46 @@ impl ApplicationHandler for App {
         println!("[engine] jugador posado en y={:.2}", camera.position.y);
         self.camera = Some(camera);
 
+        // Modo demo (SOLARIA_DEMO=1): coloca antorchas cerca para lucir la luz
+        // de bloque en las capturas, sin tener que hacer click.
+        if std::env::var("SOLARIA_DEMO").is_ok() {
+            let cam = self.camera.as_ref().unwrap();
+            let bx = cam.position.x.floor() as i32;
+            let bz = cam.position.z.floor() as i32;
+            let feet = (cam.position.y - crate::player::EYE_HEIGHT).floor() as i32;
+            if let Some(renderer) = self.renderer.as_mut() {
+                // Buscamos la primera capa de aire (encima del suelo) en cada
+                // punto y ponemos la antorcha ahi.
+                for (dx, dz) in [(4, 0), (-4, 0), (0, 4), (0, -4)] {
+                    let (x, z) = (bx + dx, bz + dz);
+                    let mut y = feet + 2;
+                    while y > feet - 3 {
+                        let solid_below = renderer.is_solid_at(Vec3::new(
+                            x as f32 + 0.5,
+                            (y - 1) as f32 + 0.5,
+                            z as f32 + 0.5,
+                        ));
+                        let air_here = !renderer.is_solid_at(Vec3::new(
+                            x as f32 + 0.5,
+                            y as f32 + 0.5,
+                            z as f32 + 0.5,
+                        ));
+                        if solid_below && air_here {
+                            renderer.set_block([x, y, z], crate::world::Block::Torch);
+                            break;
+                        }
+                        y -= 1;
+                    }
+                }
+            }
+            println!("[engine] demo: antorchas colocadas");
+        }
+
         self.last_frame = Some(Instant::now());
         self.window = Some(window);
 
         println!("[engine] click = capturar raton | WASD = andar | Espacio = saltar");
-        println!("[engine] F = volar (Espacio/Shift sube/baja) | Escape = salir");
+        println!("[engine] 1/2/3 = piedra/madera/antorcha | F = volar | Escape = salir");
     }
 
     /// Eventos de la ventana (foco, teclado, botones, resize...).
@@ -382,6 +419,19 @@ impl ApplicationHandler for App {
                                 "[engine] modo vuelo: {}",
                                 if self.flying { "ON" } else { "OFF" }
                             );
+                        }
+                        // 1/2/3: elige el bloque que se coloca con click derecho.
+                        KeyCode::Digit1 if event.state == ElementState::Pressed => {
+                            self.selected_block = crate::world::Block::Stone;
+                            println!("[engine] bloque a colocar: piedra");
+                        }
+                        KeyCode::Digit2 if event.state == ElementState::Pressed => {
+                            self.selected_block = crate::world::Block::Wood;
+                            println!("[engine] bloque a colocar: madera");
+                        }
+                        KeyCode::Digit3 if event.state == ElementState::Pressed => {
+                            self.selected_block = crate::world::Block::Torch;
+                            println!("[engine] bloque a colocar: antorcha (emite luz)");
                         }
                         _ => {}
                     }

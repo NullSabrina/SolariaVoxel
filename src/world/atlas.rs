@@ -12,7 +12,7 @@
 pub const TILE: u32 = 16;
 
 /// Numero de tiles en el atlas (0..TILES).
-pub const TILES: u32 = 8;
+pub const TILES: u32 = 9;
 
 /// Tiles por fila.
 pub const COLS: u32 = 4;
@@ -106,6 +106,23 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 3] {
             let gap = if (x + y).is_multiple_of(5) { -35 } else { 0 };
             tint([60, 120, 40], noise + gap)
         }
+        // 8: antorcha (palo marron con punta amarilla/naranja incandescente).
+        8 => {
+            let cx = (x as i32 - 8).abs();
+            let cy = (y as i32 - 8).abs();
+            if (6..=9).contains(&x) && y >= 6 {
+                // La llama: nucleo claro y bordes naranjas.
+                if cx <= 1 && cy <= 1 {
+                    [255, 240, 180]
+                } else {
+                    [240, 170, 60]
+                }
+            } else if (7..=8).contains(&x) && y < 8 {
+                [120, 80, 45] // el palo
+            } else {
+                [40, 40, 45] // fondo oscuro (opaco, simplificado)
+            }
+        }
         _ => [0, 0, 0],
     }
 }
@@ -138,8 +155,20 @@ mod tests {
     fn el_atlas_tiene_el_tamano_esperado() {
         let pixels = build_pixels();
         assert_eq!(pixels.len(), (WIDTH * HEIGHT * 4) as usize);
-        // Todos los texels son opacos.
-        assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));
+        // Comprobamos por tile (no como rebanada plana, porque el atlas tiene 12
+        // huecos para 9 tiles y las celdas sin usar quedan a cero).
+        for tile in 0..TILES {
+            let col = tile % COLS;
+            let row = tile / COLS;
+            for y in 0..TILE {
+                for x in 0..TILE {
+                    let px = col * TILE + x;
+                    let py = row * TILE + y;
+                    let i = ((py * WIDTH + px) * 4) as usize;
+                    assert_eq!(pixels[i + 3], 255, "tile {tile} pixel ({x},{y})");
+                }
+            }
+        }
     }
 
     #[test]

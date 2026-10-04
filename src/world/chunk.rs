@@ -73,6 +73,8 @@ pub struct Column {
     /// Guardamos `u8` por celda: 16x16x384 = ~98 KB por columna. En v0.12.x
     /// pasaremos a un buffer de 4 bits por celda (mitad de memoria).
     light: Vec<u8>,
+    /// Luz de bloque (antorchas, 0..15), propagada con un flood-fill.
+    block_light: Vec<u8>,
 }
 
 impl Column {
@@ -81,6 +83,7 @@ impl Column {
         Self {
             sections: array::from_fn(|_| Chunk::empty()),
             light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
+            block_light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
         }
     }
 
@@ -132,6 +135,81 @@ impl Column {
         }
     }
 
+    /// Luz de bloque (antorchas) en una posicion (0..15).
+    #[inline]
+    pub fn block_light_at(&self, x: usize, y: usize, z: usize) -> u8 {
+        self.block_light[Self::light_index(x, y, z)]
+    }
+
+    /// Luz total que recibe una celda: el **maximo** de cielo y de bloque. Es lo
+    /// que finalmente se dibuja (una antorcha ilumina una cueva a oscuras).
+    #[inline]
+    pub fn combined_light(&self, x: usize, y: usize, z: usize) -> u8 {
+        self.light_at(x, y, z).max(self.block_light_at(x, y, z))
+    }
+
+    /// Calcula la **luz de bloque** con un flood-fill (BFS) desde cada bloque
+    /// que emite luz. La luz pierde 1 por cada paso y no atraviesa bloques
+    /// solidos.
+    ///
+    /// Usamos BFS (cola) en lugar de DFS para que la propagacion sea uniforme:
+    /// cada celda se visita una sola vez con su nivel mas alto.
+    pub fn compute_block_light(&mut self) {
+        use std::collections::VecDeque;
+
+        self.block_light.fill(0);
+        let mut queue: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
+
+        // Fuentes.
+        for y in 0..WORLD_HEIGHT {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let emission = self.get(x, y, z).light_emission();
+                    if emission > 0 {
+                        let idx = Self::light_index(x, y, z);
+                        self.block_light[idx] = emission;
+                        queue.push_back((x, y, z, emission));
+                    }
+                }
+            }
+        }
+
+        // Propagacion a los 6 vecinos.
+        while let Some((x, y, z, level)) = queue.pop_front() {
+            if level <= 1 {
+                continue;
+            }
+            let next = level - 1;
+            let neighbors: [(i32, i32, i32); 6] = [
+                (1, 0, 0),
+                (-1, 0, 0),
+                (0, 1, 0),
+                (0, -1, 0),
+                (0, 0, 1),
+                (0, 0, -1),
+            ];
+            for (dx, dy, dz) in neighbors {
+                let (nx, ny, nz) = (x as i32 + dx, y as i32 + dy, z as i32 + dz);
+                if nx < 0 || ny < 0 || nz < 0 {
+                    continue;
+                }
+                let (nx, ny, nz) = (nx as usize, ny as usize, nz as usize);
+                if nx >= CHUNK_SIZE || nz >= CHUNK_SIZE || ny >= WORLD_HEIGHT {
+                    continue;
+                }
+                // La luz no atraviesa bloques solidos.
+                if self.get(nx, ny, nz).is_solid() {
+                    continue;
+                }
+                let idx = Self::light_index(nx, ny, nz);
+                if self.block_light[idx] < next {
+                    self.block_light[idx] = next;
+                    queue.push_back((nx, ny, nz, next));
+                }
+            }
+        }
+    }
+
     /// Luz de cielo en coordenadas que pueden salirse de la columna. Fuera
     /// devolvemos 0 (oscuridad).
     #[inline]
@@ -144,6 +222,19 @@ impl Column {
             return 0;
         }
         self.light_at(x, y, z)
+    }
+
+    /// Luz combinada (cielo vs bloque) en coordenadas que pueden salirse.
+    #[inline]
+    pub fn combined_or_zero(&self, x: i32, y: i32, z: i32) -> u8 {
+        if x < 0 || y < 0 || z < 0 {
+            return 0;
+        }
+        let (x, y, z) = (x as usize, y as usize, z as usize);
+        if x >= CHUNK_SIZE || z >= CHUNK_SIZE || y >= WORLD_HEIGHT {
+            return 0;
+        }
+        self.combined_light(x, y, z)
     }
 
     /// Lee un bloque con `y` global (0..WORLD_HEIGHT).
@@ -299,6 +390,48 @@ mod tests {
         assert_eq!(column.light_at(0, 3, 0), 0);
         // El propio bloque solido tambien queda a 0.
         assert_eq!(column.light_at(0, 0, 0), 0);
+    }
+
+    #[test]
+    fn la_luz_de_bloque_se_propaga_desde_la_antorcha() {
+        let mut column = Column::empty();
+        // Antorcha en (8, 8, 8).
+        column.set(8, 8, 8, Block::Torch);
+        column.compute_block_light();
+        // La fuente emite 14.
+        assert_eq!(column.block_light_at(8, 8, 8), 14);
+        // Un vecino inmediato recibe 13.
+        assert_eq!(column.block_light_at(9, 8, 8), 13);
+        // A 5 bloques baja a 9.
+        assert_eq!(column.block_light_at(13, 8, 8), 9);
+        // A 8 bloques (14 - 8) queda en 6.
+        assert_eq!(column.block_light_at(0, 8, 8), 6);
+    }
+
+    #[test]
+    fn la_luz_no_atraviesa_bloques_solidos() {
+        let mut column = Column::empty();
+        column.set(0, 4, 4, Block::Torch);
+        // Pared solida COMPLETA (una cara entera del cubo 16x16) en x=1, para
+        // que la luz no pueda rodearla.
+        for y in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                column.set(1, y, z, Block::Stone);
+            }
+        }
+        column.compute_block_light();
+        // Al otro lado de la pared no llega luz.
+        assert_eq!(column.block_light_at(2, 4, 4), 0);
+    }
+
+    #[test]
+    fn la_luz_combinada_toma_el_maximo() {
+        let mut column = Column::empty();
+        column.set(8, 8, 8, Block::Torch);
+        column.compute_skylight(); // todo aire a cielo abierto (pero hay antorcha)
+        column.compute_block_light();
+        // combined = max(sky, block) >= block.
+        assert!(column.combined_light(8, 8, 8) >= 14);
     }
 
     #[test]

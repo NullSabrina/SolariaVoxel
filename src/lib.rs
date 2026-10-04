@@ -10,14 +10,14 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.6.0 — Iluminacion basica
+//! ## Estado actual: v0.6.1 — Block light (antorchas)
 //!
-//! * **Luz de cielo** por columna (`Column::compute_skylight`): lo que esta a
-//!   cielo abierto recibe luz 15; bajo la superficie, 0. Se recalcula al editar.
-//! * La luz viaja **por vertice** hacia el shader, que modula el color (con un
-//!   minimo ambiental para que la oscuridad sea legible).
-//! * Sobre v0.5.2: compresion LZ4, mundo en memoria + streaming.
-//! * v0.4.x: raycast, greedy meshing, romper/colocar.
+//! * Bloque `Torch`: no solido, se dibuja y **emite luz 14**.
+//! * `Column::compute_block_light` propaga la luz con un **flood-fill BFS**
+//!   que pierde 1 por paso y no atraviesa bloques solidos.
+//! * La luz dibujada es `max(cielo, bloque)`. Con las teclas 1/2/3 se elige
+//!   piedra/madera/antorcha a colocar.
+//! * Sobre v0.6.0: luz de cielo; v0.5.x: LZ4, mundo en memoria + streaming.
 //!
 //! ## Organizacion del codigo
 //!

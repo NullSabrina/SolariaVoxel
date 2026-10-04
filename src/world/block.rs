@@ -53,6 +53,15 @@ pub enum Block {
     Sand,
     Wood,
     Leaves,
+    /// Antorcha: no es solida (se puede atravesar) pero **emite luz**.
+    Torch,
+}
+
+impl Default for Block {
+    /// El bloque que se coloca al empezar (piedra).
+    fn default() -> Self {
+        Block::Stone
+    }
 }
 
 impl Block {
@@ -66,6 +75,7 @@ impl Block {
             4 => Block::Sand,
             5 => Block::Wood,
             6 => Block::Leaves,
+            7 => Block::Torch,
             _ => Block::Air,
         }
     }
@@ -76,10 +86,25 @@ impl Block {
         self as u8
     }
 
-    /// ¿Ocupa espacio? (el aire no).
+    /// ¿Ocupa espacio? (el aire y la antorcha no bloquean).
     #[inline]
     pub fn is_solid(self) -> bool {
-        !matches!(self, Block::Air)
+        !matches!(self, Block::Air | Block::Torch)
+    }
+
+    /// ¿Es un bloque que se dibuja pero no bloquea? (la antorcha).
+    #[inline]
+    pub fn is_visible(self) -> bool {
+        matches!(self, Block::Torch)
+    }
+
+    /// Luz que **emite** el bloque (0..15). La antorcha emite 14.
+    #[inline]
+    pub fn light_emission(self) -> u8 {
+        match self {
+            Block::Torch => 14,
+            _ => 0,
+        }
     }
 
     /// Que tile del atlas usa cada cara de este bloque.
@@ -102,6 +127,9 @@ impl Block {
                 _ => 5,                       // corteza
             },
             Block::Leaves => 7,
+            // La antorcha usa un tile propio (cruz de textura, en v0.6.1 lo
+            // representamos como un bloque pequeno con esta cara).
+            Block::Torch => 8,
         }
     }
 }

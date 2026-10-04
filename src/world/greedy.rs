@@ -43,7 +43,7 @@ struct FaceKey {
 /// `origin`). `origin` desplaza la columna (0..16) a su sitio del mundo.
 pub fn greedy_column(column: &Column, origin: [f32; 3]) -> (Vec<Vertex>, Vec<u32>) {
     let query = |x: i32, y: i32, z: i32| column.get_or_air(x, y, z);
-    let light = |x: i32, y: i32, z: i32| column.light_or_zero(x, y, z);
+    let light = |x: i32, y: i32, z: i32| column.combined_or_zero(x, y, z);
     greedy_range(&query, &light, 0, WORLD_HEIGHT, origin)
 }
 
@@ -54,7 +54,7 @@ pub fn greedy_section(
     origin: [f32; 3],
 ) -> (Vec<Vertex>, Vec<u32>) {
     let query = |x: i32, y: i32, z: i32| column.get_or_air(x, y, z);
-    let light = |x: i32, y: i32, z: i32| column.light_or_zero(x, y, z);
+    let light = |x: i32, y: i32, z: i32| column.combined_or_zero(x, y, z);
     greedy_section_query(&query, &light, section, origin)
 }
 
@@ -201,13 +201,15 @@ fn mask_value(
     };
 
     let block = query(x as i32, y as i32, z as i32);
-    if !block.is_solid() {
+    // Se dibuja lo solido y lo "visible no solido" (la antorcha).
+    if !block.is_solid() && !block.is_visible() {
         return None;
     }
     let (ox, oy, oz) = face.offset();
     // El vecino puede estar fuera de la columna (otro chunk): la query decide.
     let (nx, ny, nz) = (x as i32 + ox, y as i32 + oy, z as i32 + oz);
     let neighbor = query(nx, ny, nz);
+    // Solo se oculta la cara si el vecino es SOLIDO (una antorcha no tapa).
     if neighbor.is_solid() {
         return None; // cara oculta (o vecino en otro chunk)
     }
