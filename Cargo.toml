@@ -1,6 +1,6 @@
 [package]
 name = "solaria_voxel"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 rust-version = "1.87"
 description = "Solaria Voxel - motor de voxeles en Rust construido desde cero (ventana + wgpu)"
@@ -26,6 +26,7 @@ winit = "0.30.13"
 bytemuck = { version = "1.25", features = ["derive"] }
 noise = "0.9.0"
 bincode = { version = "2", features = ["derive"] }
+lz4_flex = "0.14.0"
 
 # ---------------------------------------------------------------------------
 # Perfiles de compilacion.

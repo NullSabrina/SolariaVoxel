@@ -10,14 +10,14 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.5.1 — Streaming de chunks (mundo en memoria)
+//! ## Estado actual: v0.5.2 — Compresion de chunks (LZ4)
 //!
-//! * [`world::World`]: columnas cargadas en memoria con **cache**, streaming
-//!   alrededor del jugador (carga/descarga) y ediciones de cualquier columna.
-//! * El mesher consulta al **vecino** a traves de los bordes: ya **no hay muros
-//!   internos** entre chunks; el mundo se ve continuo.
-//! * El guardado persiste **todos** los chunks modificados (no solo el central).
-//! * Sobre v0.5.0: versionado + bincode; y v0.4.x: raycast, greedy, edicion.
+//! * [`world::save::ChunkRecord`] comprime los bloques con **LZ4** (formato v2).
+//!   Un chunk de terreno pasa de 4096 a ~31 bytes (**x130**).
+//! * [`world::save::MigrationChain`] incluye el migrador **v1 -> v2** (comprime
+//!   los chunks antiguos al cargarlos).
+//! * Sobre v0.5.1: mundo en memoria + streaming y sin muros internos.
+//! * v0.4.x: raycast, greedy meshing, romper/colocar.
 //!
 //! ## Organizacion del codigo
 //!

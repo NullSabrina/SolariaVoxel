@@ -210,14 +210,16 @@ impl World {
 /// Seccion que contiene la superficie del terreno (y 64..80).
 pub const TERRAIN_SECTION: usize = 4;
 
-/// Aplica los bloques de un `ChunkRecord` a una columna.
+/// Aplica los bloques de un `ChunkRecord` a una columna (descomprime si hace
+/// falta).
 pub fn apply_record(column: &mut Column, record: &ChunkRecord) {
+    let blocks = record.decompressed_blocks();
     let y0 = TERRAIN_SECTION * CHUNK_SIZE;
     let mut i = 0usize;
     for y in y0..(y0 + CHUNK_SIZE).min(WORLD_HEIGHT) {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                if let Some(&id) = record.blocks.get(i) {
+                if let Some(&id) = blocks.get(i) {
                     column.set(x, y, z, Block::from_u8(id));
                 }
                 i += 1;

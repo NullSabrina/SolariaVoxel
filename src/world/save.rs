@@ -26,7 +26,10 @@ use super::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Column, WORLD_HEIGHT};
 
 /// Version actual del formato de archivo. Sube SIEMPRE que cambie como se
 /// serializan los datos (rompe compatibilidad binaria).
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// * v1: `ChunkRecord.blocks` eran 4096 bytes sin comprimir.
+/// * v2: `ChunkRecord.blocks` guarda bytes **comprimidos con LZ4** (y un flag).
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Version actual del generador de terreno.
 pub const GENERATOR_VERSION: u32 = 1;
@@ -96,37 +99,70 @@ impl WorldHeader {
 
 /// Los bloques de un chunk modificado por el jugador.
 ///
-/// Guardamos el chunk **completo** (4096 `u8`) en lugar de solo el "diff".
-/// Gastamos mas, pero es simple y robusto; el hermano optimizado (paleta +
-/// compresion LZ4) llega en v0.5.2/v0.11.0.
+/// Guardamos el chunk **completo** (4096 bloques) en lugar de solo el "diff".
+/// Desde el formato v2 los bytes van **comprimidos con LZ4** (un chunk de
+/// terreno baja de 4096 a unos pocos cientos de bytes, porque hay muchisimo
+/// aire y zonas uniformes).
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct ChunkRecord {
     /// Version del formato de ESTE chunk (permite migrar chunk a chunk).
     pub format_version: u32,
     /// Version del generador con el que se genero su terreno base.
     pub generator_version: u32,
-    /// Los 4096 bloques.
+    /// ¿`blocks` esta comprimido con LZ4?
+    pub compressed: bool,
+    /// Los bloques (4096 si `!compressed`; bytes LZ4 si `compressed`).
     pub blocks: Vec<u8>,
 }
 
 impl ChunkRecord {
     /// Construye el registro a partir de una columna (solo su chunk `chunk_y`
-    /// vertical; de momento guardamos el chunk que contiene el terreno).
+    /// vertical; de momento guardamos el chunk que contiene el terreno). Los
+    /// bloques se comprimen con LZ4.
     pub fn from_column(column: &Column, chunk_y: usize) -> Self {
-        let mut blocks = Vec::with_capacity(CHUNK_VOLUME);
+        let mut raw = Vec::with_capacity(CHUNK_VOLUME);
         let y0 = chunk_y * CHUNK_SIZE;
         for y in y0..(y0 + CHUNK_SIZE).min(WORLD_HEIGHT) {
             for z in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
-                    blocks.push(column.get(x, y, z).id());
+                    raw.push(column.get(x, y, z).id());
                 }
             }
         }
         Self {
             format_version: FORMAT_VERSION,
             generator_version: GENERATOR_VERSION,
-            blocks,
+            compressed: true,
+            blocks: lz4_flex::compress_prepend_size(&raw),
         }
+    }
+
+    /// Devuelve los 4096 bloques sin comprimir (descomprime si hace falta).
+    pub fn decompressed_blocks(&self) -> Vec<u8> {
+        if self.compressed {
+            lz4_flex::decompress_size_prepended(&self.blocks).unwrap_or_else(|_| Vec::new())
+        } else {
+            self.blocks.clone()
+        }
+    }
+
+    /// Ratio de compresion (`raw / compressed`). 1.0 = no comprime.
+    pub fn compression_ratio(&self) -> f32 {
+        if self.compressed && !self.blocks.is_empty() {
+            CHUNK_VOLUME as f32 / self.blocks.len() as f32
+        } else {
+            1.0
+        }
+    }
+
+    /// Migra un registro v1 (sin comprimir) al v2 (comprimido). Es un no-op
+    /// funcional cuando ya esta comprimido.
+    pub fn migrate_to_v2(&mut self) {
+        if !self.compressed {
+            self.blocks = lz4_flex::compress_prepend_size(&self.blocks);
+            self.compressed = true;
+        }
+        self.format_version = 2;
     }
 }
 
@@ -241,6 +277,26 @@ pub trait WorldMigrator {
     }
 }
 
+/// Migrador v1 -> v2: comprime con LZ4 los bloques que iban sin comprimir.
+pub struct V1ToV2;
+
+impl WorldMigrator for V1ToV2 {
+    fn from_version(&self) -> u32 {
+        1
+    }
+    fn to_version(&self) -> u32 {
+        2
+    }
+    fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
+        // En v1 `compressed` no existia; al deserializar v1 llega en `false`
+        // (por defecto de bincode no habia campo). Lo normalizamos a comprimido.
+        let mut record = chunk.clone();
+        record.compressed = false;
+        record.migrate_to_v2();
+        record
+    }
+}
+
 /// Cadena de migradores: los aplica en orden hasta llegar al formato actual.
 #[derive(Default)]
 pub struct MigrationChain {
@@ -250,10 +306,8 @@ pub struct MigrationChain {
 impl MigrationChain {
     /// Crea la cadena con los migradores conocidos por el motor.
     pub fn with_builtins() -> Self {
-        // Aun no hay migradores reales (solo existe el formato v1). Cuando
-        // subamos a v2, se registra aqui el `V1ToV2`.
         Self {
-            migrators: Vec::new(),
+            migrators: vec![Box::new(V1ToV2)],
         }
     }
 
@@ -333,9 +387,37 @@ mod tests {
         assert_eq!(loaded.header.seed, 42);
         assert!(loaded.header.is_valid());
         let record = loaded.chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        // El bloque de piedra debe seguir ahi (indice del chunk 0).
+        // El bloque de piedra debe seguir ahi (indice del chunk 0), tras
+        // descomprimir.
+        let blocks = record.decompressed_blocks();
         let idx = (5 * CHUNK_SIZE + 3) * CHUNK_SIZE + 2;
-        assert_eq!(record.blocks[idx], Block::Stone.id());
+        assert_eq!(blocks[idx], Block::Stone.id());
+        // Y el chunk deberia comprimir (terreno mayormente uniforme).
+        assert!(
+            record.compression_ratio() > 2.0,
+            "ratio {}",
+            record.compression_ratio()
+        );
+    }
+
+    #[test]
+    fn un_chunk_de_terreno_comprime_bien_con_lz4() {
+        // Generamos un chunk de terreno real y medimos el ratio.
+        let generator = crate::world::TerrainGenerator::new(13371);
+        let column = generator.generate_column(0, 0);
+        let record = ChunkRecord::from_column(&column, crate::world::store::TERRAIN_SECTION);
+        assert!(record.compressed);
+        let raw = 4096;
+        let compressed = record.blocks.len();
+        let ratio = record.compression_ratio();
+        println!("[lz4] {raw} -> {compressed} bytes (x{ratio:.1})");
+        // Deberia comprimir al menos 3x (hay mucho aire y zonas uniformes).
+        assert!(
+            ratio > 3.0,
+            "ratio {ratio:.1} ({raw} -> {compressed} bytes)"
+        );
+        // Y descomprimir devuelve los 4096 bloques.
+        assert_eq!(record.decompressed_blocks().len(), 4096);
     }
 
     #[test]

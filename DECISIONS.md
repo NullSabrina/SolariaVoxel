@@ -520,6 +520,37 @@ mayor; la estructura (`StreamChange`) ya esta preparada.
 
 ---
 
+## v0.5.2 — Compresion de chunks (LZ4)
+
+### 2026-10-04 — LZ4 (`lz4_flex`) en el propio `ChunkRecord`, formato v2
+
+**Decision.** Los 4096 bloques se guardan comprimidos con LZ4 dentro del
+`ChunkRecord` (`compressed: bool` + `blocks`), y `FORMAT_VERSION` sube a 2.
+
+**Motivo.** LZ4 es rapidisimo y sin dependencias nativas, ideal para este caso.
+Comprimir dentro del registro (no todo el archivo) permite migrar chunk a chunk
+y leer uno sin descomprimir los demas.
+
+**Medida.** Un chunk de terreno real: **4096 -> 31 bytes (x132)**. El aire y las
+zonas uniformes comprimen casi a cero.
+
+### 2026-10-04 — Migrador v1 -> v2 incluido en la cadena por defecto
+
+**Decision.** `MigrationChain::with_builtins()` registra `V1ToV2`, que comprime
+los chunks que vienen sin comprimir.
+
+**Motivo.** Es el primer migrador real y valida el sistema de versionado: un
+mundo v1 se carga, se migra a v2 y se puede seguir usando.
+
+**Limitacion honesta.** Como bincode es posicional, un archivo v1 **binario**
+real no deserializa directamente en el struct v2 (le falta el campo
+`compressed`). El migrador funciona sobre registros ya deserializados; para
+leer archivos v1 reales haria falta un struct `ChunkRecordV1` espejo y una
+funcion de conversion. Como v1 solo existio minutos en desarrollo, no lo
+implementamos, pero queda anotado para el futuro.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

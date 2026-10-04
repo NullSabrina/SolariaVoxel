@@ -203,12 +203,26 @@ impl App {
         for (pos, record) in renderer.snapshot_modified() {
             save.set_chunk(pos, record);
         }
+        // Ratio de compresion medio (raw / comprimido) de los chunks.
+        let ratio = if save.chunks.is_empty() {
+            1.0
+        } else {
+            let sum: f32 = save.chunks.values().map(|r| r.compression_ratio()).sum();
+            sum / save.chunks.len() as f32
+        };
         match save.save_to(&world_path()) {
-            Ok(()) => println!(
-                "[world] guardado en {:?} ({} chunks editados)",
-                world_path(),
-                save.chunks.len()
-            ),
+            Ok(()) => {
+                let size = std::fs::metadata(world_path())
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                println!(
+                    "[world] guardado en {:?}: {} chunks editados, {} bytes, LZ4 x{:.1}",
+                    world_path(),
+                    save.chunks.len(),
+                    size,
+                    ratio
+                );
+            }
             Err(e) => eprintln!("[world] no se pudo guardar: {e}"),
         }
     }
