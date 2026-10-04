@@ -10,11 +10,12 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.1.0 — "Hola Mundo Voxel"
+//! ## Estado actual: v0.1.1 — Camara FPS basica
 //!
-//! * Una ventana de 1280x720.
-//! * La pantalla se limpia a un azul cielo.
-//! * Una [`scene::Camera`] estatica que ya calcula sus matrices.
+//! * Una ventana de 1280x720 que se limpia a un azul cielo.
+//! * Camara FPS movible: WASD para andar, Espacio/Shift para subir/bajar.
+//! * Captura del raton (pointer lock) al hacer click; Escape libera o sale.
+//! * Movimiento independiente del framerate (delta time).
 //!
 //! ## Organizacion del codigo
 //!

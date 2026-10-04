@@ -6,6 +6,7 @@
 //! [`crate::math`]).
 
 mod app;
+mod input;
 mod window;
 
 pub use app::{App, run};

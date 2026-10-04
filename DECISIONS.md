@@ -88,6 +88,45 @@ sacrificar tiempos de compilacion de nuestro crate.
 
 ---
 
+## v0.1.1 — Camara FPS basica
+
+### 2026-10-04 — El input se desacopla de la camara
+
+**Decision.** La camara no lee eventos de winit. Un modulo `engine::input`
+mantiene el estado (teclas pulsadas, delta del raton) y la camara solo recibe
+valores ya resueltos: `add_look(dx, dy)` y `walk(forward, right, up, dt)`.
+
+**Motivo.** Testear la camara sin arrancar una ventana, y poder cambiar
+"raton+teclado" por otra fuente de input (mando, red) sin tocar la camara.
+
+### 2026-10-04 — Pointer lock opt-in, liberado con Escape y al perder foco
+
+**Decision.** El cursor se captura solo al hacer click, y se libera con
+`Escape` o cuando la ventana pierde el foco (alt-tab). Hacer click otra vez
+recaptura.
+
+**Motivo.** Secuestrar el raton nada mas abrir es hostil (no puedes ni mover la
+ventana). Liberar al perder foco evita dejar el cursor atrapado al alt-tab.
+
+### 2026-10-04 — Movimiento por delta time, con `dt` limitado a 0.1 s
+
+**Decision.** El desplazamiento es `velocidad * dt` (no por frame). El `dt` se
+limita a 0.1 s como maximo.
+
+**Motivo.** El mismo comportamiento a 30 o 144 FPS. El limite evita el
+"teletransporte" cuando el proceso se congela (arrastrar la ventana, un
+breakpoint) y vuelve con un `dt` enorme.
+
+### 2026-10-04 — Teclas por codigo fisico (`PhysicalKey`)
+
+**Decision.** WASD se detecta por la posicion fisica de la tecla, no por la
+letra.
+
+**Motivo.** Que la disposicion del teclado (AZERTY, Dvorak) no rompa los
+controles. `KeyCode::KeyW` significa "la tecla que esta donde la W", no la letra.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

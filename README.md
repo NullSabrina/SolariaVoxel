@@ -8,12 +8,13 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.1.0` — Hola Mundo Voxel
+## Estado actual: `v0.1.1` — Camara FPS basica
 
-- Ventana de 1280x720.
-- Pantalla limpiada a un azul cielo (sRGB correcto).
-- Camara FPS estatica que ya calcula sus matrices de vista y proyeccion.
-- Suite de tests de matematica y camara (10 tests).
+- Ventana de 1280x720, limpiada a un azul cielo (sRGB correcto).
+- Camara FPS **movible**: WASD para andar, Espacio/Shift para subir/bajar.
+- Captura del raton (pointer lock) al hacer click; mirar con el raton.
+- Movimiento independiente del framerate (delta time) y con `dt` limitado.
+- Suite de tests de matematica, camara e input (16 tests).
 
 ## Requisitos
 
@@ -29,7 +30,10 @@ cargo run
 La primera compilacion tarda unos minutos (compila `wgpu` y sus dependencias).
 Veras en consola la GPU y el formato de superficie elegidos.
 
-Controles: `Escape` (o el boton de cerrar) sale de la aplicacion.
+Controles:
+- **Click izquierdo**: captura el raton (mira con el raton).
+- **W / A / S / D**: andar. **Espacio / Shift**: subir / bajar.
+- **Escape**: libera el raton; si ya esta libre, cierra la aplicacion.
 
 ## Tests
 
@@ -45,6 +49,7 @@ src/
 ├── lib.rs           Documentacion general y lista de modulos.
 ├── engine/
 │   ├── app.rs       ApplicationHandler: ventana + renderer + camara, eventos.
+│   ├── input.rs     Estado de teclado y raton (ejes de movimiento, delta).
 │   └── window.rs    Atributos de la ventana (tamano, titulo).
 ├── render/
 │   └── renderer.rs  Envoltura sobre wgpu: superficie, device, cola, clear.
