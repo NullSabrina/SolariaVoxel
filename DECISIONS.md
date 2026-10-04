@@ -168,6 +168,64 @@ un objeto.
 
 ---
 
+## v0.2.0 — Primer chunk estatico
+
+### 2026-10-04 — Bloques como `u8`, chunk de 4096 bytes
+
+**Decision.** Cada bloque es un `enum` con `#[repr(u8)]`; un chunk guarda
+4096 de ellos en un array plano.
+
+**Motivo.** La memoria es un objetivo del proyecto (< 500 MB). 1 byte/bloque es
+el minimo razonable y deja claro el coste. En v0.11.0 anadiremos una paleta
+(por si un chunk usa pocos tipos) para bajar de 1 byte/bloque.
+
+### 2026-10-04 — Face culling en el mesher (en vez de un cubo por voxel)
+
+**Decision.** El mesher no emite los 6 cubos por bloque: solo emite las caras
+que dan al aire.
+
+**Motivo.** La guia describia "1 cubo por voxel visible" como paso naive, pero
+descartar caras ocultas es igual de sencillo y reduce la geometria a una
+fraccion (un chunk de terreno pasa de ~147k a ~3.2k triangulos). No tiene
+sentido generar lo que nunca se ve.
+
+### 2026-10-04 — Atlas de texturas generado por codigo (sin assets)
+
+**Decision.** El atlas (8 tiles de 16x16) se genera por codigo como una rejilla
+con ruido determinista; no cargamos imagenes de disco.
+
+**Motivo.** Cero dependencias de assets, resultados reproducibles y todo bajo
+control de versiones como codigo. Cuando haya texturas hechas a mano, se
+sustituira el generador por un cargador de PNG sin cambiar el mesher.
+
+### 2026-10-04 — Fuera del chunk = aire
+
+**Decision.** `Chunk::get_or_air` devuelve aire para coordenadas fuera del
+chunk, asi que el mesher dibuja la cara exterior.
+
+**Motivo.** Con un solo chunk es lo correcto y lo mas simple. Cuando haya
+varios chunks (v0.3.1), esta funcion pasara a consultar el chunk vecino.
+
+### 2026-10-04 — Terreno de ejemplo deterministico (placeholder)
+
+**Decision.** `Chunk::generate_demo` crea una colina con senos/cosenos y un
+arbol. No es generacion procedural "de verdad".
+
+**Motivo.** Meter el ruido Perlin y los biomas es el objetivo de v0.3.0. Este
+placeholder solo asegura que haya algo interesante que mirar y probar en v0.2.0.
+
+### 2026-10-04 — `world` depende de `render::mesh::Vertex`
+
+**Decision.** El mesher (en `world`) construye `render::mesh::Vertex` y `mesh`
+es `pub(crate)`.
+
+**Motivo.** Tener DOS tipos de vertice (uno de mundo y otro de GPU) obligaria a
+convertir en cada frame. Aceptamos que `world` conozca el tipo de vertice;
+`render` sigue sin conocer la logica del mundo. Es un acoplamiento pequeno y
+consciente.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

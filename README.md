@@ -8,13 +8,15 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.1.2` — Primer cubo
+## Estado actual: `v0.2.0` — Primer chunk estatico
 
-- Camara FPS movible: WASD + raton (pointer lock), Espacio/Shift vertical.
-- Un **cubo 3D** con color por cara, colocado delante de la camara.
-- Pipeline de wgpu: shader WGSL, uniforms (matriz MVP) y **z-buffer**.
-- Geometria generada a mano (24 vertices / 36 indices) y subida a la GPU.
-- Suite de tests de matematica, camara e input (20 tests).
+- Un **chunk** de 16x16x16 bloques (1 byte por bloque) con terreno de ejemplo
+  y un arbol.
+- **Meshing naive con face culling**: solo se generan las caras que dan al aire.
+- **Atlas de texturas** procedural (8 tiles: hierba, tierra, piedra, arena,
+  madera, hojas) y sampler *nearest*.
+- Camara FPS movible, z-buffer y pipeline de wgpu con uniforms.
+- Suite de tests (31 tests).
 
 ## Requisitos
 
@@ -58,6 +60,11 @@ src/
 │   └── scene.wgsl   Shader del cubo (vertex + fragment).
 ├── scene/
 │   └── camera.rs    Camara FPS (posicion, yaw/pitch, matrices).
+├── world/
+│   ├── block.rs     Tipos de bloque y su tile del atlas.
+│   ├── chunk.rs     Chunk 16^3 + generacion de terreno de ejemplo.
+│   ├── atlas.rs     Atlas de texturas procedural (pixels por codigo).
+│   └── mesher.rs    Chunk -> geometria (face culling).
 └── math/
     ├── vec3.rs      Vector de 3 componentes.
     └── mat4.rs      Matriz 4x4 column-major (perspectiva, look-at).

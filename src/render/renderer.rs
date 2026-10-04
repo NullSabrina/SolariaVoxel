@@ -21,6 +21,7 @@ use crate::math::{Mat4, Vec3};
 use crate::render::color::srgb_to_linear;
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
+use crate::world::{Chunk, mesh_chunk};
 
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
@@ -139,16 +140,23 @@ impl Renderer {
 
         surface.configure(&device, &config);
 
-        // 6. Z-buffer, pipeline y malla.
+        // 6. Z-buffer, pipeline, y el mundo: generamos un chunk de ejemplo y lo
+        //    convertimos en malla (vertices + indices) para subirlo a la GPU.
         let (depth_texture, depth_view) = Self::create_depth(&device, &config);
-        let pipeline = ScenePipeline::new(&device, config.format, Self::DEPTH_FORMAT);
-        let mesh = Mesh::cube(&device, 1.0);
+        let pipeline = ScenePipeline::new(&device, &queue, config.format, Self::DEPTH_FORMAT);
 
-        // 7. Colocamos el cubo delante de la camara y un poco rotado para que
-        //    se vean tres caras (y asi se aprecia que es 3D de verdad).
-        let model = Mat4::translation(Vec3::new(0.0, 0.0, -6.0))
-            * Mat4::rotation_y(0.6)
-            * Mat4::rotation_x(-0.5);
+        let chunk = Chunk::generate_demo();
+        let (vertices, indices) = mesh_chunk(&chunk);
+        println!(
+            "[world] chunk demo: {} vertices, {} indices ({} triangulos)",
+            vertices.len(),
+            indices.len(),
+            indices.len() / 3
+        );
+        let mesh = Mesh::new(&device, "chunk", &vertices, &indices);
+
+        // 7. Centramos el chunk (ocupa x,z en 0..16) en el origen horizontal.
+        let model = Mat4::translation(Vec3::new(-8.0, 0.0, -8.0));
 
         let info = adapter.get_info();
         println!("[render] GPU: {} | backend: {:?}", info.name, info.backend);

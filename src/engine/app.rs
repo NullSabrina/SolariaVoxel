@@ -10,8 +10,9 @@
 //! * [`Input`] acumula el estado de teclado y raton.
 //! * [`Renderer`] dibuja. [`Camera`] dice desde donde miramos y se mueve.
 //!
-//! v0.1.1 anadio la camara FPS (WASD + pointer lock). v0.1.2 anade el dibujado
-//! de un cubo: cada frame le pasamos al renderer la matriz de la camara.
+//! v0.1.1 anadio la camara FPS (WASD + pointer lock); v0.1.2, el primer cubo;
+//! v0.2.0, el primer chunk de voxeles. Cada frame le pasamos al renderer la
+//! matriz de la camara.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -140,8 +141,9 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Camara FPS: empieza en el origen mirando al frente (-Z).
-        let mut camera = Camera::new(Vec3::ZERO);
+        // Camara FPS: situada para mirar el chunk de ejemplo desde fuera.
+        let mut camera = Camera::new(Vec3::new(0.0, 14.0, 30.0));
+        camera.pitch_deg = -14.0; // inclinada un poco hacia abajo
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
         camera.update_view();
