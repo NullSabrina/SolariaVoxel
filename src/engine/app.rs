@@ -26,6 +26,7 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 use crate::engine::input::Input;
 use crate::engine::window;
 use crate::math::Vec3;
+use crate::player::PlayerController;
 use crate::render::Renderer;
 use crate::scene::Camera;
 
@@ -38,9 +39,12 @@ pub struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     camera: Option<Camera>,
+    player: PlayerController,
     input: Input,
     /// ¿Tenemos el cursor capturado (pointer lock)?
     mouse_locked: bool,
+    /// Modo vuelo (F): sin gravedad, para explorar.
+    flying: bool,
     /// Marca de tiempo del frame anterior, para calcular el `dt`.
     last_frame: Option<Instant>,
 }
@@ -88,27 +92,54 @@ impl App {
         self.mouse_locked = false;
     }
 
-    /// Un tick de simulacion: aplica el giro del raton y el desplazamiento WASD.
+    /// Un tick de simulacion: giro del raton, desplazamiento horizontal y
+    /// fisica vertical (gravedad/suelo) del jugador.
     fn update(&mut self, dt: f32) {
-        // Leemos TODO el input primero, para no mezclar los prestamos de la
-        // camara con los del input.
+        // Leemos TODO el input primero, para no mezclar prestamos.
         let (dx, dy) = self.input.take_mouse_delta();
         let forward = self.input.forward_axis();
         let right = self.input.right_axis();
-        let up = self.input.up_axis();
+        let jump = self.input.jump_axis();
+        let jump_held = self.input.jump_held();
+        let flying = self.flying;
 
+        // Necesitamos el renderer (para consultar bloques) y la camara a la vez.
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
         let Some(camera) = self.camera.as_mut() else {
             return;
         };
 
-        // Solo giramos si el cursor esta capturado (y nos movimos de verdad).
+        // Giro.
         if self.mouse_locked && (dx != 0.0 || dy != 0.0) {
             camera.add_look(dx, dy);
         }
 
-        if forward != 0.0 || right != 0.0 || up != 0.0 {
-            camera.walk(forward, right, up, dt);
+        // Movimiento horizontal (el vertical lo resuelve la fisica).
+        if forward != 0.0 || right != 0.0 {
+            camera.walk(forward, right, 0.0, dt);
         }
+
+        // Fisica vertical. La consulta de solido ignora la componente Y del
+        // punto (ya la elige el controlador): solo usamos x/z para localizar el
+        // bloque dentro del chunk central.
+        let world = renderer;
+        let is_solid = move |point: Vec3| -> bool {
+            world.block_at(point).map(|b| b.is_solid()).unwrap_or(false)
+        };
+
+        // En modo vuelo, Espacio/Shift suben/bajan; en modo normal Space salta.
+        let shift = self.input.is_pressed(winit::keyboard::KeyCode::ShiftLeft)
+            || self.input.is_pressed(winit::keyboard::KeyCode::ShiftRight);
+        let fly_up = if flying {
+            (jump_held as i32 - shift as i32) as f32
+        } else {
+            0.0
+        };
+        let mut player = self.player;
+        player.update(camera, is_solid, fly_up, flying, jump && !flying, dt);
+        self.player = player;
     }
 }
 
@@ -141,19 +172,27 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Camara FPS: elevada y cerca del borde para ver la rejilla 3x3.
-        let mut camera = Camera::new(Vec3::new(0.0, 100.0, 30.0));
-        camera.pitch_deg = -38.0;
+        // Camara FPS: en el centro del chunk, a ras de suelo. La fisica la
+        // posara sobre el terreno antes del primer frame.
+        let mut camera = Camera::new(Vec3::new(8.0, 100.0, 8.0));
+        camera.pitch_deg = -10.0;
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
         camera.update_view();
+        // Coloca la camara sobre el primer bloque solido bajo ella.
+        {
+            let world = self.renderer.as_ref().unwrap();
+            let is_solid = |p: Vec3| world.block_at(p).map(|b| b.is_solid()).unwrap_or(false);
+            self.player.settle(&mut camera, is_solid);
+        }
+        println!("[engine] jugador posado en y={:.2}", camera.position.y);
         self.camera = Some(camera);
 
         self.last_frame = Some(Instant::now());
         self.window = Some(window);
 
-        println!("[engine] controles: click = capturar raton | WASD = andar");
-        println!("[engine] Espacio/Shift = subir/bajar | Escape = liberar/salir");
+        println!("[engine] click = capturar raton | WASD = andar | Espacio = saltar");
+        println!("[engine] F = volar (Espacio/Shift sube/baja) | Escape = salir");
     }
 
     /// Eventos de la ventana (foco, teclado, botones, resize...).
@@ -174,13 +213,24 @@ impl ApplicationHandler for App {
                     // Guardamos el estado (necesario para el movimiento continuo).
                     self.input.on_key(code, event.state);
 
-                    // Escape: libera el raton; si ya esta libre, sale.
-                    if code == KeyCode::Escape && event.state == ElementState::Pressed {
-                        if self.mouse_locked {
-                            self.unlock_mouse();
-                        } else {
-                            event_loop.exit();
+                    match code {
+                        // Escape: libera el raton; si ya esta libre, sale.
+                        KeyCode::Escape if event.state == ElementState::Pressed => {
+                            if self.mouse_locked {
+                                self.unlock_mouse();
+                            } else {
+                                event_loop.exit();
+                            }
                         }
+                        // F: alterna modo vuelo.
+                        KeyCode::KeyF if event.state == ElementState::Pressed => {
+                            self.flying = !self.flying;
+                            println!(
+                                "[engine] modo vuelo: {}",
+                                if self.flying { "ON" } else { "OFF" }
+                            );
+                        }
+                        _ => {}
                     }
                 }
             }

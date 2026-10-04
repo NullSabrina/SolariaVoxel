@@ -8,14 +8,14 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.3.1` — Mundo infinito (visual)
+## Estado actual: `v0.3.2` — Colisiones basicas
 
-- **Rejilla 3x3 de columnas** alrededor del jugador (el mundo se extiende).
-- **Streaming**: al cruzar a otra columna de chunks, se regenera la rejilla
-  centrada en el jugador (sin cache todavia).
-- Terreno procedural con ruido Perlin, deterministico por semilla.
-- Camara FPS movible, z-buffer, atlas de texturas y pipeline de wgpu.
-- Suite de tests (38 tests).
+- **Gravedad y deteccion de suelo**: el jugador cae y se posa sobre el terreno
+  (no lo atraviesa). Incluye **salto** y subdivision de pasos a alta velocidad.
+- **Modo vuelo** (`F`): Espacio/Shift para subir/bajar sin gravedad.
+- **Rejilla 7x7 de columnas** (112x112 bloques) alrededor del jugador.
+- Terreno procedural con ruido Perlin, camara FPS, z-buffer y atlas.
+- Suite de tests (43 tests).
 
 ## Requisitos
 
@@ -33,7 +33,8 @@ Veras en consola la GPU y el formato de superficie elegidos.
 
 Controles:
 - **Click izquierdo**: captura el raton (mira con el raton).
-- **W / A / S / D**: andar. **Espacio / Shift**: subir / bajar.
+- **W / A / S / D**: andar. **Espacio**: saltar.
+- **F**: alterna modo vuelo (Espacio/Shift sube/baja).
 - **Escape**: libera el raton; si ya esta libre, cierra la aplicacion.
 
 ## Tests
@@ -57,6 +58,8 @@ src/
 │   ├── pipeline.rs  Pipeline: shader WGSL, layout de vertices, uniforms MVP.
 │   ├── mesh.rs      Vertices + indices y su subida a la GPU (cubo).
 │   └── scene.wgsl   Shader del cubo (vertex + fragment).
+├── player/
+│   └── controller.rs Fisica del jugador: gravedad, suelo, salto, vuelo.
 ├── scene/
 │   └── camera.rs    Camara FPS (posicion, yaw/pitch, matrices).
 ├── world/

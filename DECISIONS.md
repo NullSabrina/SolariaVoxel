@@ -295,6 +295,46 @@ codigo legible.
 
 ---
 
+## v0.3.2 — Colisiones basicas
+
+### 2026-10-04 — El controlador recibe `is_solid` como parametro
+
+**Decision.** `PlayerController::update(..., is_solid: impl Fn(Vec3) -> bool, ...)`
+recibe la consulta del mundo en cada llamada, en lugar de guardarla dentro.
+
+**Motivo.** El mundo (el `Renderer`, que tiene el chunk central) se presta desde
+la `App`. Guardar una closure con captura dentro del controlador obligaria a
+`Box<dyn Fn>` y a perder `Copy`. Pasarla por parametro mantiene el controlador
+trivial, testeable con una funcion plana (`|p| p.y < 4.0`) y sin acoplarlo a wgpu.
+
+### 2026-10-04 — Fisica por subpasos (no un solo paso)
+
+**Decision.** Al integrar la velocidad vertical dividimos el desplazamiento en
+subpasos de como maximo 0.5 bloques.
+
+**Motivo.** Un `dt` grande con una caida rapida (hasta 50 bloques/s) puede saltar
+por encima de un bloque fino en un solo paso y atravesarlo. Los subpasos lo
+evitan con coste minimo.
+
+### 2026-10-04 — Streaming ampliado a 7x7 y "settle" al arrancar
+
+**Decision.** El radio de columnas pasa de 1 (3x3) a 3 (7x7 = 112x112 bloques) y
+la camara se posa sobre el primer bloque solido al arrancar.
+
+**Motivo.** v0.3.1 regeneraba el mundo "de golpe" al cruzar de chunk; eso era
+incompatible con andar a ras de suelo (te teletransportabas al regenerar). Un
+radio mayor cubre bastante terreno para caminar. La regeneracion en hilos/cache
+llega en v0.5.1; entonces el radio podra volver a ser pequeno.
+
+### 2026-10-04 — Modo vuelo con `F`
+
+**Decision.** `F` alterna volar (sin gravedad, Espacio/Shift vertical).
+
+**Motivo.** Muy util para depurar y explorar el mundo mientras las colisiones son
+todavia basicas. Es tambien el embrión del modo creativo.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

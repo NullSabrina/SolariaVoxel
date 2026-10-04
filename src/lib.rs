@@ -10,14 +10,12 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.3.1 — Mundo infinito (visual)
+//! ## Estado actual: v0.3.2 — Colisiones basicas
 //!
-//! * Rejilla de **3x3 columnas** centrada en el jugador; el mundo se extiende
-//!   mas alla de una sola columna.
-//! * *Streaming* por columnas: al cruzar a otra columna de chunks se recarga la
-//!   rejilla a su alrededor.
-//! * Terreno procedural con ruido Perlin, deterministico por semilla.
-//! * Atlas de texturas procedural, camara FPS y z-buffer.
+//! * [`player::PlayerController`]: gravedad, deteccion de suelo y salto.
+//! * El jugador se posa sobre el terreno al arrancar (no atraviesa el suelo).
+//! * Modo vuelo (tecla `F`) para explorar sin gravedad.
+//! * Rejilla 7x7 de columnas alrededor del jugador; terreno Perlin; camara FPS.
 //!
 //! ## Organizacion del codigo
 //!
@@ -36,6 +34,7 @@
 
 pub mod engine;
 pub mod math;
+pub mod player;
 pub mod render;
 pub mod scene;
 pub mod world;

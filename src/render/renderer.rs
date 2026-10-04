@@ -21,7 +21,7 @@ use crate::math::Mat4;
 use crate::render::color::srgb_to_linear;
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
-use crate::world::{TerrainGenerator, mesh_column};
+use crate::world::{Column, TerrainGenerator, mesh_column};
 
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
@@ -93,6 +93,9 @@ pub struct Renderer {
     view_radius: i32,
     /// Centro de la ultima rejilla generada, en coordenadas de chunk.
     loaded_center: (i32, i32),
+    /// La columna del chunk central, para consultar bloques (colisiones,
+    /// raycast...). Las columnas vecinas no se guardan en v0.3.2.
+    center_column: Column,
 
     /// Color con el que limpiamos el color buffer cada frame.
     clear_color: wgpu::Color,
@@ -155,8 +158,10 @@ impl Renderer {
         let pipeline = ScenePipeline::new(&device, &queue, config.format, Self::DEPTH_FORMAT);
 
         let seed = 13_371;
-        let view_radius = 1; // 1 => rejilla 3x3 de columnas
+        let view_radius = 3; // 3 => rejilla 7x7 de columnas
         let meshes = Self::build_column_meshes(&device, seed, (0, 0), view_radius);
+        // Guardamos la columna central para las consultas de bloques.
+        let center_column = TerrainGenerator::new(seed).generate_column(0, 0);
 
         let info = adapter.get_info();
         println!("[render] GPU: {} | backend: {:?}", info.name, info.backend);
@@ -177,6 +182,7 @@ impl Renderer {
             seed,
             view_radius,
             loaded_center: (0, 0),
+            center_column,
             clear_color: sky_color(),
         })
     }
@@ -241,7 +247,36 @@ impl Renderer {
         self.meshes.clear();
         let built = Self::build_column_meshes(&self.device, self.seed, chunk, self.view_radius);
         self.meshes = built.meshes;
+        // Actualiza la columna central (la que usan las colisiones).
+        let cs = crate::world::CHUNK_SIZE as i32;
+        self.center_column =
+            TerrainGenerator::new(self.seed).generate_column(chunk.0 * cs, chunk.1 * cs);
         println!("[world] streaming -> centro de chunk {chunk:?}");
+    }
+
+    /// Devuelve el bloque en un punto del **chunk central**, o `None` si esta
+    /// fuera de esa columna. Es la base para la deteccion de suelo.
+    pub fn block_at(&self, world: crate::math::Vec3) -> Option<crate::world::Block> {
+        if world.y < 0.0 {
+            return None;
+        }
+        // Coordenadas locales dentro del chunk central (0..16).
+        let local_x = world.x - (self.loaded_center.0 * crate::world::CHUNK_SIZE as i32) as f32;
+        let local_z = world.z - (self.loaded_center.1 * crate::world::CHUNK_SIZE as i32) as f32;
+        if local_x < 0.0
+            || local_z < 0.0
+            || local_x >= crate::world::CHUNK_SIZE as f32
+            || local_z >= crate::world::CHUNK_SIZE as f32
+        {
+            return None;
+        }
+        let xi = local_x as usize;
+        let zi = local_z as usize;
+        let yi = world.y as usize;
+        if yi >= crate::world::WORLD_HEIGHT {
+            return None;
+        }
+        Some(self.center_column.get(xi, yi, zi))
     }
 
     /// Crea (o recrea) la textura de profundidad para el tamano actual.

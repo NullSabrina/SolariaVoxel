@@ -77,11 +77,14 @@ impl Input {
         )
     }
 
-    /// Eje subir/bajar: Espacio = +1, Shift (izq o der) = -1.
-    pub fn up_axis(&self) -> f32 {
-        let up = self.is_pressed(KeyCode::Space);
-        let down = self.is_pressed(KeyCode::ShiftLeft) || self.is_pressed(KeyCode::ShiftRight);
-        axis(up, down)
+    /// ¿Esta pulsada la tecla de "subir" (Espacio)? Se usa en modo vuelo y salto.
+    pub fn jump_held(&self) -> bool {
+        self.is_pressed(KeyCode::Space)
+    }
+
+    /// ¿Se ha pedido un salto? (Espacio). En modo normal, salta si esta en suelo.
+    pub fn jump_axis(&self) -> bool {
+        self.is_pressed(KeyCode::Space)
     }
 }
 
