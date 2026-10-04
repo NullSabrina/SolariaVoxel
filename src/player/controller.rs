@@ -113,21 +113,40 @@ impl PlayerController {
         camera.update_view();
     }
 
-    /// Teleporta la camara a la primera superficie solida bajo ella (evita quedar
-    /// atrapado bajo tierra al arrancar).
+    /// Posa la camara sobre la **superficie** del terreno en su columna `(x, z)`
+    /// (evita quedar atrapado bajo tierra al arrancar).
+    ///
+    /// Buscamos **de arriba hacia abajo** el primer bloque con aire justo encima:
+    /// ese es el techo del terreno. Empezar desde el fondo seria un error, porque
+    /// lo primero que aparece es piedra en lo profundo y el jugador acabaria
+    /// enterrado dentro del suelo.
     pub fn settle(&mut self, camera: &mut Camera, is_solid: impl Fn(Vec3) -> bool) {
-        let mut y = 0.0f32;
-        while y < crate::world::WORLD_HEIGHT as f32 {
-            let feet = Vec3::new(camera.position.x, y, camera.position.z);
-            if is_solid(feet) {
-                camera.position.y = (y + 1.0) + EYE_HEIGHT;
-                self.vertical_velocity = 0.0;
-                self.on_ground = true;
-                camera.update_view();
-                return;
+        let x = camera.position.x;
+        let z = camera.position.z;
+        let top = crate::world::WORLD_HEIGHT as f32 - 1.0;
+
+        let mut y = top;
+        while y >= 0.0 {
+            let here = is_solid(Vec3::new(x, y, z));
+            // Superficie = bloque solido con aire encima (o el borde superior).
+            if here {
+                let above = y + 1.0 >= crate::world::WORLD_HEIGHT as f32;
+                if above || !is_solid(Vec3::new(x, y + 1.0, z)) {
+                    camera.position.y = (y + 1.0) + EYE_HEIGHT;
+                    self.vertical_velocity = 0.0;
+                    self.on_ground = true;
+                    camera.update_view();
+                    return;
+                }
             }
-            y += 1.0;
+            y -= 1.0;
         }
+
+        // Sin terreno solido en esta columna: dejamos la camara alta y que caiga.
+        camera.position.y = top + EYE_HEIGHT;
+        self.vertical_velocity = 0.0;
+        self.on_ground = false;
+        camera.update_view();
     }
 }
 
@@ -200,5 +219,36 @@ mod tests {
         use crate::world::Block;
         assert!(Block::Stone.is_solid());
         assert!(!Block::Air.is_solid());
+    }
+
+    // Terreno tipo columna: solido desde y=0 hasta y=9, aire por encima.
+    fn column_solid(point: Vec3) -> bool {
+        point.y >= 0.0 && point.y < 10.0
+    }
+
+    #[test]
+    fn settle_pone_al_jugador_sobre_la_superficie_no_dentro() {
+        // Este era el bug: el jugador aparecia enterrado en la piedra.
+        let mut camera = Camera::new(Vec3::new(0.5, 200.0, 0.5));
+        camera.update_view();
+        let mut player = PlayerController::new();
+        player.settle(&mut camera, column_solid);
+        // La superficie esta en y=10; los pies deben quedar en y=10.
+        assert!(player.on_ground);
+        assert!(
+            (camera.position.y - (10.0 + EYE_HEIGHT)).abs() < 0.01,
+            "camara en y={} (esperado {})",
+            camera.position.y,
+            10.0 + EYE_HEIGHT
+        );
+    }
+
+    #[test]
+    fn settle_sin_terreno_deja_caer_al_jugador() {
+        let mut camera = Camera::new(Vec3::new(0.5, 5.0, 0.5));
+        camera.update_view();
+        let mut player = PlayerController::new();
+        player.settle(&mut camera, |_| false);
+        assert!(!player.on_ground);
     }
 }
