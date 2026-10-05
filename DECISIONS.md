@@ -1525,6 +1525,36 @@ aparecerian cuando en el modelo son transparentes.
 3D), helper `emit_box`; tests de conteo actualizados (24 vertices, 72 indices).
 161 tests; clippy limpio. Captura `v0.8.10_antorcha.png` (poste con llama).
 
+### 2026-10-05 (v0.8.11) — Agua interactiva y antorcha correcta
+
+**Decision.**
+1. **Antorcha**: deshacer el experimento de v0.8.9/v0.8.10. El `.bbmodel` tiene 3
+   cubos pero, al extraer sus texturas (`tex3 = torch_32.png`, `tex4 = blank`),
+   las caras **visibles** son las **tablas cruzadas** (`cross_x`/`cross_z`, tex3);
+   el palo central usa `blank` y es **invisible**. Se vuelve a dibujar la cruz de
+   dos planos con el tile entero (cutout), que es lo que se ve en Blockbench
+   (una antorcha estrecha, no un poste).
+2. **Agua: interaccion**. El raycast ya **no apunta liquidos** (`is_liquid` ->
+   se ignora): el rayo los atraviesa, asi se rompe/coloca el bloque del fondo o
+   de detras y el resaltado no marca el agua (antes marcaba el cubo de agua y no
+   dejaba interactuar con lo de debajo).
+3. **Agua: forma**. La superficie se baja a **14/16** del bloque (como MC), en
+   lugar del 8/8 a tope: el agua deja ver un labio por debajo del borde y deja de
+   parecer un cubo macizo.
+
+**Motivo.** El usuario reporto que la antorcha se veia mal (comparada con
+Blockbench), que el agua "seguia siendo un bloque" y que no podia colocar/romper
+bloques en el agua.
+
+**Alternativas descartadas.** (a) Poste 3D: la geometria que se ve en Blockbench
+no es el palo. (b) Apuntar el agua y romperla: MC no deja; ademas se rellena al
+instante (es fuente) y bloquea el acceso al fondo.
+
+**Consecuencia.** `mesher.rs` (vuelve `emit_torch` a la cruz, se elimina
+`emit_box`); `renderer.rs` (raycast ignora `is_liquid`); `fluid_mesher.rs`
+(`surface_height` = nivel/8 * 14/16, tests actualizados). 161 tests; clippy
+limpio. Captura `v0.8.11_oceano.png`.
+
 ---
 
 ## Plantilla para futuras entradas

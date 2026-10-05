@@ -186,94 +186,16 @@ fn light_pair(column: &Column, x: usize, y: usize, z: usize) -> (f32, f32) {
     )
 }
 
-/// Emite la geometria de una antorcha: **dos quads verticales cruzados**, uno en
-/// el plano `X = centro` y otro en el plano `Z = centro` del voxel (la "cruz"
-/// que se ve desde arriba). Ambos usan el tile entero de la antorcha; el shader
-/// descarta el alfa bajo (cutout), asi que solo se ve la llama y el palo, no el
-/// fondo transparente.
+/// Emite la geometria de una antorcha. En el modelo
+/// `assets/models/solaria_torch.bbmodel` la unica parte **visible** son las dos
+/// **tablas cruzadas** (`cross_x`/`cross_z`), con la textura de antorcha; el
+/// palo central usa la textura "blank" (transparente) y no se ve.
 ///
-/// Emite una caja con las 6 caras (ambas orientaciones, para que el culling no
-/// oculte ninguna) mapeando `uv` en cada cara. Se usa para el palo del modelo.
-#[allow(clippy::too_many_arguments)]
-fn emit_box(
-    vertices: &mut Vec<Vertex>,
-    indices: &mut Vec<u32>,
-    min: [f32; 3],
-    max: [f32; 3],
-    uv: [f32; 4],
-    sky: f32,
-    block_light: f32,
-    tile: u32,
-) {
-    let [u0, v0, u1, v1] = uv;
-    let faces: [[[f32; 3]; 4]; 6] = [
-        [
-            [min[0], min[1], min[2]],
-            [min[0], min[1], max[2]],
-            [min[0], max[1], max[2]],
-            [min[0], max[1], min[2]],
-        ],
-        [
-            [max[0], min[1], min[2]],
-            [max[0], max[1], min[2]],
-            [max[0], max[1], max[2]],
-            [max[0], min[1], max[2]],
-        ],
-        [
-            [min[0], min[1], min[2]],
-            [max[0], min[1], min[2]],
-            [max[0], min[1], max[2]],
-            [min[0], min[1], max[2]],
-        ],
-        [
-            [min[0], max[1], min[2]],
-            [min[0], max[1], max[2]],
-            [max[0], max[1], max[2]],
-            [max[0], max[1], min[2]],
-        ],
-        [
-            [min[0], min[1], min[2]],
-            [min[0], max[1], min[2]],
-            [max[0], max[1], min[2]],
-            [max[0], min[1], min[2]],
-        ],
-        [
-            [min[0], min[1], max[2]],
-            [max[0], min[1], max[2]],
-            [max[0], max[1], max[2]],
-            [min[0], max[1], max[2]],
-        ],
-    ];
-    let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
-    for face in faces {
-        let base = vertices.len() as u32;
-        for (corner, uv) in face.iter().zip(uvs.iter()) {
-            vertices.push(Vertex::with_light(*corner, *uv, sky, block_light, tile));
-        }
-        indices.extend_from_slice(&[
-            base,
-            base + 1,
-            base + 2,
-            base,
-            base + 2,
-            base + 3,
-            base,
-            base + 2,
-            base + 1,
-            base,
-            base + 3,
-            base + 2,
-        ]);
-    }
-}
-
-/// Emite la geometria de una antorcha: el **palo 3D** del modelo
-/// `assets/models/solaria_torch.bbmodel` (cubo 7..9 x 0..10 x 7..9).
-///
-/// El modelo tiene tres cubos, pero solo el palo es **visible**: sus lados usan
-/// la textura de antorcha. Las dos tablas cruzadas (`cross_x`/`cross_z`) llevan
-/// la textura "blank" (transparente), asi que no se dibujan. Antes se pintaba
-/// una cruz plana que no coincidia con lo que se ve en Blockbench.
+/// Se dibujan como dos planos cruzados (uno en `X = centro`, otro en
+/// `Z = centro`) con el tile entero: el shader descarta el alfa bajo (cutout),
+/// asi que solo se ve la llama y el palo del sprite, no el fondo transparente.
+/// Cada plano se emite con las dos orientaciones (el pipeline usa back-face
+/// culling).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_torch(
     vertices: &mut Vec<Vertex>,
@@ -291,20 +213,36 @@ pub(crate) fn emit_torch(
         origin[1] + y as f32,
         origin[2] + z as f32,
     );
+    let (x1, y1, z1) = (x0 + 1.0, y0 + 1.0, z0 + 1.0);
+    let (cx, cz) = (x0 + 0.5, z0 + 0.5);
     let tile = block.face_tile(Face::PosY) as u32;
-    // UV 1:1 con la columna de la antorcha del sprite (2x10 px: desde la llama,
-    // fila 6, hasta la base) para que el palo de 2x10 bloques/16 muestre la
-    // llama arriba y el palo debajo sin quedar casi transparente.
-    emit_box(
-        vertices,
-        indices,
-        [x0 + 7.0 / 16.0, y0, z0 + 7.0 / 16.0],
-        [x0 + 9.0 / 16.0, y0 + 10.0 / 16.0, z0 + 9.0 / 16.0],
-        [7.0 / 16.0, 6.0 / 16.0, 9.0 / 16.0, 1.0],
-        sky,
-        block_light,
-        tile,
-    );
+    // `v = 0` arriba (llama) y `v = 1` abajo (palo), igual que el sprite.
+    let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+    // Plano X = centro: recorre Z (u) e Y (v).
+    let plane_x = [[cx, y0, z1], [cx, y0, z0], [cx, y1, z0], [cx, y1, z1]];
+    // Plano Z = centro: recorre X (u) e Y (v).
+    let plane_z = [[x0, y0, cz], [x1, y0, cz], [x1, y1, cz], [x0, y1, cz]];
+    for corners in [plane_x, plane_z] {
+        let base = vertices.len() as u32;
+        for (corner, uv) in corners.iter().zip(uvs.iter()) {
+            vertices.push(Vertex::with_light(*corner, *uv, sky, block_light, tile));
+        }
+        // Las dos orientaciones (mismos vertices, indices invertidos).
+        indices.extend_from_slice(&[
+            base,
+            base + 1,
+            base + 2,
+            base,
+            base + 2,
+            base + 3,
+            base,
+            base + 2,
+            base + 1,
+            base,
+            base + 3,
+            base + 2,
+        ]);
+    }
 }
 
 #[cfg(test)]
@@ -358,14 +296,14 @@ mod tests {
     }
 
     #[test]
-    fn la_antorcha_es_el_palo_3d_del_modelo() {
+    fn la_antorcha_es_una_cruz_de_dos_planos() {
         let mut column = Column::empty();
         column.set(8, 8, 8, Block::Torch);
         let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
         assert_eq!(sections.len(), 1);
-        // Solo el palo del .bbmodel: 6 caras x 4 vertices (caja).
-        assert_eq!(sections[0].vertices.len(), 24);
-        assert_eq!(sections[0].indices.len(), 72);
+        // Dos planos cruzados; cada uno con las dos orientaciones.
+        assert_eq!(sections[0].vertices.len(), 8);
+        assert_eq!(sections[0].indices.len(), 24);
         // Todas las caras usan el tile de la antorcha.
         assert!(sections[0].vertices.iter().all(|v| v.tile == 8));
         assert!(
@@ -385,7 +323,7 @@ mod tests {
         column.set(9, 8, 8, Block::Torch);
         let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
         let total: usize = sections.iter().map(|s| s.vertices.len()).sum();
-        // 6 caras de la piedra (24) + el palo de la antorcha (24).
-        assert_eq!(total, 24 + 24);
+        // 6 caras de la piedra (24) + los dos planos de la antorcha (8).
+        assert_eq!(total, 24 + 8);
     }
 }

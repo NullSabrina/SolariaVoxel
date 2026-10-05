@@ -535,12 +535,20 @@ impl Renderer {
             .is_liquid()
     }
 
-    /// Lanza un rayo y devuelve el primer bloque **golpeable** (solido, o visible
-    /// no solido como la antorcha) de cualquier columna cargada.
+    /// Lanza un rayo y devuelve el primer bloque **golpeable** (solido, o la
+    /// antorcha) de cualquier columna cargada.
+    ///
+    /// El agua y la lava **no** se apuntan: el rayo las **atraviesa**, de modo
+    /// que se puede romper o colocar el bloque del fondo/detras (como en
+    /// Minecraft). Si se apuntaran, el resaltado marcaria el liquido y no
+    /// dejaria interactuar con lo que hay debajo.
     pub fn raycast(&self, origin: Vec3, dir: Vec3, max_distance: f32) -> Option<RayHit> {
         let is_hit = |x: i32, y: i32, z: i32| -> bool {
             let block = self.world.get_block([x, y, z]);
-            block.is_solid() || block.is_visible()
+            if block.is_liquid() {
+                return false;
+            }
+            block.is_solid() || block == Block::Torch
         };
         raycast(origin, dir, max_distance, is_hit)
     }

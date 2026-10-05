@@ -10,14 +10,15 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.10 - Antorcha fiel al modelo .bbmodel
+//! ## Estado actual: v0.8.11 - Agua interactiva y antorcha corregida
 //!
-//! * La antorcha se dibuja como el **palo 3D** de
-//!   `assets/models/solaria_torch.bbmodel` (cubo 7..9 x 0..10 x 7..9, UV 1:1 a
-//!   la columna de la llama). Las dos tablas cruzadas del modelo llevan textura
-//!   "blank" (transparente), asi que no se emiten.
-//! * Hereda de v0.8.9 (inventario con todos los bloques), v0.8.8 (agua continua),
-//!   v0.8.7 (cache de ruido 2D, decoracion, cuevas por densidad).
+//! * **Agua**: el rayo **atraviesa** el agua/lava (no se apuntan), asi se puede
+//!   romper/colocar el bloque del fondo o de detras; el resaltado ya no marca el
+//!   liquido. La superficie queda **2/16 por debajo** del borde del bloque (como
+//!   Minecraft), no a tope.
+//! * **Antorcha**: se dibuja como en el `.bbmodel`, cuyas caras visibles son las
+//!   **tablas cruzadas** (el palo usa la textura "blank").
+//! * Hereda de v0.8.10/v0.8.9 (antorcha, inventario completo), v0.8.8 (agua).
 //!
 //! Siguiente (Etapa 2): **mobs** (usando `physics`).
 //!

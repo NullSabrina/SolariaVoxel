@@ -8,15 +8,16 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.10` — Antorcha fiel al modelo `.bbmodel`
+## Estado actual: `v0.8.11` — Agua interactiva y antorcha corregida
 
-- La **antorcha** se dibuja como el **palo 3D** de
-  `assets/models/solaria_torch.bbmodel` (cubo 7–9 × 0–10 × 7–9) con UV 1:1 a la
-  columna de la llama: poste con la **llama arriba**. Las tablas cruzadas del
-  modelo usan textura "blank" (transparente) y no se emiten.
-- Hereda de **v0.8.9**: inventario con **todos los bloques** (rejilla de 8
-  columnas). **v0.8.8**: agua como líquido continuo. **v0.8.7**: cache de ruido
-  2D, decoración, cuevas por densidad.
+- **Agua**: el rayo **atraviesa** el agua/lava (no se apuntan), así puedes
+  romper/colocar el bloque del fondo o de detrás; el resaltado ya no marca el
+  líquido. La superficie queda **2/16 por debajo** del borde del bloque (como
+  Minecraft), no a tope.
+- **Antorcha**: se dibuja como en el `.bbmodel` (las caras visibles son las
+  **tablas cruzadas**; el palo usa la textura "blank").
+- Hereda de **v0.8.9**: inventario con todos los bloques. **v0.8.8**: agua como
+  líquido continuo. **v0.8.7**: cache de ruido 2D, decoración, cuevas.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
 der = colocar (sobre una mesa, la abre). Siguiente (Etapa 2): **mobs** (usando

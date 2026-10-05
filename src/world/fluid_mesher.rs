@@ -18,9 +18,13 @@ use crate::world::chunk::{CHUNK_SIZE, MAX_LIGHT, WORLD_HEIGHT};
 use crate::world::water::MAX_LEVEL;
 
 /// Altura de la superficie (0..1) de una celda de nivel `level`.
+///
+/// No llena el bloque: deja 2/16 libres arriba, asi la superficie queda **por
+/// debajo** del borde del bloque (como Minecraft) y se ve que es liquido, no un
+/// cubo macizo.
 #[inline]
 pub fn surface_height(level: u8) -> f32 {
-    level.min(MAX_LEVEL) as f32 / MAX_LEVEL as f32
+    (level.min(MAX_LEVEL) as f32 / MAX_LEVEL as f32) * (14.0 / 16.0)
 }
 
 /// Nivel maximo de las celdas de agua que comparten la esquina `(x+dx, z+dz)`,
@@ -177,16 +181,16 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn la_altura_de_superficie_es_nivel_entre_ocho() {
-        assert!((surface_height(8) - 1.0).abs() < 1e-6);
-        assert!((surface_height(4) - 0.5).abs() < 1e-6);
-        assert!((surface_height(1) - 0.125).abs() < 1e-6);
-        // Niveles 8 y 4 -> diferencia de exactamente 0.5.
-        assert!((surface_height(8) - surface_height(4) - 0.5).abs() < 1e-6);
+    fn la_altura_de_superficie_es_nivel_entre_ocho_menos_dos_px() {
+        assert!((surface_height(8) - 0.875).abs() < 1e-6);
+        assert!((surface_height(4) - 0.4375).abs() < 1e-6);
+        assert!((surface_height(1) - 0.109_375).abs() < 1e-6);
+        // Niveles 8 y 4 -> 4/8 del alto de agua (0.875 - 0.4375 = 0.4375).
+        assert!((surface_height(8) - surface_height(4) - 0.4375).abs() < 1e-6);
     }
 
     #[test]
-    fn dos_celdas_adyacentes_8_y_4_forman_rampa_de_medio_bloque() {
+    fn dos_celdas_adyacentes_8_y_4_forman_rampa() {
         let mut levels: HashMap<(i32, i32, i32), u8> = HashMap::new();
         levels.insert((0, 0, 0), 8);
         levels.insert((1, 0, 0), 4);
@@ -197,20 +201,20 @@ mod tests {
         let (vertices, indices) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
         assert!(!vertices.is_empty() && indices.len() % 3 == 0);
 
-        // Alturas presentes: 0.0 (base de las caras laterales), 0.5 y 1.0.
+        // Alturas presentes: 0.0 (base), 0.4375 (nivel 4) y 0.875 (nivel 8).
         let mut ys: Vec<f32> = vertices.iter().map(|v| v.position[1]).collect();
         ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
         ys.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
-        assert!(
-            ys.iter().any(|&y| (y - 1.0).abs() < 1e-4),
-            "falta la superficie de nivel 8: {ys:?}"
-        );
-        assert!(
-            ys.iter().any(|&y| (y - 0.5).abs() < 1e-4),
-            "falta la superficie de nivel 4: {ys:?}"
-        );
-        let h8 = ys.iter().copied().find(|y| (y - 1.0).abs() < 1e-4).unwrap();
-        let h4 = ys.iter().copied().find(|y| (y - 0.5).abs() < 1e-4).unwrap();
-        assert!(((h8 - h4) - 0.5).abs() < 1e-4, "diferencia {h8}-{h4}");
+        let h8 = ys
+            .iter()
+            .copied()
+            .find(|y| (y - 0.875).abs() < 1e-4)
+            .expect("falta la superficie de nivel 8");
+        let h4 = ys
+            .iter()
+            .copied()
+            .find(|y| (y - 0.4375).abs() < 1e-4)
+            .expect("falta la superficie de nivel 4");
+        assert!(((h8 - h4) - 0.4375).abs() < 1e-4, "diferencia {h8}-{h4}");
     }
 }
