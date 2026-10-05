@@ -185,6 +185,10 @@ impl World {
             return false;
         };
         column.set(local[0], local[1], local[2], block);
+        // Luz de BLOQUE incremental: recalcula solo lo afectado por esta celda
+        // (antes se hacia un `recompute_block_light` de todo el mundo cargado en
+        // cada edicion -> pico de CPU).
+        self.relight_block(world, block);
         // La columna queda sucia: el registro persistente se reconstruye al
         // guardar o al descargar (no aqui: comprimir 98 KB por bloque seria
         // carisimo). Asi el guardado captura tambien las ediciones por encima y
@@ -198,8 +202,97 @@ impl World {
         for d in NEIGHBORS6 {
             self.enqueue_water([world[0] + d[0], world[1] + d[1], world[2] + d[2]]);
         }
-        // La luz la recalcula el mundo entero justo despues (cruza chunks).
+        // La luz de bloque ya se recalculo de forma incremental en
+        // `relight_block`; el renderer re-meshea el area.
         true
+    }
+
+    /// Escribe la luz de bloque de una celda de mundo (0..15). No-op si la
+    /// columna no esta cargada.
+    fn put_block_light(&mut self, world: [i32; 3], level: u8) {
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return;
+        }
+        let (pos, local) = Self::world_to_local(world);
+        if let Some(column) = self.columns.get_mut(&pos) {
+            column.set_block_light(local[0], local[1], local[2], level);
+        }
+    }
+
+    /// Recalcula la **luz de bloque** de forma **incremental** alrededor de la
+    /// edicion `(p -> new_block)`.
+    ///
+    /// 1. Apaga la luz que partia de `p` (cola de **remocion**, BFS): las celdas
+    ///    que dependian de ella se oscurecen; las que tienen otra fuente se
+    ///    re-siembran.
+    /// 2. **Re-propagacion** (cola de adicion, solo sube): rellena desde las
+    ///    celdas-frontera con luz y desde la fuente nueva si `new_block` emite.
+    ///
+    /// Es equivalente al recalculo global pero acotado al alcance de la luz
+    /// (< 16 bloques), sin recorrer el mundo entero.
+    fn relight_block(&mut self, p: [i32; 3], new_block: Block) {
+        use std::collections::VecDeque;
+        let old_light = self.block_light_at(p);
+        let new_emission = new_block.light_emission();
+
+        let mut remove: VecDeque<([i32; 3], u8)> = VecDeque::new();
+        let mut add: VecDeque<([i32; 3], u8)> = VecDeque::new();
+
+        self.put_block_light(p, 0);
+        remove.push_back((p, old_light));
+
+        // 1. Remocion.
+        while let Some((c, level)) = remove.pop_front() {
+            for d in NEIGHBORS6 {
+                let n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
+                if n[1] < 0 || n[1] >= WORLD_HEIGHT as i32 {
+                    continue;
+                }
+                let nl = self.block_light_at(n);
+                if nl != 0 && nl < level {
+                    self.put_block_light(n, 0);
+                    remove.push_back((n, nl));
+                } else if nl >= level {
+                    add.push_back((n, nl));
+                }
+            }
+        }
+
+        // 2. Re-siembra desde los vecinos con luz (por si quedaron a oscuras
+        //    celdas que otra fuente deberia iluminar de nuevo).
+        for d in NEIGHBORS6 {
+            let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+            let nl = self.block_light_at(n);
+            if nl > 1 {
+                add.push_back((n, nl));
+            }
+        }
+        // Fuente nueva (antorcha/lava colocada).
+        if new_emission > 0 {
+            self.put_block_light(p, new_emission);
+            add.push_back((p, new_emission));
+        }
+
+        // 3. Propagacion (solo sube).
+        while let Some((c, level)) = add.pop_front() {
+            if level <= 1 {
+                continue;
+            }
+            for d in NEIGHBORS6 {
+                let n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
+                if n[1] < 0 || n[1] >= WORLD_HEIGHT as i32 {
+                    continue;
+                }
+                if self.get_block(n).is_solid() {
+                    continue;
+                }
+                let next = level - 1;
+                if self.block_light_at(n) < next {
+                    self.put_block_light(n, next);
+                    add.push_back((n, next));
+                }
+            }
+        }
     }
 
     /// Luz de **cielo** (0..15) de una celda, en coords de mundo.
@@ -835,6 +928,41 @@ impl StreamChange {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_luz_de_bloque_incremental_coincide_con_el_global() {
+        // La luz incremental debe dar el MISMO resultado que recalcular todo.
+        let mut world = World::new(7, 2, vec![]);
+        world.warm_streaming([8.0, 100.0, 8.0]); // chunk (0,0), 5x5 columnas
+        let edits = [
+            ([1, 100, 1], Block::Torch),
+            ([14, 100, 14], Block::Torch),
+            ([7, 100, 7], Block::Stone),
+            ([7, 101, 7], Block::Stone),
+            ([8, 100, 8], Block::Torch),
+            ([8, 100, 8], Block::Air),
+            ([1, 100, 1], Block::Air),
+        ];
+        for (p, b) in edits {
+            assert!(world.set_block(p, b), "no se pudo editar {p:?}");
+        }
+        // Zona amplia (cruza bordes de chunk) donde la luz puede cambiar.
+        let mut coords = Vec::new();
+        for y in 96..106 {
+            for z in -8..24 {
+                for x in -8..24 {
+                    coords.push([x, y, z]);
+                }
+            }
+        }
+        let incremental: Vec<u8> = coords.iter().map(|&c| world.block_light_at(c)).collect();
+        world.recompute_block_light();
+        let global: Vec<u8> = coords.iter().map(|&c| world.block_light_at(c)).collect();
+        assert_eq!(
+            incremental, global,
+            "la luz incremental difiere del recalculo global"
+        );
+    }
 
     #[test]
     fn el_warm_streaming_carga_el_radio_completo_en_sync() {

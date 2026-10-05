@@ -1679,6 +1679,38 @@ terreno. **Limites**: la fisica aun usa `Unloaded = solido` (puede frenar un
 frame al entrar a un chunk pendiente); la luz sigue siendo reconstruccion global
 en cada cambio de streaming; el meshing sigue en el hilo principal.
 
+### 2026-10-05 (v0.8.15) — Luz de bloque incremental (auditoria P0)
+
+**Decision.** Editar un bloque ya **no** recalcula la luz de bloque de todo el
+mundo cargado. `World::relight_block(p, new_block)`:
+
+1. **Remocion** (BFS): apaga la luz de `p` y, en cascada, la de las celdas que
+   dependian de ella (`nl < level`); las celdas que tienen **otra** fuente
+   (`nl >= level`) se **re-siembran** en la cola de adicion.
+2. **Re-siembra** desde los vecinos con luz.
+3. **Adicion** (BFS, solo sube): propaga desde las fronteras y desde la fuente
+   nueva si `new_block` emite.
+
+Ambas colas cruzan chunks (coordenadas de mundo) y quedan acotadas al alcance de
+la luz (< 16 bloques). `set_block` la ejecuta; el renderer dejo de llamar a
+`recompute_block_light()` en las ediciones (solo se mantiene en los cambios de
+streaming, cuando entran/salen columnas con antorchas).
+
+**Motivo.** El audit marca `recompute_block_light()` (recorrer y recalcular todo
+el mundo cargado por cada edicion) como P0: picos de CPU al romper/colocar.
+
+**Alternativas descartadas.** Recalcular una region local en vez de colas: dejaba
+costuras oscuras en el borde de la region. La cola de remocion + adicion es el
+algoritmo correcto y acotado.
+
+**Consecuencia.** `store.rs` (`relight_block`, `put_block_light`, llamado en
+`set_block`); `renderer.rs` (sin `recompute_block_light` en ediciones). Test
+`la_luz_de_bloque_incremental_coincide_con_el_global` verifica que el resultado
+coincide con el recalculo global sobre una zona amplia que cruza chunks. 174
+tests; clippy `-D warnings` limpio. **Limite restante**: los cambios de streaming
+siguen llamando al recalculo global de luz de bloque (columnas nuevas con
+antorchas); se acotara despues.
+
 ---
 
 ## Plantilla para futuras entradas

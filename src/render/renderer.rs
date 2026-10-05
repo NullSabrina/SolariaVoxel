@@ -600,11 +600,10 @@ impl Renderer {
         if !self.world.set_block(voxel, block) {
             return false;
         }
-        // La luz cambio (cielo y bloque): recomputamos la region afectada y
-        // re-mesheamos el area.
+        // La luz de cielo se recalcula por region; la de bloque ya se actualizo
+        // de forma incremental dentro de `set_block`. Re-mesheamos el area.
         let (pos, _) = World::world_to_local(voxel);
         self.world.recompute_skylight(&area3x3(pos));
-        self.world.recompute_block_light();
         self.refresh_area(pos);
         true
     }
@@ -661,7 +660,6 @@ impl Renderer {
             }
         }
         self.world.recompute_skylight(&to_remesh);
-        self.world.recompute_block_light();
         for n in to_remesh {
             if self.world.is_loaded(n) {
                 let m = self.build_column_meshes(n);

@@ -8,26 +8,21 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.14` — Streaming de terreno por jobs (async)
+## Estado actual: `v0.8.15` — Luz de bloque incremental
 
-FASE 2 de la auditoría: generar terreno **fuera del hilo principal**.
+P0 de la auditoría: editar un bloque ya **no** recalcula la luz de bloque de todo
+el mundo cargado.
 
-- `world::streaming::TerrainScheduler`: pool de hilos que comparten el
-  `TerrainGenerator` y generan `Column` con **id de petición**; los resultados
-  obsoletos (fuera del radio) se descartan. El render ya no se congela al cruzar
-  de chunk.
-- `World::plan_streaming` + `poll_generation`: el renderer encola y recoge en
-  frames posteriores.
-- Modelo **Loaded/Unloaded**: la física trata una columna sin cargar como muro
-  (`is_solid_or_unloaded`) para no caer al vacío; posar/meshing usan sólo lo
-  cargado.
-- Arranque con `warm_streaming` (carga síncrona del área del jugador) y
-  saneamiento de la posición guardada. `Column` va **boxeada** (98 KB).
-- Hereda de **v0.8.13**: guardado en segundo plano. **v0.8.12**: persistencia v4.
+- `World::relight_block`: cola de **remoción** (apaga la luz que partía de la
+  celda y re-siembra desde otras fuentes) + cola de **adición** (sólo sube),
+  acotadas al alcance de la luz (< 16 bloques). Cruza chunks.
+- `set_block` la ejecuta; el renderer ya no llama a `recompute_block_light` en
+  las ediciones. Test: incremental **==** recálculo global.
+- Hereda de **v0.8.14**: streaming por jobs. **v0.8.13**: guardado async.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (auditoría): luz incremental,
-meshing async, registry.
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): meshing async,
+fluids (active set), registry.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

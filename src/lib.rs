@@ -10,24 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.14 - Streaming de terreno por jobs (async)
+//! ## Estado actual: v0.8.15 - Luz de bloque incremental
 //!
-//! FASE 2 de la auditoria: generar terreno fuera del hilo principal.
-//! * Nuevo `world::streaming::TerrainScheduler`: pool de hilos que comparten el
-//!   `TerrainGenerator` y generan `Column` con **id de peticion**; los resultados
-//!   obsoletos (fuera del radio) se descartan.
-//! * `World::plan_streaming` + `poll_generation`: el renderer encola y recoge en
-//!   frames posteriores; la vista no se congela al cruzar de chunk.
-//! * Modelo **Loaded/Unloaded**: la fisica trata una columna sin cargar como
-//!   muro (`is_solid_or_unloaded`) para no caer al vacio; posar/meshing usan solo
-//!   lo cargado.
-//! * Arranque con `warm_streaming` (carga sincrona del area del jugador) y
-//!   saneamiento de la posicion guardada. `Column` va **boxeada** (98 KB) para no
-//!   desbordar la pila al moverla.
+//! P0 de la auditoria: editar un bloque ya **no** recalcula la luz de bloque de
+//! todo el mundo cargado.
+//! * `World::relight_block`: cola de **remocion** (apaga la luz que partia de la
+//!   celda y re-siembra desde las celdas con otra fuente) + cola de **adicion**
+//!   (solo sube) acotadas al alcance de la luz (< 16 bloques). Cruza chunks.
+//! * `set_block` la ejecuta; el renderer ya no llama a `recompute_block_light` en
+//!   las ediciones. Test: incremental == recalculo global.
 //!
-//! Hereda de v0.8.13 (guardado async), v0.8.12 (persistencia v4).
+//! Hereda de v0.8.14 (streaming por jobs), v0.8.13 (guardado async).
 //!
-//! Siguiente (auditoria): luz incremental, meshing async, registry.
+//! Siguiente (auditoria): meshing async, fluids (active set), registry.
 //!
 //! ## Organizacion del codigo
 //!
