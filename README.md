@@ -8,21 +8,18 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.0` — Hotbar, inventario y guardado de posicion
+## Estado actual: `v0.8.1` — Texturas cartoon y hotbar fiel a la referencia
 
-Inicio de la **Etapa 2 (gameplay)**:
+Reestilizado visual completo (sin cambiar gameplay):
 
-- **Hotbar** de 9 ranuras con iconos de bloque (arte generado por codigo, estilo
-  de la referencia D). Se elige con **`1`..`9`** o la **rueda**; la ranura activa
-  se resalta.
-- **Inventario** con **`E`**: rejilla 3x3 con todos los bloques; **click** para
-  asignarlos a la ranura activa.
-- **Guardado completo de la posicion** del jugador (`FORMAT_VERSION` 3), que se
-  restaura al cargar. Compatible con mundos v2 (posicion por defecto).
-- Nuevo **pipeline de interfaz 2D** (`render::ui`) + textura de GUI
-  (`render::gui`).
-- Sobre **v0.7.9**: arboles + hojas transparentes + texturas de madera. v0.7.8:
-  oceanos. v0.7.5: cuevas. v0.7.4: culling + niebla.
+- Los 12 tiles del atlas se **repintaron en LibreSprite** con la paleta "Solaria
+  Cartoon": 3 tonos cercanos por material, manchas suaves de 4x4, sin negro puro
+  (estilo Luanti/Terasology, dibujo original).
+- La hotbar es la **referencia D del usuario** (colores medidos del PNG): marco
+  `#4E351E`, ranuras hundidas `#1C0B02/#2B190C/#352011/#311C0F`. Vive en
+  `assets/gui.png` (LibreSprite) con fallback procedural.
+- Hereda de **v0.8.0**: hotbar de 9 ranuras, inventario (`E`) y guardado de
+  posicion.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
 der = colocar. Siguiente (Etapa 2): **crafteo** (rejilla + recetas) y **mobs**.

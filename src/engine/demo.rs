@@ -166,13 +166,19 @@ pub fn build(renderer: &mut Renderer, camera: &mut Camera) -> [i32; 3] {
     let torch = [cx, plateau + 1, cz - 5];
     edits.push((torch, Block::Torch));
 
-    renderer.set_blocks(&edits);
-
+    let applied = renderer.set_blocks(&edits);
     // 3. Camara: a 2.3 del suelo y 5.0 al frente, mirando a la antorcha.
     camera.position = Vec3::new(cx as f32 + 0.5, plateau as f32 + 2.3, cz as f32 - 0.5);
     camera.yaw_deg = 0.0;
     camera.pitch_deg = -13.7;
     camera.update_view();
+    println!(
+        "[demo] aplicados {applied}/{} edits, antorcha en {torch:?}, camara=({:.1},{:.1},{:.1})",
+        edits.len(),
+        camera.position.x,
+        camera.position.y,
+        camera.position.z
+    );
 
     // Sin resaltado: queremos ver el modelo limpio.
     renderer.set_highlight(None);

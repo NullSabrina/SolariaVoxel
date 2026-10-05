@@ -72,16 +72,23 @@ pub fn load_pixels() -> Vec<u8> {
 /// Intenta decodificar `assets/atlas.png` a RGBA8. `None` si falla o el tamano
 /// no coincide.
 fn try_load_pixels() -> Option<Vec<u8>> {
-    let file = std::fs::File::open(ATLAS_PATH).ok()?;
+    load_png_rgba(ATLAS_PATH, WIDTH, HEIGHT)
+}
+
+/// Decodifica un PNG a RGBA8, normalizando RGB/grises si hace falta. `None` si
+/// no se puede abrir, no decodifica o el tamano no coincide con `width` x
+/// `height`. Lo reutiliza la textura de interfaz (`render::gui`).
+pub(crate) fn load_png_rgba(path: &str, width: u32, height: u32) -> Option<Vec<u8>> {
+    let file = std::fs::File::open(path).ok()?;
     let decoder = png::Decoder::new(std::io::BufReader::new(file));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0u8; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
 
-    // Rechazamos tamanos que no encajen con el layout del atlas.
-    if info.width != WIDTH || info.height != HEIGHT {
+    // Rechazamos tamanos que no encajen con el layout esperado.
+    if info.width != width || info.height != height {
         eprintln!(
-            "[atlas] {ATLAS_PATH} mide {}x{} (esperado {WIDTH}x{HEIGHT}); ignorado",
+            "[png] {path} mide {}x{} (esperado {width}x{height}); ignorado",
             info.width, info.height
         );
         return None;
@@ -98,7 +105,7 @@ fn try_load_pixels() -> Option<Vec<u8>> {
     if channels == 4 {
         return Some(buf);
     }
-    let count = (WIDTH * HEIGHT) as usize;
+    let count = (width * height) as usize;
     let mut rgba = vec![0u8; count * 4];
     for i in 0..count {
         let s = i * channels;
@@ -141,15 +148,18 @@ pub fn build_pixels() -> Vec<u8> {
 }
 
 /// Color RGBA de un pixel de un tile concreto, con los patrones de cada
-/// material. El alfa es 0 en el fondo de la antorcha (para el cutout del
-/// shader) y 255 en el resto: asi el fallback procedural se ve igual que el
-/// atlas pintado a mano.
+/// material.
+///
+/// Paleta "Solaria Cartoon" (v0.8.1): tonos cercanos por tile, sin negro puro
+/// ni motas de alto contraste; las manchas se agrupan en bloques de 4x4 en el
+/// atlas pintado a mano. El fallback procedural usa los mismos tonos base para
+/// que el juego se vea coherente con o sin assets.
 fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
     // Por defecto opaco; cada rama devuelve [r, g, b, a].
     let opaque = |c: [u8; 3]| [c[0], c[1], c[2], 255];
     match tile {
         // 0: hierba (arriba)
-        0 => opaque(tint([104, 170, 66], noise)),
+        0 => opaque(tint([106, 190, 78], noise)),
         // 1: lateral de hierba (franja verde irregular arriba, tierra debajo)
         1 => {
             let depth = 2 + (noise.rem_euclid(4)) as u32;
@@ -161,18 +171,18 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
         }
         // 2: tierra (grano fino de bajo contraste)
         2 => opaque(dirt_shade(noise)),
-        // 3: piedra
-        3 => opaque(tint([128, 128, 128], noise)),
-        // 4: arena
-        4 => opaque(tint([219, 207, 163], noise)),
+        // 3: piedra (grises frios suaves)
+        3 => opaque(tint([140, 140, 150], noise)),
+        // 4: arena (amarillos calidos suaves)
+        4 => opaque(tint([226, 205, 148], noise)),
         // 5: corteza del tronco (veta vertical, bajo contraste)
         5 => {
             let streak = if x.is_multiple_of(4) { -20 } else { 0 };
             let c = match noise + streak {
-                i if i < -12 => [58, 40, 26],
-                i if i < -2 => [80, 58, 36],
-                i if i < 10 => [102, 76, 46],
-                _ => [122, 92, 56],
+                i if i < -12 => [78, 51, 32],
+                i if i < -2 => [96, 66, 41],
+                i if i < 10 => [107, 74, 46],
+                _ => [124, 89, 54],
             };
             opaque(c)
         }
@@ -182,11 +192,11 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
             let dy = y as f32 - 7.5;
             let d = (dx * dx + dy * dy).sqrt();
             let c = if d > 7.0 {
-                [134, 102, 60]
+                [138, 95, 46]
             } else if ((d as i32) / 2) % 2 == 0 {
-                [166, 130, 80]
+                [196, 154, 90]
             } else {
-                [196, 160, 104]
+                [224, 190, 130]
             };
             opaque(c)
         }
@@ -196,9 +206,9 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
                 [0, 0, 0, 0]
             } else {
                 let c = match noise {
-                    i if i < -2 => [40, 88, 34],
-                    i if i < 8 => [60, 120, 42],
-                    _ => [96, 158, 62],
+                    i if i < -2 => [44, 122, 56],
+                    i if i < 8 => [62, 158, 79],
+                    _ => [96, 186, 110],
                 };
                 opaque(c)
             }
@@ -248,12 +258,12 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
         // 11: tablones (tablas horizontales con juntas).
         11 => {
             if y.is_multiple_of(4) {
-                opaque([110, 82, 48])
+                opaque([95, 63, 34])
             } else {
                 let c = match noise {
-                    i if i < -4 => [138, 106, 62],
-                    i if i < 8 => [166, 130, 80],
-                    _ => [188, 152, 102],
+                    i if i < -4 => [138, 95, 46],
+                    i if i < 8 => [154, 107, 63],
+                    _ => [176, 130, 78],
                 };
                 opaque(c)
             }
@@ -271,24 +281,23 @@ fn tint(base: [i32; 3], delta: i32) -> [u8; 3] {
     ]
 }
 
-/// Tonos de tierra (nuestra paleta, contraste comprimido) elegidos por el ruido.
-/// Repartidos píxel a píxel dan grano, no manchas grandes.
+/// Tonos de tierra (paleta cartoon: marrones calidos cercanos).
 fn dirt_shade(noise: i32) -> [u8; 3] {
     match noise {
-        i if i < -12 => [98, 68, 50],
-        i if i < -4 => [116, 82, 57],
-        i if i < 6 => [134, 96, 67],
-        i if i < 12 => [152, 112, 79],
-        _ => [166, 124, 86],
+        i if i < -12 => [107, 68, 35],
+        i if i < -4 => [122, 79, 43],
+        i if i < 6 => [138, 90, 51],
+        i if i < 12 => [153, 103, 60],
+        _ => [168, 117, 68],
     }
 }
 
-/// Tonos de hierba (base, oscuro, claro).
+/// Tonos de hierba (verdes cartoon: base, oscuro, claro).
 fn grass_shade(noise: i32) -> [u8; 3] {
     match noise {
-        i if i < -4 => [74, 132, 48],
-        i if i < 8 => [104, 170, 66],
-        _ => [150, 206, 92],
+        i if i < -4 => [78, 154, 60],
+        i if i < 8 => [106, 190, 78],
+        _ => [138, 217, 100],
     }
 }
 

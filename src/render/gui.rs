@@ -1,9 +1,12 @@
-//! Textura de la **interfaz** (hotbar e inventario), generada por codigo.
+//! Textura de la **interfaz** (hotbar e inventario).
 //!
-//! El estilo sigue la referencia del usuario ("Rappenem's Reforge", opcion D):
-//! un marco de **madera** con ranuras **hundidas** de tonos marrones. Generarlo
-//! por codigo (como el atlas procedural) mantiene todo bajo control de versiones
-//! y reproducible, sin un PNG binario aparte.
+//! El estilo sigue la referencia del usuario (opcion D, colores medidos del
+//! PNG): un marco de **madera** (`#4E351E`) con ranuras **hundidas** de tonos
+//! marrones (`#1C0B02/#2B190C/#352011/#311C0F`).
+//!
+//! La textura se **pinta en LibreSprite** (`assets/gui.png`, 256x160) y se carga
+//! con [`load_pixels`]; el procedural de [`build_pixels`] queda como fallback
+//! sin assets (mismos tonos, mismo layout de regiones).
 
 /// Ancho de la textura de la interfaz.
 pub const GUI_W: u32 = 256;
@@ -51,6 +54,24 @@ pub const SELECTION: Region = Region {
     h: SLOT,
 };
 
+/// Ruta de la textura de interfaz en disco (pintada en LibreSprite).
+pub const GUI_PATH: &str = "assets/gui.png";
+
+/// Carga `assets/gui.png` (RGBA8 256x160). Si no existe o no encaja, devuelve
+/// el procedural de [`build_pixels`].
+pub fn load_pixels() -> Vec<u8> {
+    match crate::world::atlas::load_png_rgba(GUI_PATH, GUI_W, GUI_H) {
+        Some(p) => {
+            println!("[gui] cargado {GUI_PATH} ({GUI_W}x{GUI_H})");
+            p
+        }
+        None => {
+            println!("[gui] sin {GUI_PATH}; uso la interfaz procedural");
+            build_pixels()
+        }
+    }
+}
+
 /// Genera la imagen RGBA de la interfaz (sRGB).
 pub fn build_pixels() -> Vec<u8> {
     let mut px = vec![0u8; (GUI_W * GUI_H * 4) as usize];
@@ -97,24 +118,19 @@ fn put(px: &mut [u8], x: u32, y: u32, c: [u8; 4]) {
 }
 
 /// Dibuja una ranura hundida de `SLOT`x`SLOT` en `(ox, oy)`.
+///
+/// Replica la referencia D del usuario (medida del PNG): borde exterior
+/// `#1C0B02`, anillos concentricos `#2B190C` / `#352011` y centro `#311C0F`.
 fn draw_slot(px: &mut [u8], ox: u32, oy: u32) {
     for y in 0..SLOT {
         for x in 0..SLOT {
             let d = x.min(y).min(SLOT - 1 - x).min(SLOT - 1 - y);
             let c = match d {
-                0 => [26, 18, 12, 255], // borde exterior oscuro
-                1 => [96, 70, 42, 255], // marco de madera claro
-                _ => {
-                    // Interior: cuadrado hundido con un contorno mas claro.
-                    let e = x.min(y).min(SLOT - 1 - x).min(SLOT - 1 - y);
-                    if e == 4 {
-                        [78, 58, 36, 255]
-                    } else if e < 4 {
-                        [50, 38, 26, 255]
-                    } else {
-                        [42, 32, 22, 255]
-                    }
-                }
+                0 => [28, 11, 2, 255],  // borde exterior oscuro
+                1 => [43, 25, 12, 255], // anillo 1
+                2 => [53, 32, 17, 255], // anillo 2
+                3 => [49, 28, 15, 255], // centro
+                _ => [53, 32, 17, 255], // interior: eco del anillo 2
             };
             put(px, ox + x, oy + y, c);
         }
@@ -122,9 +138,12 @@ fn draw_slot(px: &mut [u8], ox: u32, oy: u32) {
 }
 
 /// Marco de madera alrededor de la barra de la hotbar.
+///
+/// Madera de la referencia D: marco `#4E351E`, divisores `#593E23`, contorno
+/// oscuro `#1C0B02`.
 fn draw_hotbar_frame(px: &mut [u8]) {
-    let wood = [104, 76, 46, 255];
-    let trim = [70, 50, 30, 255];
+    let wood = [78, 53, 30, 255];
+    let trim = [28, 11, 2, 255];
     for x in 0..HOTBAR.w {
         put(px, HOTBAR.x + x, HOTBAR.y, trim); // fila superior
         put(px, HOTBAR.x + x, HOTBAR.y + HOTBAR.h - 1, trim); // inferior
@@ -135,11 +154,12 @@ fn draw_hotbar_frame(px: &mut [u8]) {
     }
 }
 
-/// Fondo del panel de inventario (marco + interior).
+/// Fondo del panel de inventario (marco + interior). Misma madera que la
+/// hotbar (referencia D): marco `#4E351E`, contorno `#1C0B02`.
 fn draw_panel(px: &mut [u8]) {
-    let wood = [110, 80, 48, 255];
-    let dark = [30, 22, 14, 255];
-    let inner = [58, 46, 32, 255];
+    let wood = [78, 53, 30, 255];
+    let dark = [28, 11, 2, 255];
+    let inner = [43, 25, 12, 255];
     for y in 0..PANEL.h {
         for x in 0..PANEL.w {
             let edge = x == 0 || y == 0 || x == PANEL.w - 1 || y == PANEL.h - 1;
@@ -180,5 +200,16 @@ mod tests {
         // El centro es mas claro que el borde.
         let c = at(SLOT_REGION.x + 10, SLOT_REGION.y + 10);
         assert!(c[0] > e[0]);
+    }
+
+    #[test]
+    fn el_png_cargado_coincide_con_el_layout() {
+        // Si existe assets/gui.png debe medir GUI_W x GUI_H; si no existe, el
+        // fallback procedural sigue valiendo (test de tamanos).
+        if let Some(px) = crate::world::atlas::load_png_rgba(GUI_PATH, GUI_W, GUI_H) {
+            assert_eq!(px.len(), (GUI_W * GUI_H * 4) as usize);
+            // La primera ranura del PNG debe ser opaca (marco D).
+            assert_eq!(px[3], 255);
+        }
     }
 }

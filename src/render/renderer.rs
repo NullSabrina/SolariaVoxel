@@ -272,7 +272,7 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let pixels = gui::build_pixels();
+        let pixels = gui::load_pixels();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,

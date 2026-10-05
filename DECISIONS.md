@@ -1193,6 +1193,37 @@ compatible de v2 (`WorldSaveV2`). 123 tests.
 **Pendiente (Etapa 2).** **Crafteo** (rejilla + recetas; la segunda referencia del
 usuario) y **mobs**. El crafteo reusara `render::ui`.
 
+### 2026-10-05 (v0.8.1) — Texturas cartoon y hotbar fiel a la referencia D
+
+**Decision.** Reestilizado visual completo: (1) los 12 tiles del atlas se
+**repintaron en LibreSprite** con la paleta "Solaria Cartoon" (3 tonos cercanos
+por material, manchas suaves de 4x4, sin negro puro); (2) la hotbar es la
+**referencia D medida del PNG** (marco `#4E351E`, divisores `#593E23`, ranuras
+`#1C0B02/#2B190C/#352011/#311C0F`) y vive en `assets/gui.png` (256x160, mismo
+layout de regiones) con fallback procedural.
+
+**Motivo.** El arte anterior usaba ruido de 1px con motas casi negras: se veia
+"sucio" en vez de cartoon. La doctrina aplicada (Luanti: 16x16 nativo con
+nearest, pixel-art nitido; Terasology: acabado estilizado): paleta corta,
+clusters suaves, luz cenital leve y bordes funcionales nitidos. Los dibujos son
+originales (estilo inspirado, no copias) con nuestra paleta mejorada.
+
+**Alternativas descartadas.** (a) Copiar texturas de Luanti tal cual: licencia
+CC BY-SA y paleta ajena; se pinto original inspirado en su estilo. (b) Seguir
+solo con procedural: el usuario pidio LibreSprite para todo el arte; el
+procedural queda como fallback sin assets.
+
+**Consecuencia.** `atlas::load_png_rgba` (decodificador compartido),
+`gui::GUI_PATH` + `gui::load_pixels`, `Renderer` carga `gui.png` con fallback.
+Fallback procedural con los mismos tonos base. 124 tests (nuevo: el PNG de GUI
+coincide con el layout). Capturas `v0.8.1_hotbar` (hotbar D + iconos) y
+`v0.8.1_spawn` (terreno con la nueva paleta).
+
+**Nota de captura.** Las capturas cortas (<15 s) a veces salen sin hotbar porque
+la ventana no llega a asentarse (el foco lo tiene otro proceso y
+`SetForegroundWindow` falla); con espera larga la UI aparece siempre. No es bug
+del juego (quads y config verificados): es entorno de captura.
+
 
 
 
