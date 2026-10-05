@@ -379,6 +379,15 @@ impl App {
         let slot = gui::SLOT as f32 * UI_SCALE;
         let inset = 3.0 * UI_SCALE;
 
+        // Con una ventana abierta se atenua el mundo detras (legibilidad).
+        if self.inventory_open || self.crafting_open {
+            quads.push(UiQuad {
+                rect: [0.0, 0.0, win_w, win_h],
+                uv: region_uv(gui::DIM),
+                layer: -1,
+            });
+        }
+
         // Hotbar centrada abajo.
         let bar_w = gui::HOTBAR.w as f32 * UI_SCALE;
         let bar_h = gui::HOTBAR.h as f32 * UI_SCALE;
@@ -953,5 +962,37 @@ impl ApplicationHandler for App {
     /// `CloseRequested`/Escape (cierre desde el sistema).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.save_world();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn la_mesa_abierta_atenua_el_fondo_y_dibuja_la_rejilla() {
+        let mut app = App::default();
+        let base = app.build_ui(1280.0, 720.0).len();
+        app.crafting_open = true;
+        app.craft_grid = [
+            None,
+            None,
+            None,
+            None,
+            Some(crate::world::Block::Wood),
+            None,
+            None,
+            None,
+            None,
+        ];
+        app.refresh_craft_result();
+        let quads = app.build_ui(1280.0, 720.0);
+        assert!(quads.len() > base, "la mesa debe anadir quads");
+        assert_eq!(
+            quads[0].rect,
+            [0.0, 0.0, 1280.0, 720.0],
+            "el primer quad es el dim a pantalla completa"
+        );
+        assert_eq!(app.craft_result, Some(crate::world::Block::Planks));
     }
 }

@@ -8,18 +8,17 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.2` — Mesa de crafteo funcional (Etapa 2)
+## Estado actual: `v0.8.3` — Segunda pasada de texturas + dim de UI
 
-Como una mesa de Minecraft, con nuestra hotbar D:
+Mejora de calidad de arte con doctrina Minecraft/Luanti (16x16, 3-4 valores,
+formas de 2-4px, sin ruido de 1px):
 
-- Nuevo bloque **`CraftingTable`** (tiles 12 lateral / 13 tapa, atlas 64x64).
-  **Click derecho** sobre ella abre la interfaz; el resto coloca normal.
-- Rejilla 3x3 + **flecha pergamino** + resultado; recetas con normalize como MC:
-  1 madera -> tablones, 2x2 tablones -> mesa. Sin conteos (creativo): tomar el
-  resultado lo asigna a la ranura activa y limpia la rejilla.
-- Los tablones salen de ITEMS (se craftean); entra la mesa. `E`/Escape cierra.
-- Hereda de **v0.8.1**: texturas cartoon + hotbar D. **v0.8.0**: hotbar,
-  inventario, guardado de posicion.
+- 8 tiles repintados en LibreSprite: tierra e hierba con **terrones**, piedra
+  con **manchas grandes**, arena casi lisa, corteza con brillos, tablones con
+  **nudos** y lateral de mesa con **sierra**.
+- La UI **atenua el mundo** cuando hay ventana abierta (negro alfa 130).
+- Hereda de **v0.8.2**: mesa de crafteo. **v0.8.1**: texturas cartoon + hotbar
+  D. **v0.8.0**: hotbar, inventario, guardado de posicion.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
 der = colocar. Siguiente (Etapa 2): **crafteo** (rejilla + recetas) y **mobs**.

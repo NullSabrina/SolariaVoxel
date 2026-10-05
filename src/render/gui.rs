@@ -60,6 +60,13 @@ pub const ARROW: Region = Region {
     w: 32,
     h: 16,
 };
+/// Pixel oscuro translucido para atenuar el mundo con una ventana abierta.
+pub const DIM: Region = Region {
+    x: 244,
+    y: 64,
+    w: 8,
+    h: 8,
+};
 
 /// Ruta de la textura de interfaz en disco (pintada en LibreSprite).
 pub const GUI_PATH: &str = "assets/gui.png";
@@ -100,6 +107,13 @@ pub fn build_pixels() -> Vec<u8> {
 
     // Flecha de crafteo.
     draw_arrow(&mut px);
+
+    // Atenuador de fondo.
+    for y in 0..DIM.h {
+        for x in 0..DIM.w {
+            put(&mut px, DIM.x + x, DIM.y + y, [0, 0, 0, 130]);
+        }
+    }
     px
 }
 

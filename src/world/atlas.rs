@@ -147,6 +147,12 @@ pub fn build_pixels() -> Vec<u8> {
     pixels
 }
 
+/// Ruido en bloques de 2x2 (manchas suaves en vez de grano de 1px) para los
+/// tiles grandes y lisos (hierba, tierra, piedra, arena).
+fn grain(x: u32, y: u32, tile: u32) -> i32 {
+    noise(x >> 1, y >> 1, tile)
+}
+
 /// Color RGBA de un pixel de un tile concreto, con los patrones de cada
 /// material.
 ///
@@ -158,23 +164,36 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
     // Por defecto opaco; cada rama devuelve [r, g, b, a].
     let opaque = |c: [u8; 3]| [c[0], c[1], c[2], 255];
     match tile {
-        // 0: hierba (arriba)
-        0 => opaque(tint([106, 190, 78], noise)),
+        // 0: hierba (arriba). Ruido en bloques de 2x2: manchas, no grano fino.
+        0 => {
+            let grain = grain(x, y, tile);
+            opaque(tint([106, 190, 78], grain))
+        }
         // 1: lateral de hierba (franja verde irregular arriba, tierra debajo)
         1 => {
-            let depth = 2 + (noise.rem_euclid(4)) as u32;
+            let grain = grain(x, y, tile);
+            let depth = 2 + (grain.rem_euclid(4)) as u32;
             if y < depth {
-                opaque(grass_shade(noise))
+                opaque(grass_shade(grain))
             } else {
-                opaque(dirt_shade(noise))
+                opaque(dirt_shade(grain))
             }
         }
-        // 2: tierra (grano fino de bajo contraste)
-        2 => opaque(dirt_shade(noise)),
-        // 3: piedra (grises frios suaves)
-        3 => opaque(tint([140, 140, 150], noise)),
-        // 4: arena (amarillos calidos suaves)
-        4 => opaque(tint([226, 205, 148], noise)),
+        // 2: tierra (grano de 2x2, bajo contraste)
+        2 => {
+            let grain = grain(x, y, tile);
+            opaque(dirt_shade(grain))
+        }
+        // 3: piedra (grises frios suaves, grano 2x2)
+        3 => {
+            let grain = grain(x, y, tile);
+            opaque(tint([140, 140, 150], grain))
+        }
+        // 4: arena (amarillos calidos suaves, grano 2x2)
+        4 => {
+            let grain = grain(x, y, tile);
+            opaque(tint([226, 205, 148], grain))
+        }
         // 5: corteza del tronco (veta vertical, bajo contraste)
         5 => {
             let streak = if x.is_multiple_of(4) { -20 } else { 0 };

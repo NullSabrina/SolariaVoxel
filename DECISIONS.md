@@ -1251,6 +1251,31 @@ derecho, `E` y Escape.
 entre dibujo y clic. Demo `SOLARIA_CRAFT=1`. El crafteo reusara esto para mas
 recetas; los conteos llegaran con los drops (pendientes de la guia).
 
+### 2026-10-05 (v0.8.3) — Segunda pasada de texturas: analisis MC/Luanti + dim
+
+**Decision.** Repintar 8 tiles con criterio Minecraft/Luanti (16x16, luz
+cenital, 3-4 valores, formas de 2-4px, sin ruido de 1px ni negros): tierra e
+hierba con **terrones** 2x2, piedra con **manchas grandes** + motas grises,
+arena casi lisa, corteza con **brillos ocres**, tablones con **nudos**, lateral
+de mesa con **sierra** (hoja + mango). Ademas la UI **atenua el mundo** (negro
+alfa 130 a pantalla completa) cuando hay ventana abierta. Se conservan
+hojas/antorcha/nieve/agua/tapa de mesa (ya verificados).
+
+**Motivo.** La captura del usuario mostro que, aun con la paleta cartoon, el
+grano de 1px se leia "sucio" y la mesa no se distinguia de tablones. La doctrina
+MC/Luanti resuelve ambos: estructura legible por tile y motivo propio en la
+mesa. El dim mejora la legibilidad de rejilla y resultado sobre fondos claros.
+
+**Alternativas descartadas.** (a) Clonar pixeles de MC/Luanti: dibujo original
+con la doctrina, no copias. (b) Redimensionar `gui.png` para un panel de
+crafteo bitmap: las ranuras D se auto-enmarcan; solo se añadio la region DIM
+(8x8) en hueco libre.
+
+**Consecuencia.** `atlas::grain` (ruido 2x2 en el fallback para hierba, tierra,
+piedra y arena), region `gui::DIM` + quad de atenuado primero en `build_ui`
+(test: el primer quad es fullscreen), motivo de sierra verificable en captura.
+Cielo con dim medido: 120,181,247 -> 86,131,180 (mezcla 51% negro exacta).
+
 
 
 

@@ -10,20 +10,15 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.2 — Mesa de crafteo funcional (Etapa 2)
+//! ## Estado actual: v0.8.3 — Segunda pasada de texturas + dim de UI
 //!
-//! Como una mesa de Minecraft, con nuestra hotbar D:
-//! * Nuevo bloque `CraftingTable` (tiles 12 lateral / 13 tapa, atlas 64x64).
-//!   Click derecho sobre ella abre la interfaz (click derecho normal coloca).
-//! * Rejilla 3x3 + flecha pergamino + resultado; recetas con normalize como MC:
-//!   1 madera -> tablones, 2x2 tablones -> mesa. Sin conteos (creativo): tomar
-//!   el resultado lo asigna a la ranura activa y limpia la rejilla.
-//! * Los tablones salen de ITEMS (se craftean); entra la mesa. `E`/Escape cierra.
+//! Mejora de calidad de arte con doctrina Minecraft/Luanti, sin cambiar
+//! gameplay: 8 tiles repintados (terrones, vetas, nudos, sierra en la mesa) y
+//! la UI atenua el mundo cuando hay ventana abierta.
 //!
-//! Hereda de v0.8.1 (texturas cartoon + hotbar D) y v0.8.0 (hotbar, inventario,
-//! guardado de posicion).
+//! Hereda de v0.8.2 (mesa de crafteo) y v0.8.1 (texturas cartoon + hotbar D).
 //!
-//! Siguiente (Etapa 2): **drops** (quedo pendiente de la guia) y **mobs**.
+//! Siguiente (Etapa 2): **drops** (pendiente de la guia) y **mobs**.
 //!
 //! ## Organizacion del codigo
 //!
