@@ -10,20 +10,24 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.13 - Guardado en segundo plano (async)
+//! ## Estado actual: v0.8.14 - Streaming de terreno por jobs (async)
 //!
-//! Segunda fase de la auditoria (save asincrono):
-//! * Nuevo `engine::save_worker`: un hilo serializa y escribe el mundo de forma
-//!   atomica; el hilo principal solo pide el guardado y consulta el resultado.
-//! * **Autoguardado** cada 5 min sin bloquear el render, y al cerrar se espera
-//!   (`join`) para no perder el ultimo estado (idempotente).
-//! * Prerequisito del siguiente paso: `TerrainGenerator` es `Send + Sync`
-//!   (`Cell<u32>` -> `AtomicU32`), listo para workers de generacion.
+//! FASE 2 de la auditoria: generar terreno fuera del hilo principal.
+//! * Nuevo `world::streaming::TerrainScheduler`: pool de hilos que comparten el
+//!   `TerrainGenerator` y generan `Column` con **id de peticion**; los resultados
+//!   obsoletos (fuera del radio) se descartan.
+//! * `World::plan_streaming` + `poll_generation`: el renderer encola y recoge en
+//!   frames posteriores; la vista no se congela al cruzar de chunk.
+//! * Modelo **Loaded/Unloaded**: la fisica trata una columna sin cargar como
+//!   muro (`is_solid_or_unloaded`) para no caer al vacio; posar/meshing usan solo
+//!   lo cargado.
+//! * Arranque con `warm_streaming` (carga sincrona del area del jugador) y
+//!   saneamiento de la posicion guardada. `Column` va **boxeada** (98 KB) para no
+//!   desbordar la pila al moverla.
 //!
-//! Hereda de v0.8.12 (persistencia v4: columna completa, atomica, validada).
+//! Hereda de v0.8.13 (guardado async), v0.8.12 (persistencia v4).
 //!
-//! Siguiente (auditoria): streaming por jobs + revisiones, luz incremental,
-//! meshing async.
+//! Siguiente (auditoria): luz incremental, meshing async, registry.
 //!
 //! ## Organizacion del codigo
 //!

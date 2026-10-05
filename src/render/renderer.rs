@@ -254,8 +254,9 @@ impl Renderer {
             day_factor: 1.0,
             start: Instant::now(),
         };
-        // Carga inicial del mundo alrededor del origen.
-        renderer.sync_streaming(Vec3::new(0.0, 64.0, 0.0));
+        // Carga inicial **sincrona** del mundo alrededor del origen. El app
+        // vuelve a calentar en la posicion real del jugador antes de posarlo.
+        renderer.warm_streaming(Vec3::new(0.0, 64.0, 0.0));
         Ok(renderer)
     }
 
@@ -345,9 +346,26 @@ impl Renderer {
     /// cargar/descargar, reconstruimos tambien las columnas **colindantes** ya
     /// mesheadas.
     pub fn sync_streaming(&mut self, player_pos: Vec3) {
+        let mut change = self
+            .world
+            .plan_streaming([player_pos.x, player_pos.y, player_pos.z]);
+        // Columnas generadas por los workers que ya estan listas este frame.
+        change.loaded.extend(self.world.poll_generation());
+        self.apply_stream_change(&change, player_pos);
+    }
+
+    /// Carga **sincrona** inicial del area del jugador (arranque). Garantiza que
+    /// hay terreno antes de posar al jugador o montar la demo; a partir de ahi
+    /// el streaming normal es asincrono.
+    pub fn warm_streaming(&mut self, player_pos: Vec3) {
         let change = self
             .world
-            .update_streaming([player_pos.x, player_pos.y, player_pos.z]);
+            .warm_streaming([player_pos.x, player_pos.y, player_pos.z]);
+        self.apply_stream_change(&change, player_pos);
+    }
+
+    /// Aplica un cambio de streaming: ilumina, libera/encola mallas y registra.
+    fn apply_stream_change(&mut self, change: &StreamChange, player_pos: Vec3) {
         if change.is_empty() {
             return;
         }
@@ -355,7 +373,7 @@ impl Renderer {
         let dirty = {
             let loaded = &self.world;
             let mut dirty: Vec<ChunkPos> = change.loaded.clone();
-            for n in columns_to_remesh(&change, |p| loaded.is_loaded(p)) {
+            for n in columns_to_remesh(change, |p| loaded.is_loaded(p)) {
                 if !dirty.contains(&n) {
                     dirty.push(n);
                 }
@@ -374,7 +392,7 @@ impl Renderer {
         // Encolar las columnas nuevas y sus vecinas de borde; se meshean
         // repartidas entre frames (`pump_meshing`), empezando por las cercanas.
         let mut to_queue: Vec<ChunkPos> = change.loaded.clone();
-        for n in columns_to_remesh(&change, |p| self.world.is_loaded(p)) {
+        for n in columns_to_remesh(change, |p| self.world.is_loaded(p)) {
             if !to_queue.contains(&n) {
                 to_queue.push(n);
             }
@@ -515,7 +533,22 @@ impl Renderer {
     }
 
     /// ¿Hay bloque solido en este punto del mundo (coordenadas en bloques)?
+    ///
+    /// Para la **fisica** usamos `is_solid_or_unloaded`: una columna aun no
+    /// generada cuenta como muro, de modo que el jugador no cae al vacio
+    /// mientras el streaming asincrono la trae.
     pub fn is_solid_at(&self, point: Vec3) -> bool {
+        self.world.is_solid_or_unloaded([
+            point.x.floor() as i32,
+            point.y.floor() as i32,
+            point.z.floor() as i32,
+        ])
+    }
+
+    /// Solidez mirando solo columnas **cargadas** (`Unloaded` = aire, no muro).
+    /// Se usa para **posar** al jugador al arrancar (tras la carga sincrona
+    /// inicial): asi encuentra el suelo real y no el "techo" del mundo vacio.
+    pub fn is_solid_loaded_at(&self, point: Vec3) -> bool {
         self.world.is_solid([
             point.x.floor() as i32,
             point.y.floor() as i32,
@@ -548,6 +581,11 @@ impl Renderer {
     /// dejaria interactuar con lo que hay debajo.
     pub fn raycast(&self, origin: Vec3, dir: Vec3, max_distance: f32) -> Option<RayHit> {
         let is_hit = |x: i32, y: i32, z: i32| -> bool {
+            // No se dispara a traves de lo **no cargado**: se trata como muro
+            // (evita apuntar/colocar en el borde del load con datos fantasma).
+            if !self.world.is_column_loaded([x, y, z]) {
+                return true;
+            }
             let block = self.world.get_block([x, y, z]);
             if block.is_liquid() {
                 return false;

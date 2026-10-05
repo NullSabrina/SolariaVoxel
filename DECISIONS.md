@@ -1638,6 +1638,47 @@ el ultimo estado; se espera.
 dirty sigue en el hilo principal; el mundo guarda mientras el hilo carga el
 `WorldSave` completo en memoria (sin streaming incremental de E/S aun).
 
+### 2026-10-05 (v0.8.14) — Streaming de terreno por jobs (auditoria FASE 2)
+
+**Decision.** Generar las columnas del mundo **fuera del hilo principal**:
+
+1. **`world::streaming::TerrainScheduler`**: pool de 2 hilos que comparten el
+   `TerrainGenerator` (`Arc`, `Send + Sync` desde v0.8.13) mediante un
+   `Mutex<Receiver>`. Cada peticion lleva un **id monotonico**.
+2. **`World::plan_streaming`** (encola el area faltante, descarga la que sale del
+   radio, cancela peticiones viejas) + **`World::poll_generation`** (recoge
+   resultados, valida `id` vigente y radio, e inserta la columna). El renderer
+   combina ambos; ya no se congela al cruzar de chunk.
+3. **Modelo `Loaded`/`Unloaded`**: `is_column_loaded`, y `is_solid_or_unloaded`
+   para **fisica** (una columna sin cargar es muro -> el jugador no cae al
+   vacio); el **raycast** no dispara a traves de lo no cargado; posar/meshing usan
+   solo lo cargado (`is_solid`).
+4. **Arranque**: `Renderer::warm_streaming` + `App` llaman a `World::warm_streaming`
+   (carga **sincrona** del area del jugador, cancelando lo async pendiente) antes
+   de posar/demo; y se **sanea** la posicion guardada si cae fuera del mundo.
+   `update_streaming` (sincrono) se conserva para tests.
+
+**Motivo.** El audit marca la generacion sincrona como P0 (tiron al cruzar de
+chunk). Con jobs + revisiones, el frame no paga la generacion.
+
+**Alternativas descartadas / bugs encontrados.**
+* **Stack overflow**: la `Column` pesa ~98 KB; moverla por el canal/`collect` por
+  valor desbordaba la pila de 1 MB del hilo principal en `debug`. Se **boxea**
+  (`Box<Column>` en el canal y en `World::columns`). Verificado: con 64 MB de
+  pila no fallaba -> era tamano de pila.
+* **Camara cayendo**: `Unloaded = solido` hacia que `settle` posara al jugador en
+  el techo (y≈384) y luego cayera; y esa posicion se guardaba. Se separan las
+  consultas (fisica vs posar) y se sanea la posicion al cargar.
+
+**Consecuencia.** `world/streaming.rs` nuevo; `store.rs` (`Arc` generador,
+scheduler, pending/ids, plan/poll, warm, helpers de disponibilidad, `Box<Column>`);
+`renderer.rs` (plan+poll, warm, `is_solid_loaded_at`, raycast); `app.rs` (warm +
+saneamiento). 173 tests; clippy `-D warnings` limpio. Verificado en runtime:
+posado en y=80.6 (no 384), streaming incremental (+33/+26/+21 -> 81), demo con
+terreno. **Limites**: la fisica aun usa `Unloaded = solido` (puede frenar un
+frame al entrar a un chunk pendiente); la luz sigue siendo reconstruccion global
+en cada cambio de streaming; el meshing sigue en el hilo principal.
+
 ---
 
 ## Plantilla para futuras entradas

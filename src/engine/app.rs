@@ -740,6 +740,15 @@ impl ApplicationHandler for App {
                 )
             }
         };
+        // Saneamiento: una posicion guardada fuera del mundo (p.ej. de un
+        // arranque anterior con columnas sin cargar que poso al jugador en el
+        // techo) no debe dejarlo cayendo. Si no es valida, se usa el spawn.
+        let player_pos =
+            if player_pos[1] < 0.0 || player_pos[1] >= crate::world::WORLD_HEIGHT as f32 {
+                crate::world::save::DEFAULT_PLAYER_POS
+            } else {
+                player_pos
+            };
 
         match Renderer::new(window.clone(), seed, restored) {
             Ok(renderer) => self.renderer = Some(renderer),
@@ -755,6 +764,13 @@ impl ApplicationHandler for App {
         // Barra rapida por defecto: los primeros `HOTBAR_SLOTS` items.
         self.hotbar = std::array::from_fn(|i| ITEMS[i]);
 
+        // Carga **sincrona** del area inicial antes de posar al jugador (o
+        // montar la demo): con streaming async el suelo aun no estaria cargado y
+        // el jugador caeria o la demo saldria vacia.
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.warm_streaming(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
+        }
+
         // Camara FPS: donde la dejo el jugador (guardado completo), o el spawn
         // por defecto. La fisica la posara sobre el terreno antes del primer frame.
         let mut camera = Camera::new(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
@@ -765,7 +781,7 @@ impl ApplicationHandler for App {
         // Coloca la camara sobre el primer bloque solido bajo ella.
         {
             let world = self.renderer.as_ref().unwrap();
-            let is_solid = |p: Vec3| world.is_solid_at(p);
+            let is_solid = |p: Vec3| world.is_solid_loaded_at(p);
             self.player.settle(&mut camera, is_solid);
         }
         println!("[engine] jugador posado en y={:.2}", camera.position.y);

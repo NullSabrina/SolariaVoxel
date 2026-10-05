@@ -18,19 +18,24 @@
 //! dejamos la estructura lista (cola de peticiones) para anadirla encima.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use super::block::Block;
 use super::chunk::{CHUNK_SIZE, Column, SECTION_COUNT, WORLD_HEIGHT};
 use super::save::{ChunkPos, ChunkRecord};
+use super::streaming::{GenResult, TerrainScheduler};
 use super::terrain::TerrainGenerator;
 use super::water::{self, Fluid, FluidGrid, MAX_LEVEL};
 
 /// Un mundo vivo: columnas cargadas + cache + generador.
 pub struct World {
-    /// Generador de terreno (deterministico por semilla).
-    generator: TerrainGenerator,
-    /// Columnas cargadas, por posicion de chunk.
-    columns: HashMap<ChunkPos, Column>,
+    /// Generador de terreno (deterministico por semilla), compartido con los
+    /// workers de generacion (`Arc`, `Send + Sync`).
+    generator: Arc<TerrainGenerator>,
+    /// Columnas cargadas, por posicion de chunk. Van **boxeadas**: una `Column`
+    /// pesa ~98 KB y moverla por valor (canal/collect/insert) desborda la pila
+    /// del hilo principal en `debug`.
+    columns: HashMap<ChunkPos, Box<Column>>,
     /// Posiciones de las columnas que el jugador ha **modificado** (para
     /// guardarlas y porque no hay que regenerarlas). El registro se reconstruye
     /// de forma **perezosa** (al guardar/descargar), no en cada `set_block`.
@@ -47,6 +52,12 @@ pub struct World {
     water: HashMap<[i32; 3], Fluid>,
     /// Celdas de agua pendientes de simular (cola con deduplicacion).
     water_queue: water::DirtyQueue,
+    /// Pool de generacion en hilos (se crea al primer streaming asincrono).
+    scheduler: Option<TerrainScheduler>,
+    /// Peticiones de generacion pendientes: `ChunkPos -> id`.
+    pending: HashMap<ChunkPos, u64>,
+    /// Siguiente id de peticion (monotonico).
+    next_request: u64,
 }
 
 impl World {
@@ -54,7 +65,7 @@ impl World {
     /// hayan cargado de disco.
     pub fn new(seed: u32, view_radius: i32, restored: Vec<(ChunkPos, ChunkRecord)>) -> Self {
         let mut world = Self {
-            generator: TerrainGenerator::new(seed),
+            generator: Arc::new(TerrainGenerator::new(seed)),
             columns: HashMap::new(),
             modified: HashMap::new(),
             dirty: HashSet::new(),
@@ -62,6 +73,9 @@ impl World {
             last_center: None,
             water: HashMap::new(),
             water_queue: water::DirtyQueue::new(),
+            scheduler: None,
+            pending: HashMap::new(),
+            next_request: 0,
         };
         // Las columnas restauradas se marcan como modificadas y se aplican
         // encima del terreno generado cuando se carguen.
@@ -135,6 +149,29 @@ impl World {
     /// ¿Hay bloque solido en estas coordenadas de mundo?
     pub fn is_solid(&self, world: [i32; 3]) -> bool {
         self.get_block(world).is_solid()
+    }
+
+    /// ¿La columna de esta celda esta **cargada**? (modelo `Loaded`/`Unloaded`.)
+    pub fn is_column_loaded(&self, world: [i32; 3]) -> bool {
+        let (pos, _) = Self::world_to_local(world);
+        self.columns.contains_key(&pos)
+    }
+
+    /// Consulta para **fisica**: a diferencia de [`World::is_solid`], una columna
+    /// aun no cargada se trata como **solida** (muro), para que el jugador no
+    /// caiga al vacio mientras llega la generacion asincrona.
+    pub fn is_solid_or_unloaded(&self, world: [i32; 3]) -> bool {
+        if world[1] < 0 {
+            return true;
+        }
+        if world[1] >= WORLD_HEIGHT as i32 {
+            return false;
+        }
+        let (pos, local) = Self::world_to_local(world);
+        match self.columns.get(&pos) {
+            Some(column) => column.get(local[0], local[1], local[2]).is_solid(),
+            None => true,
+        }
     }
 
     /// Escribe un bloque en coordenadas de mundo. Marca el chunk como
@@ -224,7 +261,7 @@ impl World {
         // Calculamos la luz de cielo tras generar/restaurar la columna. La luz
         // de bloque se calcula a nivel de **mundo** (cruza chunks), no aqui.
         column.compute_skylight();
-        self.columns.insert(pos, column);
+        self.columns.insert(pos, Box::new(column));
     }
 
     /// Recalcula la **luz de cielo** con propagacion **lateral** (BFS a nivel de
@@ -436,49 +473,150 @@ impl World {
     ///
     /// Devuelve `(cargadas, descargadas)` para que el renderer sepa que mallas
     /// hay que regenerar. No hace nada si el centro no cambio.
-    pub fn update_streaming(&mut self, player_pos: [f32; 3]) -> StreamChange {
-        let center = ChunkPos::new(
+    /// Centro de streaming (chunk del jugador).
+    fn stream_center(player_pos: [f32; 3]) -> ChunkPos {
+        ChunkPos::new(
             (player_pos[0] / CHUNK_SIZE as f32).floor() as i32,
             (player_pos[2] / CHUNK_SIZE as f32).floor() as i32,
-        );
-        if self.last_center == Some(center) {
-            return StreamChange::default();
-        }
-        self.last_center = Some(center);
+        )
+    }
 
-        // Volcar las ediciones pendientes a sus registros ANTES de descargar:
-        // asi una columna editada no pierde nada al salir del radio.
+    /// Descarga lo que sale del radio (volcando antes sus ediciones), cancela
+    /// peticiones que ya no interesan y devuelve `(faltantes, descargadas)`.
+    fn plan_center(&mut self, center: ChunkPos) -> (Vec<ChunkPos>, Vec<ChunkPos>) {
+        // Guardar las ediciones pendientes ANTES de descargar.
         self.sync_modified();
+        let r = self.view_radius;
 
-        // 1. Descargar lo que quede fuera del radio.
         let mut unloaded = Vec::new();
         self.columns.retain(|pos, _| {
-            let inside = (pos.x - center.x).abs() <= self.view_radius
-                && (pos.z - center.z).abs() <= self.view_radius;
+            let inside = (pos.x - center.x).abs() <= r && (pos.z - center.z).abs() <= r;
             if !inside {
                 unloaded.push(*pos);
             }
             inside
         });
+        // Descarta peticiones fuera del radio (su resultado se ignorara igual).
+        self.pending
+            .retain(|pos, _| (pos.x - center.x).abs() <= r && (pos.z - center.z).abs() <= r);
 
-        // 2. Cargar lo que falte.
-        let mut loaded = Vec::new();
-        for dz in -self.view_radius..=self.view_radius {
-            for dx in -self.view_radius..=self.view_radius {
+        let mut missing = Vec::new();
+        for dz in -r..=r {
+            for dx in -r..=r {
                 let pos = ChunkPos::new(center.x + dx, center.z + dz);
-                if !self.columns.contains_key(&pos) {
-                    self.load_column(pos);
-                    loaded.push(pos);
+                if !self.columns.contains_key(&pos) && !self.pending.contains_key(&pos) {
+                    missing.push(pos);
                 }
             }
         }
+        (missing, unloaded)
+    }
 
+    /// Streaming **sincrono** (tests y usos que necesitan carga inmediata):
+    /// genera las columnas faltantes en el propio hilo.
+    pub fn update_streaming(&mut self, player_pos: [f32; 3]) -> StreamChange {
+        let center = Self::stream_center(player_pos);
+        if self.last_center == Some(center) {
+            return StreamChange::default();
+        }
+        self.last_center = Some(center);
+        let (missing, unloaded) = self.plan_center(center);
+        let mut loaded = Vec::with_capacity(missing.len());
+        for pos in missing {
+            self.load_column(pos);
+            loaded.push(pos);
+        }
         StreamChange { loaded, unloaded }
     }
 
-    /// Devuelve un clon de la columna (para meshearla sin prestar `self`).
+    /// Carga **sincrona forzada** de un area (arranque): cancela las peticiones
+    /// async pendientes y genera todo el area en el hilo actual. Garantiza que el
+    /// area del jugador esta completa antes del primer frame (con streaming async,
+    /// si no, el suelo aun no existe y el jugador cae).
+    pub fn warm_streaming(&mut self, player_pos: [f32; 3]) -> StreamChange {
+        // Descarta lo que haya pedido el streaming async: sus resultados se
+        // ignoraran (ya no estan en `pending`) y aqui lo cargamos todo en sync.
+        self.pending.clear();
+        self.last_center = None;
+        self.update_streaming(player_pos)
+    }
+
+    /// Streaming **asincrono**: planifica y encola la generacion en los workers.
+    /// Las columnas entran en frames posteriores via [`World::poll_generation`].
+    /// El chunk del jugador se genera **ya** para no caer mientras llega el resto.
+    pub fn plan_streaming(&mut self, player_pos: [f32; 3]) -> StreamChange {
+        let center = Self::stream_center(player_pos);
+        if self.last_center == Some(center) {
+            return StreamChange::default();
+        }
+        self.last_center = Some(center);
+        let (missing, unloaded) = self.plan_center(center);
+        self.ensure_scheduler();
+        let mut loaded = Vec::new();
+        for pos in missing {
+            if pos == center {
+                self.load_column(pos);
+                loaded.push(pos);
+            } else {
+                self.request_column(pos);
+            }
+        }
+        StreamChange { loaded, unloaded }
+    }
+
+    /// Recoge columnas generadas por los workers. Valida que la peticion siga
+    /// siendo la vigente (`id`) y que la columna siga dentro del radio; si no,
+    /// descarta el resultado (revisiones / resultados obsoletos).
+    pub fn poll_generation(&mut self) -> Vec<ChunkPos> {
+        let results: Vec<GenResult> = match self.scheduler.as_ref() {
+            Some(scheduler) => std::iter::from_fn(|| scheduler.try_recv()).collect(),
+            None => Vec::new(),
+        };
+        let mut loaded = Vec::new();
+        for result in results {
+            if self.pending.get(&result.pos) != Some(&result.id) {
+                continue; // obsoleto (se pidio otra vez o ya no interesa)
+            }
+            self.pending.remove(&result.pos);
+            let inside = self.last_center.is_none_or(|c| {
+                (result.pos.x - c.x).abs() <= self.view_radius
+                    && (result.pos.z - c.z).abs() <= self.view_radius
+            });
+            if !inside || self.columns.contains_key(&result.pos) {
+                continue;
+            }
+            let mut column = result.column;
+            if let Some(record) = self.modified.get(&result.pos) {
+                apply_record(&mut column, record);
+            }
+            column.compute_skylight();
+            self.columns.insert(result.pos, column);
+            loaded.push(result.pos);
+        }
+        loaded
+    }
+
+    /// Crea el pool de generacion la primera vez que se pide streaming async.
+    fn ensure_scheduler(&mut self) {
+        if self.scheduler.is_none() {
+            self.scheduler = Some(TerrainScheduler::new(Arc::clone(&self.generator), 2));
+        }
+    }
+
+    /// Encola la generacion de una columna con un id nuevo.
+    fn request_column(&mut self, pos: ChunkPos) {
+        let id = self.next_request;
+        self.next_request += 1;
+        if let Some(scheduler) = self.scheduler.as_ref()
+            && scheduler.request(id, pos)
+        {
+            self.pending.insert(pos, id);
+        }
+    }
+
+    /// Devuelve la columna (para meshearla sin prestar `self`).
     pub fn column(&self, pos: ChunkPos) -> Option<&Column> {
-        self.columns.get(&pos)
+        self.columns.get(&pos).map(std::convert::AsRef::as_ref)
     }
 
     /// Reconstruye los registros persistentes de las columnas cargadas
@@ -697,6 +835,44 @@ impl StreamChange {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn el_warm_streaming_carga_el_radio_completo_en_sync() {
+        let mut world = World::new(7, 4, vec![]);
+        let change = world.warm_streaming([0.0, 64.0, 0.0]);
+        assert_eq!(change.loaded.len(), 81, "deberia cargar 9x9 columnas");
+        assert_eq!(world.loaded_positions().count(), 81);
+        // El suelo del spawn es solido y esta posado en un y razonable.
+        assert!(world.is_solid([0, 60, 0]) || world.is_solid([0, 70, 0]));
+    }
+
+    #[test]
+    fn la_fisica_trata_lo_no_cargado_como_solido() {
+        let mut world = World::new(7, 1, vec![]);
+        world.warm_streaming([0.0, 64.0, 0.0]);
+        // Coordenada muy lejana: columna no cargada.
+        let lejos = [9999, 32, 9999];
+        assert!(!world.is_column_loaded(lejos));
+        // Para fisica es un muro (no se cae); para posar/meshing es aire.
+        assert!(world.is_solid_or_unloaded(lejos));
+        assert!(!world.is_solid(lejos));
+    }
+
+    #[test]
+    fn el_streaming_asincrono_carga_columnas() {
+        let mut world = World::new(7, 4, vec![]);
+        world.plan_streaming([0.0, 64.0, 0.0]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while world.loaded_positions().count() < 81 && std::time::Instant::now() < deadline {
+            world.poll_generation();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(
+            world.loaded_positions().count(),
+            81,
+            "no se cargaron las 81 columnas por streaming asincrono"
+        );
+    }
 
     #[test]
     fn cargar_y_editar_en_cualquier_columna() {

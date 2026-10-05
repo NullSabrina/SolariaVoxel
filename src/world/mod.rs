@@ -21,6 +21,7 @@ pub mod raycast;
 pub mod recipe;
 pub mod save;
 pub mod store;
+pub mod streaming;
 pub mod terrain;
 pub mod water;
 
