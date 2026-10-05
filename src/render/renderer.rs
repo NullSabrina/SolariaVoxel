@@ -12,9 +12,10 @@
 //! 3. Adquirir textura, render pass (limpiar + dibujar mallas + resaltado) y
 //!    presentar.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;
+use std::time::Instant;
 
 use winit::window::Window;
 
@@ -24,8 +25,8 @@ use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
 use crate::world::{
-    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, StreamChange, World, greedy,
-    raycast,
+    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, StreamChange, WORLD_HEIGHT,
+    World, greedy, raycast,
 };
 
 /// Errores que pueden ocurrir al inicializar el renderer.
@@ -75,6 +76,11 @@ const FOG_START: f32 = 40.0;
 /// Distancia (bloques) a la que la niebla es total. Coincide con el borde del
 /// area cargada (~64 bloques en los ejes), asi que lo funde con el cielo.
 const FOG_END: f32 = 64.0;
+
+/// Presupuesto de meshing por frame, en milisegundos. Al descubrir chunks se
+/// encolan las columnas y se meshean a este ritmo en lugar de todas de golpe: el
+/// pico de ~40 ms por cruce se reparte entre varios frames y no hay tiron.
+const MESH_BUDGET_MS: f32 = 6.0;
 
 /// Columnas ya cargadas cuyas mallas hay que reconstruir tras un cambio de
 /// streaming: las **colindantes** de cada columna cargada o descargada, en el
@@ -128,6 +134,9 @@ pub struct Renderer {
     world: World,
     /// Mallas por columna: se recrean al entrar/salir columnas del radio.
     meshes: HashMap<ChunkPos, Box<ColumnMeshes>>,
+    /// Columnas pendientes de (re)meshear. Se van vaciando con un presupuesto de
+    /// tiempo por frame para no dar tirones al descubrir chunks.
+    mesh_queue: VecDeque<ChunkPos>,
 
     clear_color: wgpu::Color,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
@@ -209,6 +218,7 @@ impl Renderer {
             highlight_mesh: None,
             world,
             meshes: HashMap::new(),
+            mesh_queue: VecDeque::new(),
             clear_color: sky_color(),
             day_factor: 1.0,
         };
@@ -284,31 +294,59 @@ impl Renderer {
         // recomputamos (region afectada) antes de meshear.
         self.world.recompute_skylight(&dirty);
         self.world.recompute_block_light();
-        // Liberar mallas de columnas descargadas.
+        // Liberar mallas de columnas descargadas (y sacarlas de la cola).
         for pos in &change.unloaded {
             self.meshes.remove(pos);
+            self.mesh_queue.retain(|p| p != pos);
         }
-        // Construir mallas de columnas nuevas.
-        for pos in &change.loaded {
-            let meshes = self.build_column_meshes(*pos);
-            self.meshes.insert(*pos, Box::new(meshes));
+        // Encolar las columnas nuevas y sus vecinas de borde; se meshean
+        // repartidas entre frames (`pump_meshing`), empezando por las cercanas.
+        let mut to_queue: Vec<ChunkPos> = change.loaded.clone();
+        for n in columns_to_remesh(&change, |p| self.world.is_loaded(p)) {
+            if !to_queue.contains(&n) {
+                to_queue.push(n);
+            }
         }
-        // Reconstruir vecinas afectadas (las propias cargadas ya se hicieron).
-        let to_remesh = {
-            let loaded = &self.world;
-            columns_to_remesh(&change, |p| loaded.is_loaded(p))
-        };
-        for pos in to_remesh {
-            let meshes = self.build_column_meshes(pos);
-            self.meshes.insert(pos, Box::new(meshes));
+        let center = ChunkPos::new(
+            (player_pos.x / CHUNK_SIZE as f32).floor() as i32,
+            (player_pos.z / CHUNK_SIZE as f32).floor() as i32,
+        );
+        to_queue.sort_by_key(|p| (p.x - center.x).abs() + (p.z - center.z).abs());
+        for pos in to_queue {
+            self.queue_mesh(pos);
         }
         if !change.loaded.is_empty() || !change.unloaded.is_empty() {
             println!(
-                "[world] streaming: +{} -{} columnas ({} cargadas)",
+                "[world] streaming: +{} -{} columnas ({} cargadas, {} por meshear)",
                 change.loaded.len(),
                 change.unloaded.len(),
-                self.meshes.len()
+                self.world.loaded_positions().count(),
+                self.mesh_queue.len(),
             );
+        }
+    }
+
+    /// Encola una columna para (re)meshear, si esta cargada y no esta ya en cola.
+    fn queue_mesh(&mut self, pos: ChunkPos) {
+        if self.world.is_loaded(pos) && !self.mesh_queue.contains(&pos) {
+            self.mesh_queue.push_back(pos);
+        }
+    }
+
+    /// Meshea columnas de la cola hasta agotar un presupuesto de tiempo. Meshea
+    /// **al menos una** para garantir progreso. Asi el coste de descubrir chunks
+    /// se reparte entre frames y no produce un tiron.
+    fn pump_meshing(&mut self, budget_ms: f32) {
+        let start = Instant::now();
+        while let Some(pos) = self.mesh_queue.pop_front() {
+            if !self.world.is_loaded(pos) {
+                continue;
+            }
+            let meshes = self.build_column_meshes(pos);
+            self.meshes.insert(pos, Box::new(meshes));
+            if start.elapsed().as_secs_f32() * 1000.0 >= budget_ms {
+                break;
+            }
         }
     }
 
@@ -320,14 +358,34 @@ impl Renderer {
         let base_x = pos.x * CHUNK_SIZE as i32;
         let base_z = pos.z * CHUNK_SIZE as i32;
 
-        // Consulta de bloque: recibe coordenadas **locales** de la columna (que
-        // pueden salirse a -1 o 16) y devuelve el bloque del mundo en ese punto,
-        // mirando la columna vecina si hace falta.
-        let query =
-            |x: i32, y: i32, z: i32| -> Block { self.world.get_block([base_x + x, y, base_z + z]) };
+        let Some(column) = self.world.column(pos) else {
+            return std::array::from_fn(|_| None);
+        };
+        // La gran mayoria de consultas caen **dentro** de la columna (lectura
+        // directa, sin HashMap ni `div_euclid`); solo los bordes (-1 / 16) miran
+        // el chunk vecino. Era el otro gran coste de meshear.
+        let in_col = |x: i32, y: i32, z: i32| {
+            (0..CHUNK_SIZE as i32).contains(&x)
+                && (0..CHUNK_SIZE as i32).contains(&z)
+                && (0..WORLD_HEIGHT as i32).contains(&y)
+        };
+        let query = |x: i32, y: i32, z: i32| -> Block {
+            if in_col(x, y, z) {
+                column.get_or_air(x, y, z)
+            } else {
+                self.world.get_block([base_x + x, y, base_z + z])
+            }
+        };
         let light = |x: i32, y: i32, z: i32| -> (u8, u8) {
-            let w = [base_x + x, y, base_z + z];
-            (self.world.sky_light_at(w), self.world.block_light_at(w))
+            if in_col(x, y, z) {
+                (
+                    column.light_or_zero(x, y, z),
+                    column.block_light_or_zero(x, y, z),
+                )
+            } else {
+                let w = [base_x + x, y, base_z + z];
+                (self.world.sky_light_at(w), self.world.block_light_at(w))
+            }
         };
 
         let mut out: ColumnMeshes = std::array::from_fn(|_| None);
@@ -470,6 +528,10 @@ impl Renderer {
 
     /// Dibuja y presenta un frame.
     pub fn render(&mut self, view_projection: &Mat4, camera_pos: Vec3) {
+        // Antes de dibujar, avanzamos el meshing pendiente con un presupuesto de
+        // tiempo para no dar tirones al descubrir chunks.
+        self.pump_meshing(MESH_BUDGET_MS);
+
         let fog_color = [
             self.clear_color.r as f32,
             self.clear_color.g as f32,

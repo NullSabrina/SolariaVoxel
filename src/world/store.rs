@@ -621,4 +621,66 @@ mod tests {
         world.recompute_block_light();
         println!("recompute_block_light: {:?}", t.elapsed());
     }
+
+    #[test]
+    fn bench_cruce_de_chunk() {
+        use super::super::greedy::greedy_section;
+        let mut world = World::new(13_371, 4, vec![]);
+        world.update_streaming([8.0, 74.0, 20.0]);
+        let all: Vec<ChunkPos> = world.loaded_positions().collect();
+        world.recompute_skylight(&all);
+        world.recompute_block_light();
+
+        // Cruce de chunk: el centro pasa a (1,1) -> entran/salen columnas.
+        let t = std::time::Instant::now();
+        let change = world.update_streaming([24.0, 74.0, 20.0]);
+        println!(
+            "update_streaming (gen): {:?} (+{} -{})",
+            t.elapsed(),
+            change.loaded.len(),
+            change.unloaded.len()
+        );
+
+        // Columnas a re-meshear (dirty para luz): loaded + anillo 3x3.
+        let mut dirty: Vec<ChunkPos> = change.loaded.clone();
+        for pos in change.loaded.iter().chain(change.unloaded.iter()) {
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+                    if world.is_loaded(n) && !dirty.contains(&n) {
+                        dirty.push(n);
+                    }
+                }
+            }
+        }
+        let t = std::time::Instant::now();
+        world.recompute_skylight(&dirty);
+        println!("skylight (region {} col): {:?}", dirty.len(), t.elapsed());
+        let t = std::time::Instant::now();
+        world.recompute_block_light();
+        println!("block_light: {:?}", t.elapsed());
+
+        // Meshing aproximado: greedy de las secciones no vacias de las columnas
+        // a re-meshear (sin GPU).
+        let t = std::time::Instant::now();
+        let mut passes = 0;
+        for pos in &dirty {
+            let Some(column) = world.column(*pos) else {
+                continue;
+            };
+            for section in 0..super::super::chunk::SECTION_COUNT {
+                if column.section_is_empty(section) {
+                    continue;
+                }
+                let _ = greedy_section(column, section, [0.0; 3]);
+                passes += 1;
+            }
+        }
+        println!(
+            "greedy ({} secciones, {} col): {:?}",
+            passes,
+            dirty.len(),
+            t.elapsed()
+        );
+    }
 }

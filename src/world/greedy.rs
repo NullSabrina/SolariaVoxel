@@ -120,16 +120,17 @@ fn greedy_range(
         };
         let v_hi = v_range.1 - v_range.0;
 
-        for c in layers.0..layers.1 {
-            // Mascara 2D: `u` en 0..16 y `v` en 0..v_hi (que para una columna
-            // entera puede ser 384). La guardamos como `Vec<Vec<..>>` porque el
-            // alto cambia; para el caso por secciones (16) es una 16x16 normal.
-            let mut mask: Vec<Vec<Option<FaceKey>>> = vec![vec![None; v_hi]; CHUNK_SIZE];
+        // Mascara 2D **plana y reutilizada** entre capas: una sola reserva por
+        // cara (antes se reservaba un `Vec<Vec>` por capa, miles de asignaciones
+        // por seccion y el grueso del coste de meshear). `idx(u, v) = u*v_hi+v`.
+        let mut mask: Vec<Option<FaceKey>> = vec![None; CHUNK_SIZE * v_hi];
 
-            for (v, _) in (0..v_hi).enumerate() {
+        for c in layers.0..layers.1 {
+            mask.fill(None);
+            for v in 0..v_hi {
                 let world_v = v_range.0 + v;
-                for (u, u_mask_col) in mask.iter_mut().enumerate() {
-                    u_mask_col[v] = mask_value(query, light, face, u, world_v, c);
+                for u in 0..CHUNK_SIZE {
+                    mask[u * v_hi + v] = mask_value(query, light, face, u, world_v, c);
                 }
             }
 
@@ -138,21 +139,21 @@ fn greedy_range(
             while v < v_hi {
                 let mut u = 0;
                 while u < CHUNK_SIZE {
-                    let Some(key) = mask[u][v] else {
+                    let Some(key) = mask[u * v_hi + v] else {
                         u += 1;
                         continue;
                     };
 
                     // Ancho: cuanto se repite `key` hacia +u.
                     let mut width = 1;
-                    while u + width < CHUNK_SIZE && mask[u + width][v] == Some(key) {
+                    while u + width < CHUNK_SIZE && mask[(u + width) * v_hi + v] == Some(key) {
                         width += 1;
                     }
                     // Alto: cuantas filas completas se repiten.
                     let mut height = 1;
                     'outer: while v + height < v_hi {
                         for du in 0..width {
-                            if mask[u + du][v + height] != Some(key) {
+                            if mask[(u + du) * v_hi + (v + height)] != Some(key) {
                                 break 'outer;
                             }
                         }
@@ -176,7 +177,7 @@ fn greedy_range(
 
                     for dv in 0..height {
                         for du in 0..width {
-                            mask[u + du][v + dv] = None;
+                            mask[(u + du) * v_hi + (v + dv)] = None;
                         }
                     }
 

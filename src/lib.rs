@@ -10,20 +10,22 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.5 — Cuevas + luz de cielo lateral
+//! ## Estado actual: v0.7.6 — Optimizacion del streaming (sin tirones de FPS)
 //!
-//! * **Cuevas**: ruido **Perlin 3D** por bloque; donde su valor cruza un umbral
-//!   (iso-superficie) se talla el terreno, formando tuneles y salas. No perfora
-//!   la corteza (2 bloques bajo la superficie) ni el suelo. `GENERATOR_VERSION` 4.
-//! * **Luz de cielo con propagacion lateral** (BFS a nivel de mundo): el aire bajo
-//!   un techo (cuevas, voladizos) se ilumina de lado con atenuacion, en vez de
-//!   quedar a oscuras de golpe. Recalculada por **region** (dirty + anillo 3x3).
-//! * Sobre v0.7.4: culling (back-face + frustum), niebla, luz de bloque
-//!   cross-chunk, FPS en el titulo. v0.7.3: re-mesheo de vecinas. v0.7.2: colision
-//!   por huella + auto-escalon. v0.7.1: altura por bloque. v0.7.0: biomas (Worley).
+//! * El meshing de las columnas nuevas ya no se hace de golpe en un frame: se
+//!   **encola** y se procesa con un **presupuesto de 6 ms/frame** (empezando por
+//!   las cercanas). El pico de ~80 ms al descubrir chunks baja a ~6 ms.
+//! * **Greedy mas rapido**: la mascara 2D es plana y se reutiliza entre capas
+//!   (antes reservaba un `Vec<Vec>` por capa) y las consultas de bloque dentro de
+//!   la columna se leen directo, sin `HashMap`. Meshing ~55 -> ~37 ms.
+//! * **Luz de cielo base** con `fill` + borrar solo lo subterraneo (~10 ms).
+//! * Sobre v0.7.5: cuevas (Perlin 3D) + luz de cielo lateral. v0.7.4: culling +
+//!   niebla. v0.7.3: re-mesheo de vecinas. v0.7.2: colision por huella +
+//!   auto-escalon. v0.7.1: altura por bloque. v0.7.0: biomas (Worley).
 //!
-//! Siguiente (v0.7.x del roadmap): **oceanos** (v0.7.6). Pendiente tambien el
-//! **palo 3D** del `.bbmodel` y la **antorcha de pared**.
+//! Siguiente (v0.7.x del roadmap): **oceanos** (v0.7.7): nivel del mar, agua,
+//! playas y un pase de transparencia. Pendiente tambien el **palo 3D** del
+//! `.bbmodel` y la **antorcha de pared**.
 //!
 //! ## Organizacion del codigo
 //!

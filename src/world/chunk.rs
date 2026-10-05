@@ -124,26 +124,29 @@ impl Column {
     /// bloque (antorchas) llegan en v0.6.1/v0.6.2. Por eso el metodo esta
     /// separado: mas adelante lo sustituimos sin tocar el resto.
     pub fn compute_skylight(&mut self) {
+        // Por defecto, todo a cielo abierto (15): es un `memset`. Solo hay que
+        // **borrar** la parte bajo el primer solido, que son ~70 celdas por
+        // columna en vez de marcar las ~312 abiertas. Mucho menos trabajo.
+        self.light.fill(MAX_LIGHT);
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                // `open` sigue siendo true mientras no encontremos solido.
-                let mut open = true;
-                let mut surface = 0u16;
+                // Primer solido de arriba hacia abajo.
                 let mut y = WORLD_HEIGHT;
                 while y > 0 {
                     y -= 1;
-                    let block = self.get(x, y, z);
-                    if block.is_solid() {
-                        if open {
-                            // Primer solido de arriba: es la superficie.
-                            surface = y as u16;
-                        }
-                        open = false;
+                    if self.get(x, y, z).is_solid() {
+                        break;
                     }
-                    let level = if open { MAX_LIGHT } else { 0 };
-                    self.set_light(x, y, z, level);
                 }
-                self.surface[z * CHUNK_SIZE + x] = surface;
+                // `y` es el primer solido (o 0 si la columna esta vacia).
+                if self.get(x, y, z).is_solid() {
+                    for yy in 0..=y {
+                        self.light[Self::light_index(x, yy, z)] = 0;
+                    }
+                    self.surface[z * CHUNK_SIZE + x] = y as u16;
+                } else {
+                    self.surface[z * CHUNK_SIZE + x] = 0;
+                }
             }
         }
     }

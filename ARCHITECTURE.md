@@ -76,11 +76,15 @@ about_to_wait() -> window.request_redraw()   (bucle continuo)
 Puntos clave:
 
 - **Streaming**: `World::update_streaming` devuelve un `StreamChange` con las
-  columnas que entran y salen. Se construyen/liberan las mallas de esas columnas
-  **y las de sus vecinas de borde** (`columns_to_remesh`): las caras de borde
-  dependen de si el vecino esta cargado, asi que al entrar/salir una columna hay
-  que re-meshear las colindantes (si no, quedan muros oscuros o huecos). No se
-  regenera el mundo entero.
+  columnas que entran y salen. Se encolan las mallas de esas columnas **y las de
+  sus vecinas de borde** (`columns_to_remesh`) y se meshean con un **presupuesto
+  de tiempo por frame** (`pump_meshing`, ~6 ms), empezando por las cercanas al
+  jugador: asi descubrir chunks no da un tiron (antes se mesheaba todo de golpe y
+  el pico era ~80 ms). Las caras de borde dependen de si el vecino esta cargado,
+  por eso al entrar/salir una columna hay que re-meshear las colindantes.
+- **Meshing rapido**: el greedy usa una mascara plana reutilizada y lee los
+  bloques de la propia columna directamente (solo los bordes van al chunk vecino),
+  evitando `HashMap` y reservas por capa.
 - **Una malla por (columna, seccion)**: una columna tiene 24 secciones; la
   mayoria estan vacias y se **saltan sin meshear** (`World::section_is_empty`);
   solo se guardan las que tienen geometria (`ColumnMeshes = [Option<Mesh>; 24]`).

@@ -998,6 +998,55 @@ benchmark. 114 tests.
 **Sin desplazamiento de roadmap.** A diferencia de las ultimas versiones, este SI
 era el hito `v0.7.5`: **oceanos** sigue en **v0.7.6**.
 
+### 2026-10-05 (v0.7.6) — Optimizacion del streaming (fin de los tirones de FPS)
+
+**Decision.** Eliminar el tiron de FPS al descubrir chunks, **midiendo** donde se
+iba el frame antes de tocar nada (un benchmark que simula un cruce de chunk):
+
+| fase | antes |
+| --- | --- |
+| generar 9 columnas | ~8 ms |
+| luz de cielo (region) | ~11.5 ms |
+| luz de bloque | ~4 ms |
+| **meshing (greedy)** | **~55 ms** |
+
+Total ~80 ms en el frame del cruce. El culpable era el **meshing**, no la
+generacion ni la luz. Tres cambios:
+
+1. **Greedy mas rapido.** La mascara 2D se reservaba como `Vec<Vec<Option>>`
+   **dentro del bucle de capas** (miles de asignaciones por seccion). Pasa a un
+   `Vec` **plano reutilizado** entre capas. 55 -> 37 ms.
+2. **Consultas de bloque sin `HashMap`.** El mesher consultaba el mundo
+   (`get_block` con `div_euclid` + `HashMap`) por cada bloque. Ahora lee la propia
+   columna directamente y solo acude al vecino en los bordes (-1/16).
+3. **Cola de meshing con presupuesto por frame.** En vez de meshear las ~27
+   columnas afectadas de golpe, se **encolan** (las cercanas al jugador primero) y
+   `pump_meshing` las procesa gastando como mucho **6 ms por frame**. El coste se
+   reparte entre varios frames; no hay pico. La calidad es la misma (solo deja de
+   llegar todo en el mismo frame; el area nueva esta a ~64 bloques, tras la
+   niebla).
+
+Ademas, `compute_skylight` pasa a `fill(15)` + borrar solo bajo el primer solido
+(~70 celdas/columna) en lugar de escribir las 384 capas: ~11.5 -> ~9.4 ms.
+
+**Medido.** FPS estable a ~640 en el titulo tras drenar la cola (antes se veia
+caer durante el pico). Los benchmarks `bench_*` quedan en `store.rs` como
+evidencia.
+
+**Alternativas descartadas.** (a) Mover generacion/meshing a hilos: la solucion
+"de libro", pero exige compartir el `World` y subir mallas desde hilos; mas
+maquinaria de la necesaria ahora. (b) Bajar el radio de carga: bajaría la
+calidad. (c) Bajar el presupuesto de meshing: pop-in visible; 6 ms es el punto
+donde no se nota.
+
+**Consecuencia.** `Renderer.mesh_queue` + `queue_mesh`/`pump_meshing`;
+`MESH_BUDGET_MS`. Greedy con mascara plana. `compute_skylight` optimizado. 115
+tests. `GENERATOR_VERSION` sigue en 4.
+
+**Desplazamiento de roadmap.** Este fix consume el numero `v0.7.6`, que la guia
+reservaba para oceanos: **oceanos pasa a v0.7.7**. No se adelanta nada; solo el
+arreglo que pidio el usuario tiene su propia version.
+
 
 
 
