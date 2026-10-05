@@ -93,9 +93,10 @@ pub trait FluidGrid {
 /// Los 4 vecinos horizontales.
 const H_DIRS: [[i32; 3]; 4] = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
 
-/// ¿El agua que fluye en `p` toca **dos o mas fuentes** ortogonales? Si es asi,
-/// pasa a `Fluid::Source`: es la regla clasica del cuadrado 2x2 (apoyar agua
-/// junto a un manantial la fija como manantial permanente).
+/// ¿El agua que fluye en `p` toca **dos o mas fuentes** ortogonales? Entonces
+/// pasa a `Fluid::Source`: es la regla clasica del 2x2 (apoyar agua junto a un
+/// manantial la fija). Exigir 2 fuentes evita que un charco normal se convierta
+/// en manantial infinito (y preserva la conservacion en modo finito).
 pub fn check_2x2_source<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
     if !matches!(grid.fluid(p), Fluid::Flow(_)) {
         return false;
@@ -467,21 +468,20 @@ mod tests {
     }
 
     #[test]
-    fn un_flujo_junto_a_dos_fuentes_se_vuelve_fuente() {
-        // Esquinas de un 2x2: tres fuentes y un flujo; el flujo se fija.
+    fn tres_fuentes_y_un_flujo_forman_un_manantial_2x2() {
+        // El prompt: 3 bloques de agua + 1 nuevo forman una fuente 2x2.
         let mut g = TestGrid::new(0);
         g.set([0, 1, 0], Fluid::Source);
         g.set([1, 1, 0], Fluid::Source);
         g.set([0, 1, 1], Fluid::Source);
         g.set([1, 1, 1], Fluid::Flow(MAX_LEVEL));
-        for _ in 0..4 {
-            tick_all(&mut g);
-        }
-        assert_eq!(
-            g.fluid([1, 1, 1]),
-            Fluid::Source,
-            "el flujo con dos fuentes contiguas deberia volverse fuente"
+        assert!(
+            check_2x2_source(&mut g, [1, 1, 1]),
+            "el bloque nuevo deberia completar el manantial"
         );
+        for c in [[0, 1, 0], [1, 1, 0], [0, 1, 1], [1, 1, 1]] {
+            assert_eq!(g.fluid(c), Fluid::Source, "celda {c:?} no es fuente");
+        }
     }
 
     #[test]

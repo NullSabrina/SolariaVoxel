@@ -192,6 +192,81 @@ fn light_pair(column: &Column, x: usize, y: usize, z: usize) -> (f32, f32) {
 /// descarta el alfa bajo (cutout), asi que solo se ve la llama y el palo, no el
 /// fondo transparente.
 ///
+/// Emite una caja con las 6 caras (ambas orientaciones, para que el culling no
+/// oculte ninguna) mapeando `uv` en cada cara. Se usa para el palo del modelo.
+#[allow(clippy::too_many_arguments)]
+fn emit_box(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    min: [f32; 3],
+    max: [f32; 3],
+    uv: [f32; 4],
+    sky: f32,
+    block_light: f32,
+    tile: u32,
+) {
+    let [u0, v0, u1, v1] = uv;
+    let faces: [[[f32; 3]; 4]; 6] = [
+        [
+            [min[0], min[1], min[2]],
+            [min[0], min[1], max[2]],
+            [min[0], max[1], max[2]],
+            [min[0], max[1], min[2]],
+        ],
+        [
+            [max[0], min[1], min[2]],
+            [max[0], max[1], min[2]],
+            [max[0], max[1], max[2]],
+            [max[0], min[1], max[2]],
+        ],
+        [
+            [min[0], min[1], min[2]],
+            [max[0], min[1], min[2]],
+            [max[0], min[1], max[2]],
+            [min[0], min[1], max[2]],
+        ],
+        [
+            [min[0], max[1], min[2]],
+            [min[0], max[1], max[2]],
+            [max[0], max[1], max[2]],
+            [max[0], max[1], min[2]],
+        ],
+        [
+            [min[0], min[1], min[2]],
+            [min[0], max[1], min[2]],
+            [max[0], max[1], min[2]],
+            [max[0], min[1], min[2]],
+        ],
+        [
+            [min[0], min[1], max[2]],
+            [max[0], min[1], max[2]],
+            [max[0], max[1], max[2]],
+            [min[0], max[1], max[2]],
+        ],
+    ];
+    let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
+    for face in faces {
+        let base = vertices.len() as u32;
+        for (corner, uv) in face.iter().zip(uvs.iter()) {
+            vertices.push(Vertex::with_light(*corner, *uv, sky, block_light, tile));
+        }
+        indices.extend_from_slice(&[
+            base,
+            base + 1,
+            base + 2,
+            base,
+            base + 2,
+            base + 3,
+            base,
+            base + 2,
+            base + 1,
+            base,
+            base + 3,
+            base + 2,
+        ]);
+    }
+}
+
 /// El pipeline dibuja con *back-face culling*, asi que cada plano se emite con
 /// las **dos orientaciones** (ambos windings comparten los 4 vertices y solo
 /// cambian los indices): la cruz se ve por delante y por detras.
@@ -246,6 +321,23 @@ pub(crate) fn emit_torch_cross(
             base + 2,
         ]);
     }
+
+    // Palo central del modelo (`assets/models/solaria_torch.bbmodel`: cubo
+    // 7..9 x 0..10 x 7..9). Se infla un pelin para que no sea coplanar con las
+    // tablas cruzadas (evita z-fighting) y se mapea solo la franja del palo del
+    // tile, para no repetir la llama.
+    let (sx0, sx1) = (x0 + 7.0 / 16.0 - 0.02, x0 + 9.0 / 16.0 + 0.02);
+    let (sz0, sz1) = (z0 + 7.0 / 16.0 - 0.02, z0 + 9.0 / 16.0 + 0.02);
+    emit_box(
+        vertices,
+        indices,
+        [sx0, y0, sz0],
+        [sx1, y0 + 10.0 / 16.0, sz1],
+        [7.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0, 1.0],
+        sky,
+        block_light,
+        tile,
+    );
 }
 
 #[cfg(test)]
@@ -299,14 +391,14 @@ mod tests {
     }
 
     #[test]
-    fn la_antorcha_emite_dos_quads_cruzados() {
+    fn la_antorcha_emite_la_cruz_mas_el_palo_del_modelo() {
         let mut column = Column::empty();
         column.set(8, 8, 8, Block::Torch);
         let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
         assert_eq!(sections.len(), 1);
-        // Dos planos x 4 vertices; cada plano con las dos orientaciones (4 tri).
-        assert_eq!(sections[0].vertices.len(), 8);
-        assert_eq!(sections[0].indices.len(), 24);
+        // 2 quads cruzados (8 verts) + el palo del .bbmodel: 6 caras x 4 verts.
+        assert_eq!(sections[0].vertices.len(), 8 + 24);
+        assert_eq!(sections[0].indices.len(), 24 + 72);
         // Todas las caras usan el tile de la antorcha.
         assert!(sections[0].vertices.iter().all(|v| v.tile == 8));
         assert!(
@@ -326,7 +418,7 @@ mod tests {
         column.set(9, 8, 8, Block::Torch);
         let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
         let total: usize = sections.iter().map(|s| s.vertices.len()).sum();
-        // 6 caras de la piedra (24) + 2 quads de la antorcha (8).
-        assert_eq!(total, 32);
+        // 6 caras de la piedra (24) + cruz y palo de la antorcha (32).
+        assert_eq!(total, 24 + 32);
     }
 }

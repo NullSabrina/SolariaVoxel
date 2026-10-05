@@ -1468,6 +1468,39 @@ agua, guarda `start: Instant` y pasa `time`). 161 tests; clippy limpio. El agua
 del oceano (nivel 8) se ve igual que antes; las rampas aparecen en flujos y
 bordes de nivel.
 
+### 2026-10-05 (v0.8.9) — Inventario completo (todos los bloques) y antorcha 3D
+
+**Decision.**
+1. **Item system**: `ITEMS` pasa de 9 bloques fijos a la lista **completa** de
+   bloques colocables (16). El inventario es una rejilla de 8 columnas que los
+   muestra todos; la hotbar usa los 9 primeros (`HOTBAR_SLOTS`). Click en el
+   inventario asigna el bloque a la ranura activa (ya existia).
+2. **Antorcha 3D**: el mesher emite ademas del cruce de tablas el **palo
+   central** de `assets/models/solaria_torch.bbmodel` (cubo 7..9 x 0..10 x 7..9),
+   ligeramente inflado para no ser coplanar con las tablas (sin z-fighting) y
+   mapeando solo la franja del palo del tile.
+3. **Agua**: `check_2x2_source` extendida a la regla clasica (flujo con **2+
+   fuentes** ortogonales -> `Source`), que con 3 fuentes + 1 bloque fija el
+   manantial 2x2 sin convertir un charco normal en fuente infinita (conserva la
+   conservacion en modo finito).
+
+**Motivo.** El usuario aviso de que "no salen todos los bloques" (faltaban
+tablones, agua, lava, obsidiana, tierra gruesa, grava, podzol) y pidio usar el
+modelo de antorcha `.bbmodel`.
+
+**Alternativas descartadas.** (a) Convertir los 4 de cualquier 2x2 de agua: un
+unico manantial convertia todo su charco en fuentes (rompia el radio de
+propagacion y la conservacion). (b) Cargar el `.bbmodel` con un parser JSON y
+texturas propias: metia una dependencia (`serde_json`) y un pipeline de texturas
+por modelo; el palo (que es lo que aporta el modelo sobre las tablas cruzadas)
+se modela directo.
+
+**Consecuencia.** `app.rs` (`ITEMS` completo, `inventory_cells` 8 columnas,
+`HOTBAR_SLOTS`); `mesher.rs` (`emit_box` + palo de la antorcha, tests de conteo
+actualizados); `water.rs` (`check_2x2_source` y su test). 161 tests; clippy
+limpio. Backend de terreno/agua del prompt anterior (cache de ruido 2D,
+acuiferos, deteccion de equilibrio) ya venia de v0.8.7/v0.8.8.
+
 ---
 
 ## Plantilla para futuras entradas

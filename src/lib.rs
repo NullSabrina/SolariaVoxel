@@ -10,15 +10,15 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.8 - Agua como liquido continuo
+//! ## Estado actual: v0.8.9 - Inventario completo y antorcha 3D
 //!
-//! * Nuevo `world::fluid_mesher`: el agua se dibuja como **lamina continua**;
-//!   las esquinas del quad superior interpolan `y + nivel/8` (rampa, sin
-//!   escalones) y solo se emiten superficie y caras expuestas.
-//! * Shader propio `water.wgsl`: **UVs animadas** con `time`, mezcla de dos
-//!   muestras, **especular** Blinn-Phong por derivadas y agua mas oscura sin luz.
-//! * Pipeline de agua: `cull_mode: None`, sin escritura de z y bandas alfa.
-//! * Hereda de v0.8.7 (worldgen/fluidos), v0.8.6 (lava, obsidiana).
+//! * El inventario muestra **todos los bloques** (`ITEMS`, rejilla de 8
+//!   columnas): ya salen tablones, agua, lava, obsidiana, tierra gruesa, grava
+//!   y podzol. La hotbar son los 9 primeros.
+//! * La antorcha anade el **palo 3D** de `assets/models/solaria_torch.bbmodel`
+//!   (cubo central) ademas de las dos tablas cruzadas.
+//! * Backend heredado de v0.8.8 (agua continua, fluid_mesher + water.wgsl),
+//!   v0.8.7 (cache de ruido 2D, decoracion, cuevas por densidad) y v0.8.6 (lava).
 //!
 //! Siguiente (Etapa 2): **mobs** (usando `physics`).
 //!

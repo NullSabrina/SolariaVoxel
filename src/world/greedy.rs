@@ -479,8 +479,9 @@ mod tests {
         column.set(8, 8, 8, Block::Torch);
         let (vertices, indices) = greedy_column(&column, [0.0; 3]);
         // Dos planos x 4 vertices; cada plano con las dos orientaciones (4 tri).
-        assert_eq!(vertices.len(), 8, "dos quads cruzados");
-        assert_eq!(indices.len(), 24);
+        // Dos planos cruzados (8) + el palo del modelo .bbmodel (6 caras x 4).
+        assert_eq!(vertices.len(), 8 + 24, "cruz + palo");
+        assert_eq!(indices.len(), 24 + 72);
         assert!(vertices.iter().all(|v| v.tile == 8));
     }
 
@@ -491,7 +492,11 @@ mod tests {
         column.set(8, 8, 8, Block::Stone);
         column.set(9, 8, 8, Block::Torch);
         let (vertices, _) = greedy_column(&column, [0.0; 3]);
-        assert_eq!(vertices.len(), 6 * 4 + 8, "6 caras de piedra + cruz");
+        assert_eq!(
+            vertices.len(),
+            6 * 4 + 32,
+            "6 caras de piedra + cruz y palo"
+        );
     }
 
     #[test]

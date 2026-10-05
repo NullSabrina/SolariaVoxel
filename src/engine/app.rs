@@ -96,21 +96,32 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Bloques disponibles en la barra rapida y en el inventario.
+/// Todos los **bloques colocables**, en el orden del inventario.
 ///
-/// Los tablones NO estan aqui: se obtienen crafteando madera (1) en la mesa.
-/// La mesa SI esta: es la puerta de entrada al crafteo.
-const ITEMS: [crate::world::Block; 9] = [
-    crate::world::Block::Stone,
-    crate::world::Block::Dirt,
+/// El inventario los muestra todos (rejilla de `inventory_cells`); la barra
+/// rapida usa los 9 primeros. Antes solo habia 9 y faltaban tablones, agua,
+/// lava, obsidiana, tierra gruesa, grava y podzol.
+const ITEMS: &[crate::world::Block] = &[
     crate::world::Block::Grass,
+    crate::world::Block::Dirt,
+    crate::world::Block::CoarseDirt,
+    crate::world::Block::Podzol,
     crate::world::Block::Sand,
-    crate::world::Block::Wood,
-    crate::world::Block::CraftingTable,
-    crate::world::Block::Leaves,
+    crate::world::Block::Gravel,
+    crate::world::Block::Stone,
+    crate::world::Block::Obsidian,
     crate::world::Block::Snow,
+    crate::world::Block::Wood,
+    crate::world::Block::Planks,
+    crate::world::Block::Leaves,
+    crate::world::Block::CraftingTable,
     crate::world::Block::Torch,
+    crate::world::Block::Water,
+    crate::world::Block::Lava,
 ];
+
+/// Cuantas ranuras tiene la barra rapida (teclas `1`-`9`).
+const HOTBAR_SLOTS: usize = 9;
 
 /// Escala de la interfaz (pixels de mundo -> pixels de pantalla).
 const UI_SCALE: f32 = 2.0;
@@ -371,12 +382,14 @@ impl App {
             .unwrap_or((1.0, 1.0))
     }
 
-    /// Celdas (rectangulos) del inventario 3x3, centradas en la ventana.
+    /// Celdas (rectangulos) del inventario: una rejilla que contiene **todos**
+    /// los bloques de `ITEMS` (8 columnas), centrada en la ventana.
     fn inventory_cells(&self, win_w: f32, win_h: f32) -> Vec<[f32; 4]> {
         use crate::render::gui;
         let slot = gui::SLOT as f32 * UI_SCALE;
         let gap = 6.0;
-        let (cols, rows) = (3usize, 3usize);
+        let cols = 8usize;
+        let rows = ITEMS.len().div_ceil(cols).max(1);
         let grid_w = cols as f32 * slot + (cols as f32 - 1.0) * gap;
         let grid_h = rows as f32 * slot + (rows as f32 - 1.0) * gap;
         let x0 = (win_w - grid_w) * 0.5;
@@ -489,7 +502,7 @@ impl App {
             }
         }
 
-        // Inventario: rejilla 3x3 con todos los bloques disponibles.
+        // Inventario: rejilla con TODOS los bloques disponibles (ICONOS).
         if self.inventory_open {
             for (cell, item) in self.inventory_cells(win_w, win_h).iter().zip(ITEMS.iter()) {
                 let [cx, cy, cw, ch] = *cell;
@@ -531,7 +544,7 @@ impl App {
         let bar_h = gui::HOTBAR.h as f32 * UI_SCALE;
         let bar_x = ((win_w - bar_w) * 0.5).floor();
         let bar_y = (win_h - bar_h - 8.0).floor();
-        (0..9)
+        (0..HOTBAR_SLOTS)
             .map(|i| {
                 let sx = bar_x + (1.0 + i as f32 * gui::SLOT as f32) * UI_SCALE;
                 let sy = bar_y + UI_SCALE;
@@ -694,7 +707,8 @@ impl ApplicationHandler for App {
         self.seed = seed;
         self.world_header = header;
         // Barra rapida por defecto.
-        self.hotbar = ITEMS;
+        // Barra rapida por defecto: los primeros `HOTBAR_SLOTS` items.
+        self.hotbar = std::array::from_fn(|i| ITEMS[i]);
 
         // Camara FPS: donde la dejo el jugador (guardado completo), o el spawn
         // por defecto. La fisica la posara sobre el terreno antes del primer frame.
