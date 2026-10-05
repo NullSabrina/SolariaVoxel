@@ -10,23 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.12 - Persistencia v4 (columna completa, atomica)
+//! ## Estado actual: v0.8.13 - Guardado en segundo plano (async)
 //!
-//! Primera fase de la auditoria maestra (data correctness):
-//! * `ChunkRecord` guarda **toda la columna** (24 secciones), no solo `y=64..80`:
-//!   las ediciones en cualquier `y` (0..383) sobreviven. `FORMAT_VERSION = 4`
-//!   con migrador v3->v4.
-//! * Guardado **atomico** (`world.vf.tmp` -> `world.vf`, rotando `.bak`) y
-//!   reintentable (`world_saved` solo se marca si la escritura termino bien).
-//! * Registro **perezoso** (dirty set): no se recomprime la columna en cada
-//!   `set_block`, solo al guardar o descargar.
-//! * Al cargar se validan chunks corruptos y **IDs de bloque desconocidos** (no
-//!   se cargan en silencio como aire).
-//! * Highlight: se reutiliza la malla GPU si el bloque apuntado no cambia.
+//! Segunda fase de la auditoria (save asincrono):
+//! * Nuevo `engine::save_worker`: un hilo serializa y escribe el mundo de forma
+//!   atomica; el hilo principal solo pide el guardado y consulta el resultado.
+//! * **Autoguardado** cada 5 min sin bloquear el render, y al cerrar se espera
+//!   (`join`) para no perder el ultimo estado (idempotente).
+//! * Prerequisito del siguiente paso: `TerrainGenerator` es `Send + Sync`
+//!   (`Cell<u32>` -> `AtomicU32`), listo para workers de generacion.
 //!
-//! Hereda de v0.8.11 (agua interactiva, antorcha), v0.8.9 (inventario completo).
+//! Hereda de v0.8.12 (persistencia v4: columna completa, atomica, validada).
 //!
-//! Siguiente (auditoria): streaming asincrono, luz incremental, meshing async.
+//! Siguiente (auditoria): streaming por jobs + revisiones, luz incremental,
+//! meshing async.
 //!
 //! ## Organizacion del codigo
 //!

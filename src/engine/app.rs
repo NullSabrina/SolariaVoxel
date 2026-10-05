@@ -68,6 +68,14 @@ pub struct App {
     world_header: crate::world::WorldHeader,
     /// Evita guardar dos veces (CloseRequested + exiting).
     world_saved: bool,
+    /// Hay un guardado en segundo plano pedido y sin confirmar.
+    save_requested: bool,
+    /// El guardado final ya se hizo (evita el doble cierre CloseRequested+exiting).
+    save_finalized: bool,
+    /// Hilo de guardado en segundo plano.
+    save_worker: Option<super::save_worker::SaveWorker>,
+    /// Acumulador para el autoguardado periodico.
+    autosave_timer: f32,
     /// Marca de tiempo del frame anterior, para calcular el `dt`.
     last_frame: Option<Instant>,
     /// Acumuladores para mostrar los FPS en el titulo de la ventana.
@@ -133,6 +141,10 @@ const WATER_PERIOD: f32 = 0.1;
 /// Celdas de agua procesadas por tick. Si hay mas, se reparten entre ticks: el
 /// agua fluye mas lento pero el juego no se congela.
 const WATER_BUDGET: usize = 8192;
+
+/// Periodo del **autoguardado** en segundo plano (segundos). El mundo se guarda
+/// sin bloquear el render.
+const AUTOSAVE_PERIOD: f32 = 300.0;
 
 /// Indice de ranura para las teclas `1`..`9`.
 fn digit_slot(code: KeyCode) -> Option<usize> {
@@ -208,6 +220,15 @@ impl App {
                     renderer.tick_water(WATER_BUDGET);
                 }
             }
+
+            // Autoguardado en segundo plano (no bloquea el render).
+            self.autosave_timer += dt;
+            if self.autosave_timer >= AUTOSAVE_PERIOD {
+                self.autosave_timer = 0.0;
+                self.save_world();
+            }
+            // Recoge los guardados que hayan terminado.
+            self.poll_save();
         }
 
         // Leemos TODO el input primero, para no mezclar prestamos.
@@ -303,10 +324,10 @@ impl App {
         self.update_selection();
     }
 
-    /// Guarda el mundo a disco (semilla + TODOS los chunks editados). Solo una
-    /// vez por ejecucion.
+    /// Pide un guardado en **segundo plano** (no bloquea el render). Sirve tanto
+    /// para el autoguardado como para el cierre.
     fn save_world(&mut self) {
-        if self.world_saved {
+        if self.save_requested {
             return;
         }
         let Some(renderer) = self.renderer.as_mut() else {
@@ -323,31 +344,53 @@ impl App {
         if let Some(camera) = self.camera.as_ref() {
             save.player_pos = [camera.position.x, camera.position.y, camera.position.z];
         }
-        // Ratio de compresion medio (raw / comprimido) de los chunks.
-        let ratio = if save.chunks.is_empty() {
-            1.0
-        } else {
-            let sum: f32 = save.chunks.values().map(|r| r.compression_ratio()).sum();
-            sum / save.chunks.len() as f32
+        let chunks = save.chunks.len();
+        let requested = match self.save_worker.as_ref() {
+            Some(worker) => worker.request(save, world_path()),
+            None => false,
         };
-        match save.save_to(&world_path()) {
-            Ok(()) => {
-                // Solo cuenta como guardado si la escritura termino bien: si
-                // falla, `exiting()` puede reintentar.
-                self.world_saved = true;
-                let size = std::fs::metadata(world_path())
-                    .map(|m| m.len())
-                    .unwrap_or(0);
-                println!(
-                    "[world] guardado en {:?}: {} chunks editados, {} bytes, LZ4 x{:.1}",
-                    world_path(),
-                    save.chunks.len(),
-                    size,
-                    ratio
-                );
-            }
-            Err(e) => eprintln!("[world] no se pudo guardar (se reintentara): {e}"),
+        if requested {
+            self.save_requested = true;
+            println!("[world] guardado en segundo plano ({chunks} chunks editados)");
+        } else {
+            eprintln!("[world] no se pudo encolar el guardado");
         }
+    }
+
+    /// Recoge los resultados de guardados terminados.
+    fn poll_save(&mut self) {
+        let outcomes: Vec<super::save_worker::SaveOutcome> = match self.save_worker.as_ref() {
+            Some(worker) => std::iter::from_fn(|| worker.try_recv()).collect(),
+            None => Vec::new(),
+        };
+        for outcome in outcomes {
+            self.save_requested = false;
+            match outcome.result {
+                Ok(()) => {
+                    self.world_saved = true;
+                    println!(
+                        "[world] guardado: {} chunks, {} bytes",
+                        outcome.chunks, outcome.bytes
+                    );
+                }
+                // Si fallo, queda reintentable (otro autosave o el cierre).
+                Err(e) => eprintln!("[world] fallo el guardado (se reintentara): {e}"),
+            }
+        }
+    }
+
+    /// Cierre: pide el guardado, **espera** al hilo y recoge el resultado (para
+    /// no perder el ultimo estado). Idempotente (`CloseRequested` + `exiting`).
+    fn finalize_save(&mut self) {
+        if self.save_finalized {
+            return;
+        }
+        self.save_finalized = true;
+        self.save_world();
+        if let Some(worker) = self.save_worker.as_mut() {
+            worker.join();
+        }
+        self.poll_save();
     }
 
     /// Coloca un bloque en el aire contiguo al apuntado (si lo hay y no choca
@@ -757,6 +800,8 @@ impl ApplicationHandler for App {
         }
 
         self.last_frame = Some(Instant::now());
+        // Hilo de guardado en segundo plano.
+        self.save_worker = Some(super::save_worker::SaveWorker::spawn());
         self.window = Some(window);
 
         println!("[engine] click = capturar raton | WASD = andar | Espacio = saltar");
@@ -773,7 +818,7 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => {
                 println!("[engine] cerrando");
-                self.save_world();
+                self.finalize_save();
                 event_loop.exit();
             }
 
@@ -793,7 +838,7 @@ impl ApplicationHandler for App {
                             } else if self.mouse_locked {
                                 self.unlock_mouse();
                             } else {
-                                self.save_world();
+                                self.finalize_save();
                                 event_loop.exit();
                             }
                         }
@@ -998,7 +1043,7 @@ impl ApplicationHandler for App {
     /// Ultimo callback antes de cerrar. Guardamos por si no se paso por
     /// `CloseRequested`/Escape (cierre desde el sistema).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.save_world();
+        self.finalize_save();
     }
 }
 

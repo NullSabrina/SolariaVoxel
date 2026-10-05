@@ -1605,6 +1605,39 @@ conocidos**: el estado de fluidos dinamicos (niveles) aun no se persiste (los
 bloques `Water`/`Lava` si); el guardado sigue sincrono en el hilo principal
 (se abordara en la fase de save asincrono).
 
+### 2026-10-05 (v0.8.13) — Guardado en segundo plano (auditoria P0: async save)
+
+**Decision.** Sacar la serializacion y la E/S de disco del hilo principal:
+
+1. **`engine::save_worker`**: un hilo recibe instantaneas `WorldSave` por canal,
+   las codifica (`bincode`) y las escribe de forma **atomica** (`save_to`, ya de
+   v0.8.12); devuelve un `SaveOutcome` (chunks, bytes, `Result`). El hilo
+   principal no serializa ni toca disco.
+2. **Autoguardado** cada 5 min (`AUTOSAVE_PERIOD`) en `App::update`, y
+   `poll_save()` recoge los resultados. Reintentable si falla.
+3. **Cierre seguro**: `finalize_save` pide el guardado, hace `join()` y recoge el
+   resultado; es **idempotente** (CloseRequested + exiting).
+4. **Prerequisito de streaming**: `TerrainGenerator` pasa de `Cell<u32>` a
+   `AtomicU32` y queda `Send + Sync` (test `el_generador_es_send_y_sync`), listo
+   para compartirse entre workers de generacion.
+
+**Motivo.** El audit pide que el hilo principal nunca comprima/serialice/haga I/O
+pesado. Aunque hoy solo se guardaba al cerrar (donde bloquear es tolerable),
+esto sienta la base del autoguardado y del guardado en partida sin tirones.
+
+**Alternativas descartadas.** (a) Mover tambien la compresion de las columnas
+dirty al worker: requiere enviar bytes crudos y reconstruir registros; se deja
+para cuando haya muchos chunks editados (hoy la compresion de las pocas columnas
+dirty es despreciable). (b) Guardado 100% sin `join` al cerrar: riesgo de perder
+el ultimo estado; se espera.
+
+**Consecuencia.** `engine/save_worker.rs` nuevo; `app.rs` (worker, autoguardado,
+`finalize_save`, `poll_save`); `terrain.rs` (`AtomicU32`). 169 tests; clippy
+`-D warnings` limpio. Verificado en runtime: al cerrar, `world.vf` (6085 bytes) y
+`.bak` rotado, sin errores en stderr. **Limites**: la compresion de columnas
+dirty sigue en el hilo principal; el mundo guarda mientras el hilo carga el
+`WorldSave` completo en memoria (sin streaming incremental de E/S aun).
+
 ---
 
 ## Plantilla para futuras entradas

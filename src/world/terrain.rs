@@ -13,7 +13,7 @@
 //!
 //! Reemplaza la generacion v6 (Worley + Perlin simple). Sube `GENERATOR_VERSION`.
 
-use std::cell::Cell;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin, RidgedMulti};
 
@@ -133,8 +133,10 @@ pub struct TerrainGenerator {
     /// Cuevas 3D.
     caves: CaveSystem,
     seed: u32,
-    /// Contador de evaluaciones de ruido **2D** (solo para el test de cache).
-    noise_calls: Cell<u32>,
+    /// Contador de evaluaciones de ruido **2D** (test de cache). Es atomico
+    /// (`AtomicU32`) en vez de `Cell` para que el generador sea `Send + Sync` y
+    /// pueda compartirse entre workers de generacion.
+    noise_calls: AtomicU32,
 }
 
 impl TerrainGenerator {
@@ -165,7 +167,7 @@ impl TerrainGenerator {
             cave_mask: Perlin::new(mix(8)),
             caves: CaveSystem::new(seed),
             seed,
-            noise_calls: Cell::new(0),
+            noise_calls: AtomicU32::new(0),
         }
     }
 
@@ -177,17 +179,17 @@ impl TerrainGenerator {
     /// Cuenta una evaluacion de ruido 2D (micro-coste; solo para el test).
     #[inline]
     fn bump(&self) {
-        self.noise_calls.set(self.noise_calls.get() + 1);
+        self.noise_calls.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Evaluaciones de ruido 2D desde el ultimo reset.
     pub fn noise_calls(&self) -> u32 {
-        self.noise_calls.get()
+        self.noise_calls.load(Ordering::Relaxed)
     }
 
     /// Reinicia el contador de ruido 2D.
     pub fn reset_noise_calls(&self) {
-        self.noise_calls.set(0);
+        self.noise_calls.store(0, Ordering::Relaxed);
     }
 
     /// Clima de `(x, z)` -> `(temperatura, humedad)` en 0..1.
@@ -623,6 +625,13 @@ pub fn max_height() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn el_generador_es_send_y_sync() {
+        // Prerequisito para generar columnas en hilos de trabajo.
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<TerrainGenerator>();
+    }
 
     #[test]
     fn el_ruido_2d_no_se_llama_por_bloque_y() {

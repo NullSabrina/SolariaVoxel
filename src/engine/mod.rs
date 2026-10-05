@@ -8,6 +8,7 @@
 mod app;
 mod demo;
 mod input;
+mod save_worker;
 mod window;
 
 pub use app::{App, run};
