@@ -37,6 +37,11 @@ pub const PLAYER_HEIGHT: f32 = 1.8;
 /// Radio del jugador en el plano horizontal (lo tratamos como un cilindro).
 pub const PLAYER_RADIUS: f32 = 0.3;
 
+/// Altura maxima que el jugador **sube automaticamente** al caminar contra un
+/// escalon (auto-step). Con terreno por bloque hay escalones de 1 bloque por
+/// todos lados; sin esto el jugador se quedaria clavado en cada subida.
+pub const STEP_HEIGHT: f32 = 1.0;
+
 /// Margen para no "chocar" con el bloque sobre el que estamos de pie: la caja de
 /// colision no incluye exactamente los extremos (pies y cabeza).
 const SKIN: f32 = 1e-3;
@@ -102,11 +107,19 @@ impl PlayerController {
         for _ in 0..substeps {
             let candidate = new_feet + step;
             if self.vertical_velocity <= 0.0 {
-                // Cayendo: miramos si los pies entran en un bloque solido.
-                let probe = Vec3::new(camera.position.x, candidate, camera.position.z);
-                if is_solid(probe) {
-                    // Nos posamos justo encima del bloque.
-                    new_feet = candidate.floor() + 1.0;
+                // Cayendo: miramos la **huella completa**, no solo el centro.
+                // Si el jugador esta apoyado sobre un escalon, su centro puede
+                // quedar sobre la columna vecina (mas baja) y empezar a caer
+                // mientras su caja todavia solapa el bloque del escalon; eso lo
+                // dejaba embebido. Sondear la huella lo posa sobre la superficie
+                // mas alta que sus pies atraviesan.
+                if let Some(surface) = Self::landing_surface(
+                    camera.position.x,
+                    camera.position.z,
+                    candidate,
+                    &is_solid,
+                ) {
+                    new_feet = surface;
                     self.vertical_velocity = 0.0;
                     self.on_ground = true;
                     break;
@@ -114,9 +127,14 @@ impl PlayerController {
                 self.on_ground = false;
                 new_feet = candidate;
             } else {
-                // Subiendo: miramos si la cabeza choca (techo).
-                let head = Vec3::new(camera.position.x, candidate + EYE_HEIGHT, camera.position.z);
-                if is_solid(head) {
+                // Subiendo: miramos si la cabeza choca (techo), tambien con la
+                // huella completa.
+                if Self::ceiling_hits(
+                    camera.position.x,
+                    camera.position.z,
+                    candidate + EYE_HEIGHT,
+                    &is_solid,
+                ) {
                     self.vertical_velocity = 0.0;
                     break;
                 }
@@ -162,6 +180,11 @@ impl PlayerController {
             );
             if !Self::collides(candidate, &is_solid) {
                 camera.position.x = candidate.x;
+            } else if let Some(raised) = Self::try_step_up(candidate, &is_solid) {
+                // Escalon de 1 bloque: subimos ademas de avanzar.
+                camera.position.x = candidate.x;
+                camera.position.y = raised;
+                self.on_ground = true;
             }
         }
         // Eje Z.
@@ -173,9 +196,20 @@ impl PlayerController {
             );
             if !Self::collides(candidate, &is_solid) {
                 camera.position.z = candidate.z;
+            } else if let Some(raised) = Self::try_step_up(candidate, &is_solid) {
+                camera.position.z = candidate.z;
+                camera.position.y = raised;
+                self.on_ground = true;
             }
         }
         camera.update_view();
+    }
+
+    /// Si el movimiento se bloquea por un escalon bajo (`<= STEP_HEIGHT`), devuelve
+    /// la nueva altura del ojo tras subirlo; `None` si no hay hueco arriba.
+    fn try_step_up(pos: Vec3, is_solid: &impl Fn(Vec3) -> bool) -> Option<f32> {
+        let raised = Vec3::new(pos.x, pos.y + STEP_HEIGHT, pos.z);
+        (!Self::collides(raised, is_solid)).then_some(raised.y)
     }
 
     /// ¿La caja del jugador (radio `PLAYER_RADIUS`, alto `PLAYER_HEIGHT`, pies en
@@ -205,37 +239,98 @@ impl PlayerController {
         false
     }
 
-    /// Posa la camara sobre la **superficie** del terreno en su columna `(x, z)`
-    /// (evita quedar atrapado bajo tierra al arrancar).
+    /// Columnas (x0, x1, z0, z1) que cubre la huella del jugador en `(x, z)`.
+    fn footprint_columns(x: f32, z: f32) -> (i32, i32, i32, i32) {
+        let (x0, x1) = (x - PLAYER_RADIUS, x + PLAYER_RADIUS);
+        let (z0, z1) = (z - PLAYER_RADIUS, z + PLAYER_RADIUS);
+        (
+            x0.floor() as i32,
+            x1.floor() as i32,
+            z0.floor() as i32,
+            z1.floor() as i32,
+        )
+    }
+
+    /// Si los pies (candidatos) entran en un bloque solido, devuelve la superficie
+    /// a la que posarlos: el techo del bloque mas alto que la huella atraviesa en
+    /// esa capa. Si no hay nada solido bajo la huella, `None` (sigue cayendo).
+    fn landing_surface(x: f32, z: f32, feet: f32, is_solid: &impl Fn(Vec3) -> bool) -> Option<f32> {
+        let by = feet.floor() as i32;
+        if by < 0 || by >= crate::world::WORLD_HEIGHT as i32 {
+            return None;
+        }
+        let (ix0, ix1, iz0, iz1) = Self::footprint_columns(x, z);
+        let mut encontrado = false;
+        for ix in ix0..=ix1 {
+            for iz in iz0..=iz1 {
+                if is_solid(Vec3::new(ix as f32 + 0.5, by as f32 + 0.5, iz as f32 + 0.5)) {
+                    encontrado = true;
+                }
+            }
+        }
+        encontrado.then(|| (by + 1) as f32)
+    }
+
+    /// ¿Alguna columna de la huella tiene un bloque solido en la capa de `head`?
+    fn ceiling_hits(x: f32, z: f32, head: f32, is_solid: &impl Fn(Vec3) -> bool) -> bool {
+        let by = head.floor() as i32;
+        if by < 0 || by >= crate::world::WORLD_HEIGHT as i32 {
+            return false;
+        }
+        let (ix0, ix1, iz0, iz1) = Self::footprint_columns(x, z);
+        for ix in ix0..=ix1 {
+            for iz in iz0..=iz1 {
+                if is_solid(Vec3::new(ix as f32 + 0.5, by as f32 + 0.5, iz as f32 + 0.5)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Superficie mas alta (techo del bloque solido mas alto) bajo la **huella**
+    /// del jugador, buscando de arriba hacia abajo. `None` si no hay terreno.
+    fn top_surface(x: f32, z: f32, is_solid: &impl Fn(Vec3) -> bool) -> Option<f32> {
+        let (ix0, ix1, iz0, iz1) = Self::footprint_columns(x, z);
+        let mut best: Option<f32> = None;
+        for ix in ix0..=ix1 {
+            for iz in iz0..=iz1 {
+                let mut y = crate::world::WORLD_HEIGHT as i32 - 1;
+                while y >= 0 {
+                    if is_solid(Vec3::new(ix as f32 + 0.5, y as f32 + 0.5, iz as f32 + 0.5)) {
+                        let top = (y + 1) as f32;
+                        best = Some(best.map_or(top, |b: f32| b.max(top)));
+                        break;
+                    }
+                    y -= 1;
+                }
+            }
+        }
+        best
+    }
+
+    /// Posa la camara sobre la **superficie** del terreno bajo su huella `(x, z)`
+    /// (evita quedar atrapado bajo tierra o con parte del cuerpo dentro de un
+    /// escalon vecino al arrancar).
     ///
-    /// Buscamos **de arriba hacia abajo** el primer bloque con aire justo encima:
-    /// ese es el techo del terreno. Empezar desde el fondo seria un error, porque
-    /// lo primero que aparece es piedra en lo profundo y el jugador acabaria
-    /// enterrado dentro del suelo.
+    /// Buscamos de arriba hacia abajo la superficie mas alta que cubre la huella
+    /// del jugador. Mirar solo la columna del centro seria un error: con terreno
+    /// por bloque, el jugador puede aparecer sobre un borde y su caja solaparia
+    /// el bloque del escalon de al lado.
     pub fn settle(&mut self, camera: &mut Camera, is_solid: impl Fn(Vec3) -> bool) {
         let x = camera.position.x;
         let z = camera.position.z;
-        let top = crate::world::WORLD_HEIGHT as f32 - 1.0;
 
-        let mut y = top;
-        while y >= 0.0 {
-            let here = is_solid(Vec3::new(x, y, z));
-            // Superficie = bloque solido con aire encima (o el borde superior).
-            if here {
-                let above = y + 1.0 >= crate::world::WORLD_HEIGHT as f32;
-                if above || !is_solid(Vec3::new(x, y + 1.0, z)) {
-                    camera.position.y = (y + 1.0) + EYE_HEIGHT;
-                    self.vertical_velocity = 0.0;
-                    self.on_ground = true;
-                    camera.update_view();
-                    return;
-                }
-            }
-            y -= 1.0;
+        if let Some(surface) = Self::top_surface(x, z, &is_solid) {
+            camera.position.y = surface + EYE_HEIGHT;
+            self.vertical_velocity = 0.0;
+            self.on_ground = true;
+            camera.update_view();
+            return;
         }
 
-        // Sin terreno solido en esta columna: dejamos la camara alta y que caiga.
-        camera.position.y = top + EYE_HEIGHT;
+        // Sin terreno solido bajo la huella: dejamos la camara alta y que caiga.
+        camera.position.y = crate::world::WORLD_HEIGHT as f32 - 1.0 + EYE_HEIGHT;
         self.vertical_velocity = 0.0;
         self.on_ground = false;
         camera.update_view();
@@ -479,5 +574,116 @@ mod tests {
             "deberia moverse sobre el suelo, x={}",
             camera.position.x
         );
+    }
+
+    #[test]
+    fn sube_un_escalon_de_un_bloque() {
+        // Suelo en y<4 y un escalon (capa y=4, techo 5) en x>=1.
+        let mut camera = test_camera_at(0.5, 0.5);
+        camera.position.y = 4.0 + EYE_HEIGHT;
+        camera.update_view();
+        let mut player = PlayerController::new();
+        let step = |p: Vec3| p.y < 4.0 || (p.x >= 1.0 && (4.0..5.0).contains(&p.y));
+        for _ in 0..120 {
+            player.move_horizontal(&mut camera, step, 0.0, 1.0, 1.0 / 60.0);
+        }
+        assert!(
+            camera.position.x > 1.0,
+            "no subio el escalon, x={}",
+            camera.position.x
+        );
+        assert!(
+            (camera.position.y - (5.0 + EYE_HEIGHT)).abs() < 0.05,
+            "quedo a la altura equivocada, y={}",
+            camera.position.y
+        );
+    }
+
+    #[test]
+    fn no_sube_un_muro_de_dos_bloques() {
+        // Muro de dos bloques (capa y=4 y y=5) en x>=1: hay que saltarlo, no
+        // debe subirse caminando.
+        let mut camera = test_camera_at(0.5, 0.5);
+        camera.position.y = 4.0 + EYE_HEIGHT;
+        camera.update_view();
+        let mut player = PlayerController::new();
+        let wall = |p: Vec3| p.y < 4.0 || (p.x >= 1.0 && (4.0..6.0).contains(&p.y));
+        for _ in 0..120 {
+            player.move_horizontal(&mut camera, wall, 0.0, 1.0, 1.0 / 60.0);
+        }
+        assert!(
+            camera.position.x + PLAYER_RADIUS < 1.0 + 1e-3,
+            "atraveso el muro, x={}",
+            camera.position.x
+        );
+        assert!(
+            (camera.position.y - (4.0 + EYE_HEIGHT)).abs() < 1e-3,
+            "subio de mas, y={}",
+            camera.position.y
+        );
+    }
+
+    // --- simulacion sobre terreno real (busca embebido) -----------------------
+
+    fn world_solid(world: &crate::world::World, p: Vec3) -> bool {
+        world.is_solid([p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32])
+    }
+
+    fn box_overlaps_solid(pos: Vec3, world: &crate::world::World) -> bool {
+        PlayerController::collides(pos, &|p| world_solid(world, p))
+    }
+
+    #[test]
+    fn caminata_por_terreno_real_no_queda_embebido() {
+        let seed = 13_371;
+        let mut world = crate::world::World::new(seed, 4, vec![]);
+        world.update_streaming([8.0, 74.0, 20.0]);
+
+        let mut camera = Camera::new(Vec3::new(8.0, 76.0, 20.0));
+        camera.update_view();
+        let mut player = PlayerController::new();
+        player.settle(&mut camera, |p| world_solid(&world, p));
+
+        assert!(
+            !box_overlaps_solid(camera.position, &world),
+            "el spawn ya nace embebido: {:?}",
+            camera.position
+        );
+
+        let mut rng: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut fwd = 1.0f32;
+        let mut right = 0.0f32;
+        for frame in 0..20_000 {
+            if frame % 17 == 0 {
+                rng = rng
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                let a = ((rng >> 40) as f32 / (1u64 << 24) as f32) * std::f32::consts::TAU;
+                fwd = a.cos();
+                right = a.sin();
+                camera.yaw_deg = ((rng >> 24) % 360) as f32;
+            }
+            player.move_horizontal(
+                &mut camera,
+                |p| world_solid(&world, p),
+                fwd,
+                right,
+                1.0 / 60.0,
+            );
+            player.update(
+                &mut camera,
+                |p| world_solid(&world, p),
+                0.0,
+                false,
+                false,
+                1.0 / 60.0,
+            );
+            world.update_streaming([camera.position.x, camera.position.y, camera.position.z]);
+            assert!(
+                !box_overlaps_solid(camera.position, &world),
+                "frame {frame}: jugador embebido en el terreno en {:?}",
+                camera.position
+            );
+        }
     }
 }

@@ -142,6 +142,10 @@ una migracion**; hay tests que lo verifican.
   combina en el shader.
 - **Colision del jugador**: cilindro vertical de radio `PLAYER_RADIUS` y alto
   `PLAYER_HEIGHT`; `player::block_overlaps_player` decide si un bloque lo ocupa.
+  La fisica vertical sondea la **huella completa** (`footprint_columns`), no un
+  punto, y hay **auto-escalon** (`STEP_HEIGHT`) para subir pasos de 1 bloque.
+- **Colision del jugador (horizontal)**: eje a eje; si un eje choca, se cancela y
+  el otro desliza. Con auto-escalon, un escalon de <= 1 bloque se sube andando.
 - **Cero comentarios de relleno**: se documenta el *porque*, no el *que*.
 
 ## Como se prueba

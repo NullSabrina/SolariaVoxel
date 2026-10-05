@@ -843,6 +843,44 @@ bucle interno. Los tests siguen verdes (98). `GENERATOR_VERSION = 3`; los mundos
 v3 se reproducen igual, los v2 conservan sus ediciones guardadas (los bloques se
 guardan por id).
 
+### 2026-10-05 (v0.7.2) — Fisica vertical por huella + auto-escalon
+
+**Decision.** La fisica vertical (`PlayerController::update`) y el `settle` dejan
+de sondear un unico punto (el centro de los pies) y pasan a mirar la **huella
+completa** del jugador (las columnas que cubre su caja). Ademas se anade
+**auto-escalon**: al caminar contra un escalon de <= `STEP_HEIGHT` (1.0 bloque),
+el jugador sube y avanza; un muro de 2 bloques sigue exigiendo salto.
+
+**Motivo.** Con el terreno **por bloque** de v0.7.1 los escalones de 1 bloque son
+continuos, y aparecio un bug: parado sobre un borde, el centro de los pies caia
+sobre la columna vecina (mas baja), el jugador empezaba a hundirse y su **caja**
+seguia solapando el bloque del escalon. A partir de ahi `move_horizontal` lo
+rechazaba todo y el jugador quedaba **embebido** ("la camara se buguea en los
+bloques"). El sondeo por punto era correcto en el terreno de mesetas de v0.7.0
+(planas) pero no en el nuevo. Se reprodujo en un test de simulacion: fallaba en
+el frame 33. Sin auto-escalon, ademas, cada subida de 1 bloque bloqueaba el paso
+(el jugador se sentia "atascado" en cualquier colina).
+
+**Alternativas descartadas.** (a) Subir `STEP_HEIGHT` a 0.6 (como Minecraft):
+insuficiente para pasos de 1 bloque, que son la norma aqui. (b) Resolver el
+embebido empujando al jugador fuera del bloque a posteriori: parche, no ataca la
+causa (el sondeo por punto). (c) Snake/deslizar la caja verticalmente con la
+huella tambien al subir: lo hicimos (`ceiling_hits` por huella) para no clipar
+techos.
+
+**Consecuencia.** `landing_surface`, `ceiling_hits` y `top_surface` (nuevos)
+operan sobre la huella (`footprint_columns`). `settle` posa al jugador sobre la
+superficie mas alta bajo su huella (antes, solo su columna). Nuevo
+`try_step_up` + `STEP_HEIGHT`. Test de regresion
+`caminata_por_terreno_real_no_queda_embebido` (20.000 frames de paseo aleatorio
+sobre el terreno real de la semilla 13371). 101 tests.
+
+**Desplazamiento de roadmap (otra vez).** El fix consume el numero `v0.7.2`, que
+v0.7.1 habia asignado a las cuevas: las **cuevas** pasan a **v0.7.3** y los
+**oceanos** a **v0.7.4**. No se adelanta ninguna feature; solo corre el
+calendario. `GENERATOR_VERSION` **no** cambia (la generacion de terreno es
+identica; esto es fisica).
+
 
 
 
