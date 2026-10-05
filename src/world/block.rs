@@ -114,6 +114,17 @@ impl Block {
         self as u8
     }
 
+    /// ¿El id corresponde a un bloque conocido por esta version del motor?
+    ///
+    /// Los ids son contiguos `0..=Obsidian`; un id mayor es de una version
+    /// futura/mod. Sirve para **no cargar en silencio** un mundo con bloques
+    /// desconocidos (se rechaza con error en vez de convertirlos a aire y
+    /// destruir datos).
+    #[inline]
+    pub fn is_known_id(value: u8) -> bool {
+        value <= Block::Obsidian.id()
+    }
+
     /// ¿Ocupa espacio? (no bloquean: aire, antorcha, liquidos y **hojas**, que
     /// son transparentes y se atraviesan).
     #[inline]

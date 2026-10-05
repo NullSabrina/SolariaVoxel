@@ -1555,6 +1555,56 @@ instante (es fuente) y bloquea el acceso al fondo.
 (`surface_height` = nivel/8 * 14/16, tests actualizados). 161 tests; clippy
 limpio. Captura `v0.8.11_oceano.png`.
 
+### 2026-10-05 (v0.8.12) — Persistencia v4: columna completa, atomica y validada (auditoria P0)
+
+**Decision.** Primera fase de la auditoria maestra (orden obligatorio: primero
+correccion de datos). Se atacan cinco P0 de persistencia:
+
+1. **Guardado vertical completo.** `ChunkRecord` guardaba una sola seccion
+   (`TERRAIN_SECTION = 4`, `y=64..80`): las ediciones en otras alturas se
+   perdian al reabrir. Ahora guarda la **columna entera** (`y0`,
+   `height = 384`) y `apply_record` escribe el rango que el registro declare, de
+   modo que conviven registros nuevos (columna completa) y migrados (una
+   seccion). `FORMAT_VERSION = 4`.
+2. **Migracion v3 -> v4.** Los archivos v3 (y v2) se leen con espejos
+   (`WorldSaveV3`/`ChunkRecordV3`, `WorldSaveV2`): bincode es posicional, asi que
+   `load_from` **espia la cabecera** (`format_version`) y elige el layout; luego
+   `V3ToV4` fija `y0 = 64`, `height = 16` en los registros antiguos. Verificado
+   en runtime con un `world.vf` real (`formato v4`, 2 chunks).
+3. **Guardado atomico.** `save_to` escribe `world.vf.tmp`, hace `sync_all`, rota
+   el anterior a `world.vf.bak` y renombra el temporal al definitivo. El archivo
+   principal nunca queda truncado.
+4. **Retry del guardado.** `save_world` marcaba `world_saved = true` **antes** de
+   escribir; ahora solo lo marca si `save_to` devuelve `Ok`, y la cadena
+   conserva la version original (`format_version.min(3)`).
+5. **Cero perdida silenciosa.** Al cargar se valida cada registro: payload que no
+   decodifica (`CorruptChunk`) o **id de bloque desconocido** (`UnknownBlock`,
+   `Block::is_known_id` = ids `0..=Obsidian`) devuelven error en vez de
+   convertirlos a aire.
+
+Ademas: **registro perezoso** (dirty set). Antes cada `set_block` recompilaba y
+comprimia la columna entera (98 KB); ahora solo se marca la columna sucia y el
+registro se reconstruye al guardar o al descargar (`World::sync_modified`), lo
+que tambien evita perder ediciones al salir del radio. Y el **highlight** deja de
+crear una `Mesh` GPU por frame: se reutiliza si el bloque apuntado no cambia.
+
+**Motivo.** El `TERRAIN_SECTION` fijo hacia que la persistencia no representara
+el mundo de 384 de alto; era el P0 mas grave segun la auditoria.
+
+**Alternativas descartadas.** (a) Guardar solo el "diff" contra el generador:
+mas complejo y fragil ante cambios de generador. (b) Anadir campos a
+`ChunkRecord` sin espejo: bincode posicional rompe la lectura de v3. (c) Guardar
+en un hilo aparte (async) ya: se hara en la siguiente fase; aqui primero la
+correccion.
+
+**Consecuencia.** `save.rs` reescrito (formato v4, espejos, migrador, atomico,
+validacion); `store.rs` (dirty set, `sync_modified`, `apply_record` por rango);
+`app.rs` (retry de guardado); `renderer.rs` (highlight reutilizado);
+`block.rs` (`is_known_id`). 166 tests; clippy `-D warnings` limpio. **Limites
+conocidos**: el estado de fluidos dinamicos (niveles) aun no se persiste (los
+bloques `Water`/`Lava` si); el guardado sigue sincrono en el hilo principal
+(se abordara en la fase de save asincrono).
+
 ---
 
 ## Plantilla para futuras entradas

@@ -10,17 +10,23 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.11 - Agua interactiva y antorcha corregida
+//! ## Estado actual: v0.8.12 - Persistencia v4 (columna completa, atomica)
 //!
-//! * **Agua**: el rayo **atraviesa** el agua/lava (no se apuntan), asi se puede
-//!   romper/colocar el bloque del fondo o de detras; el resaltado ya no marca el
-//!   liquido. La superficie queda **2/16 por debajo** del borde del bloque (como
-//!   Minecraft), no a tope.
-//! * **Antorcha**: se dibuja como en el `.bbmodel`, cuyas caras visibles son las
-//!   **tablas cruzadas** (el palo usa la textura "blank").
-//! * Hereda de v0.8.10/v0.8.9 (antorcha, inventario completo), v0.8.8 (agua).
+//! Primera fase de la auditoria maestra (data correctness):
+//! * `ChunkRecord` guarda **toda la columna** (24 secciones), no solo `y=64..80`:
+//!   las ediciones en cualquier `y` (0..383) sobreviven. `FORMAT_VERSION = 4`
+//!   con migrador v3->v4.
+//! * Guardado **atomico** (`world.vf.tmp` -> `world.vf`, rotando `.bak`) y
+//!   reintentable (`world_saved` solo se marca si la escritura termino bien).
+//! * Registro **perezoso** (dirty set): no se recomprime la columna en cada
+//!   `set_block`, solo al guardar o descargar.
+//! * Al cargar se validan chunks corruptos y **IDs de bloque desconocidos** (no
+//!   se cargan en silencio como aire).
+//! * Highlight: se reutiliza la malla GPU si el bloque apuntado no cambia.
 //!
-//! Siguiente (Etapa 2): **mobs** (usando `physics`).
+//! Hereda de v0.8.11 (agua interactiva, antorcha), v0.8.9 (inventario completo).
+//!
+//! Siguiente (auditoria): streaming asincrono, luz incremental, meshing async.
 //!
 //! ## Organizacion del codigo
 //!

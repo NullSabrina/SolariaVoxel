@@ -309,8 +309,7 @@ impl App {
         if self.world_saved {
             return;
         }
-        self.world_saved = true;
-        let Some(renderer) = self.renderer.as_ref() else {
+        let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
         let mut save = crate::world::WorldSave::new(self.seed, self.world_header.created_at);
@@ -333,6 +332,9 @@ impl App {
         };
         match save.save_to(&world_path()) {
             Ok(()) => {
+                // Solo cuenta como guardado si la escritura termino bien: si
+                // falla, `exiting()` puede reintentar.
+                self.world_saved = true;
                 let size = std::fs::metadata(world_path())
                     .map(|m| m.len())
                     .unwrap_or(0);
@@ -344,7 +346,7 @@ impl App {
                     ratio
                 );
             }
-            Err(e) => eprintln!("[world] no se pudo guardar: {e}"),
+            Err(e) => eprintln!("[world] no se pudo guardar (se reintentara): {e}"),
         }
     }
 

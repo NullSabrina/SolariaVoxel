@@ -1,54 +1,64 @@
 //! Guardado y versionado del mundo.
 //!
 //! Este modulo responde a una pregunta que en v0.3.x dolia: **"¿y mis
-//! ediciones?"**. Antes el mundo se regeneraba desde la semilla y se perdia
-//! todo lo que rompias o colocabas. Aqui definimos:
+//! ediciones?"**. Aqui definimos:
 //!
-//! * `WorldHeader` — la "ficha" del mundo: version del formato, version del
-//!   generador, version del motor, semilla y fecha.
-//! * `ChunkRecord` — los bloques de un chunk que ha sido **modificado** por el
-//!   jugador, con su propia version de formato.
+//! * `WorldHeader` — la "ficha" del mundo.
+//! * `ChunkRecord` — el estado persistente de una **columna** modificada. Desde
+//!   el formato v4 guarda **toda la columna** (384 bloques de alto), no solo una
+//!   seccion: antes `TERRAIN_SECTION` fijo hacia que las ediciones por encima o
+//!   por debajo de `y=64..80` se perdieran al reabrir.
 //! * `WorldSave` — el contenedor de todo, serializado con `bincode`.
 //! * [`MigrationChain`] — migradores para traer mundos de formatos antiguos.
 //!
 //! Versionado: `FORMAT_VERSION` es la version del **formato de archivo** (sube
 //! cuando cambia el layout binario). `GENERATOR_VERSION` es la del generador de
-//! terreno (sube cuando cambia el algoritmo y un mundo viejo ya no se reproduce
-//! igual). Son independientes, como pide la guia.
+//! terreno. Son independientes, como pide la guia.
+//!
+//! El guardado es **atomico**: se escribe a `world.vf.tmp`, se sincroniza, se
+//! rota el anterior a `world.vf.bak` y se renombra el temporal al definitivo.
+//! El archivo principal nunca queda truncado por una escritura a medias.
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 
 use bincode::config::standard;
 use bincode::{Decode, Encode};
 
-use super::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Column, WORLD_HEIGHT};
+use super::block::Block;
+use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 
-/// Version actual del formato de archivo. Sube SIEMPRE que cambie como se
-/// serializan los datos (rompe compatibilidad binaria).
+/// Bytes de una columna completa (16 x 16 x 384).
+pub const COLUMN_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT;
+
+/// Y en la que los formatos < v4 guardaban su unica seccion (era
+/// `TERRAIN_SECTION = 4`). Se conserva para migrar.
+pub const LEGACY_TERRAIN_Y0: u32 = 64;
+
+/// Version actual del formato de archivo.
 ///
-/// * v1: `ChunkRecord.blocks` eran 4096 bytes sin comprimir.
-/// * v2: `ChunkRecord.blocks` guarda bytes **comprimidos con LZ4** (y un flag).
+/// * v1: `ChunkRecord.blocks` eran 4096 bytes sin comprimir (una seccion).
+/// * v2: `ChunkRecord.blocks` va **comprimido con LZ4**.
 /// * v3: `WorldSave` guarda ademas la **posicion del jugador**.
-pub const FORMAT_VERSION: u32 = 3;
+/// * v4: `ChunkRecord` guarda **toda la columna** (`y0`, `height` y bloques de
+///   las 24 secciones). Antes solo se persistia `y=64..80`.
+pub const FORMAT_VERSION: u32 = 4;
 
 /// Version actual del generador de terreno.
 ///
-/// * v1: solo colinas (Perlin), superficie de hierba/tierra/piedra.
-/// * v2: biomas (Worley) con superficie de arena/hierba/nieve.
-/// * v3: altura y bioma calculados **por bloque** (colinas suaves, no mesetas
-///   planas de 16x16).
-/// * v4: **cuevas** con ruido Perlin 3D (iso-superficie).
-/// * v5: **oceanos/lagos**: agua hasta el nivel del mar y playas de arena.
-/// * v6: **vegetacion**: arboles (tronco de madera + copa de hojas) por bioma.
-/// * v7: **clima/biomas avanzados** (temperatura+humedad), relieve por bioma
-///   (ridged para montanas), superficie variada, cuevas 3D y acuiferos.
-/// * v8: **pozas de lava** en cuevas profundas (con suelo de obsidiana) y
-///   bloques `Lava`/`Obsidian`.
+/// * v1: solo colinas (Perlin).
+/// * v2: biomas (Worley).
+/// * v3: altura/bioma por bloque.
+/// * v4: cuevas con Perlin 3D.
+/// * v5: oceanos/lagos + playas.
+/// * v6: vegetacion (arboles).
+/// * v7: clima/biomas avanzados, relieve por bioma, cuevas 3D y acuiferos.
+/// * v8: pozas de lava + bloques `Lava`/`Obsidian`.
 pub const GENERATOR_VERSION: u32 = 8;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
-pub const MAGIC: [u8; 4] = *b"VFWD"; // VoxelForge World / Solaria
+pub const MAGIC: [u8; 4] = *b"VFWD";
 
 /// Identificador de la version del motor que guardo el mundo.
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -66,33 +76,24 @@ impl ChunkPos {
     }
 }
 
-/// Ficha del mundo. Es lo primero que se lee de un archivo y permite decidir si
-/// hay que migrar.
+/// Ficha del mundo.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct WorldHeader {
-    /// Identifica el tipo de archivo.
     pub magic: [u8; 4],
-    /// Version del formato de archivo con el que se guardo.
     pub format_version: u32,
-    /// Version del generador de terreno que lo creo (para reproducir terreno).
     pub generator_version: u32,
-    /// Semilla del mundo.
     pub seed: u32,
-    /// Version del motor (texto), para diagnostico.
     pub engine_version: String,
-    /// Fecha de creacion (segundos desde epoch de UNIX).
     pub created_at: u64,
 }
 
 impl Default for WorldHeader {
-    /// Una ficha "vacia" en el formato actual (util para `App::default()`).
     fn default() -> Self {
         Self::new(0, 0)
     }
 }
 
 impl WorldHeader {
-    /// Crea una ficha nueva para la version actual.
     pub fn new(seed: u32, created_at: u64) -> Self {
         Self {
             magic: MAGIC,
@@ -104,38 +105,45 @@ impl WorldHeader {
         }
     }
 
-    /// ¿Es un archivo de mundo valido? (comprueba el magic).
     pub fn is_valid(&self) -> bool {
         self.magic == MAGIC
     }
 }
 
-/// Los bloques de un chunk modificado por el jugador.
+/// Estado persistente de una **columna** modificada.
 ///
-/// Guardamos el chunk **completo** (4096 bloques) en lugar de solo el "diff".
-/// Desde el formato v2 los bytes van **comprimidos con LZ4** (un chunk de
-/// terreno baja de 4096 a unos pocos cientos de bytes, porque hay muchisimo
-/// aire y zonas uniformes).
+/// `blocks` guarda `height` capas de `16x16` empezando en `y0`, en orden
+/// `(y, z, x)`. En el formato v4 `y0 = 0` y `height = WORLD_HEIGHT` (columna
+/// completa); los registros migrados de v3 conservan `y0 = 64` y `height = 16`.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct ChunkRecord {
-    /// Version del formato de ESTE chunk (permite migrar chunk a chunk).
     pub format_version: u32,
-    /// Version del generador con el que se genero su terreno base.
     pub generator_version: u32,
-    /// ¿`blocks` esta comprimido con LZ4?
     pub compressed: bool,
-    /// Los bloques (4096 si `!compressed`; bytes LZ4 si `compressed`).
+    /// Primera capa Y almacenada.
+    pub y0: u32,
+    /// Numero de capas Y almacenadas.
+    pub height: u32,
+    /// Bloques (comprimidos con LZ4 si `compressed`).
     pub blocks: Vec<u8>,
 }
 
+/// Layout de `ChunkRecord` en los formatos v2/v3 (sin `y0`/`height`). Bincode es
+/// posicional: sin este espejo no se puede deserializar un archivo viejo.
+#[derive(Clone, Debug, Encode, Decode)]
+struct ChunkRecordV3 {
+    format_version: u32,
+    generator_version: u32,
+    compressed: bool,
+    blocks: Vec<u8>,
+}
+
 impl ChunkRecord {
-    /// Construye el registro a partir de una columna (solo su chunk `chunk_y`
-    /// vertical; de momento guardamos el chunk que contiene el terreno). Los
-    /// bloques se comprimen con LZ4.
-    pub fn from_column(column: &Column, chunk_y: usize) -> Self {
-        let mut raw = Vec::with_capacity(CHUNK_VOLUME);
-        let y0 = chunk_y * CHUNK_SIZE;
-        for y in y0..(y0 + CHUNK_SIZE).min(WORLD_HEIGHT) {
+    /// Construye el registro a partir de una columna cargada (terreno generado
+    /// + ediciones). Guarda las 24 secciones y comprime con LZ4.
+    pub fn from_column(column: &Column) -> Self {
+        let mut raw = Vec::with_capacity(COLUMN_VOLUME);
+        for y in 0..WORLD_HEIGHT {
             for z in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
                     raw.push(column.get(x, y, z).id());
@@ -146,30 +154,52 @@ impl ChunkRecord {
             format_version: FORMAT_VERSION,
             generator_version: GENERATOR_VERSION,
             compressed: true,
+            y0: 0,
+            height: WORLD_HEIGHT as u32,
             blocks: lz4_flex::compress_prepend_size(&raw),
         }
     }
 
-    /// Devuelve los 4096 bloques sin comprimir (descomprime si hace falta).
+    /// Bytes crudos esperados segun `height` (0 si el registro esta corrupto).
+    pub fn raw_len(&self) -> usize {
+        self.height as usize * CHUNK_SIZE * CHUNK_SIZE
+    }
+
+    /// Bloques sin comprimir. `Vec::new()` si el payload esta corrupto (lo
+    /// detecta [`ChunkRecord::is_corrupt`]).
     pub fn decompressed_blocks(&self) -> Vec<u8> {
         if self.compressed {
-            lz4_flex::decompress_size_prepended(&self.blocks).unwrap_or_else(|_| Vec::new())
+            lz4_flex::decompress_size_prepended(&self.blocks).unwrap_or_default()
         } else {
             self.blocks.clone()
         }
     }
 
+    /// ¿El payload no decodifica al tamano esperado? (chunk corrupto).
+    pub fn is_corrupt(&self) -> bool {
+        self.decompressed_blocks().len() != self.raw_len()
+    }
+
     /// Ratio de compresion (`raw / compressed`). 1.0 = no comprime.
     pub fn compression_ratio(&self) -> f32 {
         if self.compressed && !self.blocks.is_empty() {
-            CHUNK_VOLUME as f32 / self.blocks.len() as f32
+            self.raw_len() as f32 / self.blocks.len() as f32
         } else {
             1.0
         }
     }
 
-    /// Migra un registro v1 (sin comprimir) al v2 (comprimido). Es un no-op
-    /// funcional cuando ya esta comprimido.
+    /// Primer id de bloque **desconocido** en el registro, si lo hay.
+    ///
+    /// Cargar un id desconocido como aire destruiria datos de una version
+    /// futura; preferimos rechazar el mundo con un error claro.
+    pub fn first_unknown_id(&self) -> Option<u8> {
+        self.decompressed_blocks()
+            .into_iter()
+            .find(|&id| !Block::is_known_id(id))
+    }
+
+    /// Migra un registro v1 (sin comprimir) al v2 (comprimido).
     pub fn migrate_to_v2(&mut self) {
         if !self.compressed {
             self.blocks = lz4_flex::compress_prepend_size(&self.blocks);
@@ -183,7 +213,7 @@ impl ChunkRecord {
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct WorldSave {
     pub header: WorldHeader,
-    /// Chunks modificados, indexados por su posicion.
+    /// Columnas modificadas, indexadas por su posicion.
     pub chunks: HashMap<ChunkPos, ChunkRecord>,
     /// Posicion del jugador (guardado completo). Desde el formato v3.
     pub player_pos: [f32; 3],
@@ -192,17 +222,36 @@ pub struct WorldSave {
 /// Regresion del jugador por defecto (si un mundo viejo no la trae).
 pub const DEFAULT_PLAYER_POS: [f32; 3] = [8.0, 76.0, 20.0];
 
-/// Espejo del `WorldSave` **v2** (sin `player_pos`), para poder leer mundos
-/// guardados antes de v3 y migrarlos. Bincode es posicional: sin este espejo no
-/// se puede deserializar un archivo v2 en el struct actual.
+/// Espejo del `WorldSave` **v3**: mismo `player_pos` pero con los `ChunkRecord`
+/// antiguos (una sola seccion, sin `y0`/`height`).
+#[derive(Encode, Decode)]
+struct WorldSaveV3 {
+    header: WorldHeader,
+    chunks: HashMap<ChunkPos, ChunkRecordV3>,
+    player_pos: [f32; 3],
+}
+
+/// Espejo del `WorldSave` **v2** (sin `player_pos`).
 #[derive(Encode, Decode)]
 struct WorldSaveV2 {
     header: WorldHeader,
-    chunks: HashMap<ChunkPos, ChunkRecord>,
+    chunks: HashMap<ChunkPos, ChunkRecordV3>,
+}
+
+/// Convierte un registro antiguo (una seccion) al formato de columna completo.
+/// La seccion vivia en `y = LEGACY_TERRAIN_Y0`.
+fn upgrade_v3_record(old: ChunkRecordV3) -> ChunkRecord {
+    ChunkRecord {
+        format_version: 3,
+        generator_version: old.generator_version,
+        compressed: old.compressed,
+        y0: LEGACY_TERRAIN_Y0,
+        height: CHUNK_SIZE as u32,
+        blocks: old.blocks,
+    }
 }
 
 impl WorldSave {
-    /// Crea un mundo vacio (sin ediciones).
     pub fn new(seed: u32, created_at: u64) -> Self {
         Self {
             header: WorldHeader::new(seed, created_at),
@@ -211,57 +260,119 @@ impl WorldSave {
         }
     }
 
-    /// Marca un chunk como modificado (o lo actualiza).
     pub fn set_chunk(&mut self, pos: ChunkPos, record: ChunkRecord) {
         self.chunks.insert(pos, record);
     }
 
-    /// Escribe el mundo a disco en formato binario.
+    /// Escribe el mundo a disco de forma **atomica**.
     ///
-    /// `bincode 2` trabaja con un `Vec<u8>`: serializamos y luego escribimos el
-    /// archivo. El formato es compacto y rapido (no es texto legible, a
-    /// diferencia de JSON; eso es intencionado).
+    /// `path.tmp` se escribe y sincroniza; el archivo anterior se rota a
+    /// `path.bak`; y `path.tmp` se renombra a `path`. Nunca queda un `path`
+    /// truncado a medias.
     pub fn save_to(&self, path: &Path) -> Result<(), SaveError> {
         let bytes = bincode::encode_to_vec(self, standard())?;
-        std::fs::write(path, bytes)?;
+        let tmp = with_suffix(path, ".tmp");
+        let bak = with_suffix(path, ".bak");
+        {
+            let mut file = std::fs::File::create(&tmp)?;
+            file.write_all(&bytes)?;
+            // Asegura que los datos llegan al disco antes de rotar el archivo.
+            file.sync_all()?;
+        }
+        if path.exists() {
+            let _ = std::fs::remove_file(&bak);
+            std::fs::rename(path, &bak)?;
+        }
+        std::fs::rename(&tmp, path)?;
         Ok(())
     }
 
-    /// Lee y deserializa un mundo de disco. **No** migra todavia; llama a
-    /// [`load_and_migrate`] para eso. Acepta tambien el formato v2 (sin la
-    /// posicion del jugador) rellenandola con el valor por defecto.
+    /// Lee y deserializa un mundo de disco (sin migrar). Elige el layout de los
+    /// `ChunkRecord` segun la `format_version` de la cabecera: bincode es
+    /// posicional, asi que decodificar un archivo v3 con el layout v4 daria
+    /// bytes mal interpretados.
     pub fn load_from(path: &Path) -> Result<Self, SaveError> {
         let bytes = std::fs::read(path)?;
-        if let Ok((save, _len)) = bincode::decode_from_slice::<WorldSave, _>(&bytes, standard()) {
-            return Ok(save);
+        // Espiamos solo la cabecera (esta al principio) para conocer la version.
+        let version = bincode::decode_from_slice::<WorldHeader, _>(&bytes, standard())
+            .map(|(h, _)| h.format_version)
+            .unwrap_or(0);
+        if version > FORMAT_VERSION {
+            return Err(SaveError::TooNew {
+                format: version,
+                supported: FORMAT_VERSION,
+            });
         }
-        // Formato v2 (o anterior): sin `player_pos`.
-        let (v2, _len): (WorldSaveV2, usize) = bincode::decode_from_slice(&bytes, standard())?;
-        let mut header = v2.header;
-        header.format_version = FORMAT_VERSION;
-        Ok(WorldSave {
-            header,
-            chunks: v2.chunks,
-            player_pos: DEFAULT_PLAYER_POS,
-        })
+        match version {
+            4 => {
+                let (save, _) = bincode::decode_from_slice::<WorldSave, _>(&bytes, standard())?;
+                Ok(save)
+            }
+            3 => {
+                let (v3, _) = bincode::decode_from_slice::<WorldSaveV3, _>(&bytes, standard())?;
+                let mut header = v3.header;
+                header.format_version = 3;
+                Ok(WorldSave {
+                    header,
+                    chunks: v3
+                        .chunks
+                        .into_iter()
+                        .map(|(p, r)| (p, upgrade_v3_record(r)))
+                        .collect(),
+                    player_pos: v3.player_pos,
+                })
+            }
+            // v1/v2 comparten el layout de `ChunkRecordV3` (aunque v1 sin el flag
+            // `compressed` no se soporta de verdad; se documenta).
+            _ => {
+                let (v2, _): (WorldSaveV2, usize) = bincode::decode_from_slice(&bytes, standard())?;
+                let mut header = v2.header;
+                header.format_version = header.format_version.min(2);
+                Ok(WorldSave {
+                    header,
+                    chunks: v2
+                        .chunks
+                        .into_iter()
+                        .map(|(p, r)| (p, upgrade_v3_record(r)))
+                        .collect(),
+                    player_pos: DEFAULT_PLAYER_POS,
+                })
+            }
+        }
     }
+}
+
+/// `path` con un sufijo extra (`world.vf` -> `world.vf.tmp`).
+fn with_suffix(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut os = path.as_os_str().to_os_string();
+    os.push(suffix);
+    std::path::PathBuf::from(os)
 }
 
 /// Errores de guardado/carga.
 #[derive(Debug)]
 pub enum SaveError {
-    /// Error de entrada/salida (no existe el archivo, permisos...).
     Io(std::io::Error),
-    /// Los bytes no corresponden a un `WorldSave` valido.
     Decode(bincode::error::DecodeError),
-    /// No se pudo serializar el mundo (no deberia ocurrir con bincode).
     Encode(bincode::error::EncodeError),
-    /// El archivo no tiene el magic esperado.
     BadMagic([u8; 4]),
-    /// El formato es mas nuevo que el motor (no sabemos leerlo).
-    TooNew { format: u32, supported: u32 },
-    /// No hay un migrador que cubra ese salto de version.
-    NoMigration { from: u32, to: u32 },
+    TooNew {
+        format: u32,
+        supported: u32,
+    },
+    NoMigration {
+        from: u32,
+        to: u32,
+    },
+    /// Un registro guarda un id de bloque que este motor no conoce.
+    UnknownBlock {
+        id: u8,
+    },
+    /// Un chunk no decodifica al tamano esperado (payload corrupto).
+    CorruptChunk {
+        x: i32,
+        z: i32,
+    },
 }
 
 impl std::fmt::Display for SaveError {
@@ -279,6 +390,12 @@ impl std::fmt::Display for SaveError {
             ),
             SaveError::NoMigration { from, to } => {
                 write!(f, "no hay migrador de v{from} a v{to}")
+            }
+            SaveError::UnknownBlock { id } => {
+                write!(f, "el mundo contiene un bloque desconocido (id {id})")
+            }
+            SaveError::CorruptChunk { x, z } => {
+                write!(f, "chunk corrupto en ({x}, {z}): no decodifica")
             }
         }
     }
@@ -309,14 +426,12 @@ impl From<bincode::error::EncodeError> for SaveError {
 pub trait WorldMigrator {
     fn from_version(&self) -> u32;
     fn to_version(&self) -> u32;
-    /// Convierte los datos de un chunk. Por defecto, los deja igual (util para
-    /// migradores que solo tocan la cabecera).
     fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
         chunk.clone()
     }
 }
 
-/// Migrador v1 -> v2: comprime con LZ4 los bloques que iban sin comprimir.
+/// Migrador v1 -> v2: comprime con LZ4 los bloques sin comprimir.
 pub struct V1ToV2;
 
 impl WorldMigrator for V1ToV2 {
@@ -327,8 +442,6 @@ impl WorldMigrator for V1ToV2 {
         2
     }
     fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
-        // En v1 `compressed` no existia; al deserializar v1 llega en `false`
-        // (por defecto de bincode no habia campo). Lo normalizamos a comprimido.
         let mut record = chunk.clone();
         record.compressed = false;
         record.migrate_to_v2();
@@ -336,8 +449,7 @@ impl WorldMigrator for V1ToV2 {
     }
 }
 
-/// Migrador v2 -> v3: la posicion del jugador es un campo nuevo del `WorldSave`;
-/// los chunks no cambian (solo sube la version).
+/// Migrador v2 -> v3: solo sube la version (la posicion es del `WorldSave`).
 pub struct V2ToV3;
 
 impl WorldMigrator for V2ToV3 {
@@ -349,26 +461,46 @@ impl WorldMigrator for V2ToV3 {
     }
 }
 
-/// Cadena de migradores: los aplica en orden hasta llegar al formato actual.
+/// Migrador v3 -> v4: los registros de una seccion pasan a `y0`/`height`
+/// explicitos (la seccion vivia en `y=64`).
+pub struct V3ToV4;
+
+impl WorldMigrator for V3ToV4 {
+    fn from_version(&self) -> u32 {
+        3
+    }
+    fn to_version(&self) -> u32 {
+        4
+    }
+    fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
+        let mut r = chunk.clone();
+        if r.height == 0 {
+            r.y0 = LEGACY_TERRAIN_Y0;
+            r.height = CHUNK_SIZE as u32;
+        }
+        r.format_version = 4;
+        r
+    }
+}
+
+/// Cadena de migradores.
 #[derive(Default)]
 pub struct MigrationChain {
     migrators: Vec<Box<dyn WorldMigrator>>,
 }
 
 impl MigrationChain {
-    /// Crea la cadena con los migradores conocidos por el motor.
     pub fn with_builtins() -> Self {
         Self {
-            migrators: vec![Box::new(V1ToV2), Box::new(V2ToV3)],
+            migrators: vec![Box::new(V1ToV2), Box::new(V2ToV3), Box::new(V3ToV4)],
         }
     }
 
-    /// Anade un migrador (util en tests y para plugins futuros).
     pub fn push(&mut self, m: Box<dyn WorldMigrator>) {
         self.migrators.push(m);
     }
 
-    /// Migra un `WorldSave` desde su version de formato hasta `FORMAT_VERSION`.
+    /// Migra un `WorldSave` hasta `FORMAT_VERSION`.
     pub fn migrate(&self, mut save: WorldSave) -> Result<WorldSave, SaveError> {
         let mut from = save.header.format_version;
         if from > FORMAT_VERSION {
@@ -377,8 +509,6 @@ impl MigrationChain {
                 supported: FORMAT_VERSION,
             });
         }
-
-        // Aplicamos migradores en cadena hasta llegar al formato actual.
         while from < FORMAT_VERSION {
             let Some(migrator) = self
                 .migrators
@@ -390,8 +520,6 @@ impl MigrationChain {
                     to: FORMAT_VERSION,
                 });
             };
-
-            // Migramos cabecera y chunks.
             let to = migrator.to_version();
             for record in save.chunks.values_mut() {
                 *record = migrator.migrate_chunk(record);
@@ -400,28 +528,41 @@ impl MigrationChain {
             save.header.format_version = to;
             from = to;
         }
-
         Ok(save)
     }
 }
 
-/// Carga un mundo de disco y lo migra al formato actual. Es la funcion que usara
-/// el motor al abrir un mundo.
+/// Carga un mundo de disco, lo migra al formato actual y **valida** que no haya
+/// chunks corruptos ni ids de bloque desconocidos (antes de tocar el mundo).
 pub fn load_and_migrate(path: &Path) -> Result<WorldSave, SaveError> {
     let save = WorldSave::load_from(path)?;
     if !save.header.is_valid() {
         return Err(SaveError::BadMagic(save.header.magic));
     }
-    MigrationChain::with_builtins().migrate(save)
+    let save = MigrationChain::with_builtins().migrate(save)?;
+    for (pos, record) in &save.chunks {
+        if record.is_corrupt() {
+            return Err(SaveError::CorruptChunk { x: pos.x, z: pos.z });
+        }
+        if let Some(id) = record.first_unknown_id() {
+            return Err(SaveError::UnknownBlock { id });
+        }
+    }
+    Ok(save)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::block::Block;
 
     fn temp_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("solaria_test_{name}.vf"))
+    }
+
+    fn cleanup(path: &Path) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(with_suffix(path, ".tmp"));
+        let _ = std::fs::remove_file(with_suffix(path, ".bak"));
     }
 
     #[test]
@@ -429,47 +570,145 @@ mod tests {
         let mut save = WorldSave::new(42, 1234);
         let mut column = Column::empty();
         column.set(2, 5, 3, Block::Stone);
-        save.set_chunk(ChunkPos::new(0, 0), ChunkRecord::from_column(&column, 0));
+        save.set_chunk(ChunkPos::new(0, 0), ChunkRecord::from_column(&column));
 
         let path = temp_path("roundtrip");
         save.save_to(&path).unwrap();
         let loaded = WorldSave::load_from(&path).unwrap();
-        let _ = std::fs::remove_file(&path);
+        cleanup(&path);
 
         assert_eq!(loaded.header.seed, 42);
         assert!(loaded.header.is_valid());
         let record = loaded.chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        // El bloque de piedra debe seguir ahi (indice del chunk 0), tras
-        // descomprimir.
         let blocks = record.decompressed_blocks();
+        // Indice global `(y * 16 + z) * 16 + x` con y = 5.
         let idx = (5 * CHUNK_SIZE + 3) * CHUNK_SIZE + 2;
         assert_eq!(blocks[idx], Block::Stone.id());
-        // Y el chunk deberia comprimir (terreno mayormente uniforme).
         assert!(
-            record.compression_ratio() > 2.0,
+            record.compression_ratio() > 3.0,
             "ratio {}",
             record.compression_ratio()
         );
     }
 
     #[test]
-    fn un_chunk_de_terreno_comprime_bien_con_lz4() {
-        // Generamos un chunk de terreno real y medimos el ratio.
+    fn una_columna_completa_comprime_bien_conoce_su_tamano() {
         let generator = crate::world::TerrainGenerator::new(13371);
         let column = generator.generate_column(0, 0);
-        let record = ChunkRecord::from_column(&column, crate::world::store::TERRAIN_SECTION);
+        let record = ChunkRecord::from_column(&column);
         assert!(record.compressed);
-        let raw = 4096;
-        let compressed = record.blocks.len();
+        assert_eq!(record.y0, 0);
+        assert_eq!(record.height as usize, WORLD_HEIGHT);
+        assert_eq!(record.decompressed_blocks().len(), COLUMN_VOLUME);
+        assert!(!record.is_corrupt());
         let ratio = record.compression_ratio();
-        println!("[lz4] {raw} -> {compressed} bytes (x{ratio:.1})");
-        // Deberia comprimir al menos 3x (hay mucho aire y zonas uniformes).
-        assert!(
-            ratio > 3.0,
-            "ratio {ratio:.1} ({raw} -> {compressed} bytes)"
+        println!(
+            "[lz4] columna {COLUMN_VOLUME} -> {} bytes (x{ratio:.1})",
+            record.blocks.len()
         );
-        // Y descomprimir devuelve los 4096 bloques.
-        assert_eq!(record.decompressed_blocks().len(), 4096);
+        assert!(ratio > 5.0, "ratio {ratio:.1}");
+    }
+
+    #[test]
+    fn guarda_y_recupera_ediciones_en_todas_las_alturas() {
+        // El bug P0: antes solo se persistia y=64..80 y el resto se perdia.
+        let alturas: [usize; 9] = [0, 5, 63, 64, 79, 80, 100, 200, 383];
+        let mut column = Column::empty();
+        for (i, &y) in alturas.iter().enumerate() {
+            let block = match i % 3 {
+                0 => Block::Stone,
+                1 => Block::Obsidian,
+                _ => Block::Planks,
+            };
+            column.set(3, y, 7, block);
+        }
+        let record = ChunkRecord::from_column(&column);
+
+        let mut save = WorldSave::new(1, 0);
+        save.set_chunk(ChunkPos::new(0, 0), record);
+        let path = temp_path("alturas");
+        save.save_to(&path).unwrap();
+        let loaded = WorldSave::load_from(&path).unwrap();
+        cleanup(&path);
+
+        // Aplicamos el registro sobre una columna vacia: cada edicion vuelve.
+        let mut restored = Column::empty();
+        crate::world::store::apply_record(
+            &mut restored,
+            loaded.chunks.get(&ChunkPos::new(0, 0)).unwrap(),
+        );
+        for (i, &y) in alturas.iter().enumerate() {
+            let expected = match i % 3 {
+                0 => Block::Stone,
+                1 => Block::Obsidian,
+                _ => Block::Planks,
+            };
+            assert_eq!(restored.get(3, y, 7), expected, "y={y}");
+        }
+    }
+
+    #[test]
+    fn el_guardado_es_atomico_y_deja_bak_sin_tmp() {
+        let mut save = WorldSave::new(1, 0);
+        save.set_chunk(
+            ChunkPos::new(0, 0),
+            ChunkRecord::from_column(&Column::empty()),
+        );
+        let path = temp_path("atomic");
+        cleanup(&path);
+
+        // Primer guardado: crea el archivo, sin bak (no habia anterior).
+        save.save_to(&path).unwrap();
+        assert!(path.exists());
+        assert!(!with_suffix(&path, ".tmp").exists());
+
+        // Segundo guardado: rota el anterior a `.bak`.
+        save.player_pos = [1.0, 2.0, 3.0];
+        save.save_to(&path).unwrap();
+        assert!(path.exists());
+        assert!(
+            with_suffix(&path, ".bak").exists(),
+            "deberia existir el .bak"
+        );
+        assert!(!with_suffix(&path, ".tmp").exists());
+        let loaded = WorldSave::load_from(&path).unwrap();
+        assert_eq!(loaded.player_pos, [1.0, 2.0, 3.0]);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn un_id_de_bloque_desconocido_se_detecta() {
+        // 200 no es un id valido: no se debe cargar en silencio.
+        let mut raw = vec![Block::Stone.id(); COLUMN_VOLUME];
+        raw[100] = 200;
+        let record = ChunkRecord {
+            format_version: FORMAT_VERSION,
+            generator_version: GENERATOR_VERSION,
+            compressed: true,
+            y0: 0,
+            height: WORLD_HEIGHT as u32,
+            blocks: lz4_flex::compress_prepend_size(&raw),
+        };
+        assert_eq!(record.first_unknown_id(), Some(200));
+        assert!(!Block::is_known_id(200));
+        assert!(Block::is_known_id(Block::Podzol.id()));
+        assert!(
+            Block::is_known_id(Block::Obsidian.id()),
+            "obsidiana es valida"
+        );
+    }
+
+    #[test]
+    fn un_chunk_corrupto_se_detecta() {
+        let record = ChunkRecord {
+            format_version: FORMAT_VERSION,
+            generator_version: GENERATOR_VERSION,
+            compressed: true,
+            y0: 0,
+            height: WORLD_HEIGHT as u32,
+            blocks: vec![1, 2, 3, 4], // LZ4 invalido
+        };
+        assert!(record.is_corrupt());
     }
 
     #[test]
@@ -479,25 +718,65 @@ mod tests {
         let path = temp_path("player_pos");
         save.save_to(&path).unwrap();
         let loaded = WorldSave::load_from(&path).unwrap();
-        let _ = std::fs::remove_file(&path);
+        cleanup(&path);
         assert_eq!(loaded.player_pos, [12.5, 70.25, -3.75]);
     }
 
     #[test]
     fn un_mundo_v2_sin_posicion_se_lee_con_la_por_defecto() {
-        // Codificamos el struct v2 (sin `player_pos`) y comprobamos que se puede
-        // leer rellenando la posicion por defecto.
+        let mut header = WorldHeader::new(9, 123);
+        header.format_version = 2;
         let v2 = WorldSaveV2 {
-            header: WorldHeader::new(9, 123),
+            header,
             chunks: HashMap::new(),
         };
         let bytes = bincode::encode_to_vec(&v2, standard()).unwrap();
         let path = temp_path("v2_nopos");
         std::fs::write(&path, &bytes).unwrap();
         let loaded = WorldSave::load_from(&path).unwrap();
-        let _ = std::fs::remove_file(&path);
+        cleanup(&path);
         assert_eq!(loaded.header.seed, 9);
         assert_eq!(loaded.player_pos, DEFAULT_PLAYER_POS);
+    }
+
+    #[test]
+    fn un_mundo_v3_se_migra_conservando_la_seccion_antigua() {
+        // Emulamos un archivo v3: un registro con una seccion (4096 bytes) en
+        // layout antiguo. Debe migrar a v4 en `y0 = 64, height = 16`.
+        let mut raw = vec![Block::Air.id(); CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+        // Edicion en la capa local 5 del chunk -> y global 69.
+        let local = (5 * CHUNK_SIZE + 3) * CHUNK_SIZE + 2;
+        raw[local] = Block::Wood.id();
+        let old = ChunkRecordV3 {
+            format_version: 3,
+            generator_version: GENERATOR_VERSION,
+            compressed: true,
+            blocks: lz4_flex::compress_prepend_size(&raw),
+        };
+        let mut chunks = HashMap::new();
+        chunks.insert(ChunkPos::new(2, 3), old);
+        let mut header = WorldHeader::new(7, 1);
+        header.format_version = 3;
+        let v3 = WorldSaveV3 {
+            header,
+            chunks,
+            player_pos: [4.0, 5.0, 6.0],
+        };
+        let bytes = bincode::encode_to_vec(&v3, standard()).unwrap();
+        let path = temp_path("v3_migrate");
+        std::fs::write(&path, &bytes).unwrap();
+        let loaded = load_and_migrate(&path).unwrap();
+        cleanup(&path);
+
+        assert_eq!(loaded.header.format_version, FORMAT_VERSION);
+        assert_eq!(loaded.player_pos, [4.0, 5.0, 6.0]);
+        let record = loaded.chunks.get(&ChunkPos::new(2, 3)).unwrap();
+        assert_eq!(record.y0, LEGACY_TERRAIN_Y0);
+        assert_eq!(record.height, CHUNK_SIZE as u32);
+        // Aplicado, la edicion cae en y=69.
+        let mut col = Column::empty();
+        crate::world::store::apply_record(&mut col, record);
+        assert_eq!(col.get(2, 69, 3), Block::Wood);
     }
 
     #[test]
@@ -517,8 +796,6 @@ mod tests {
 
     #[test]
     fn la_cadena_aplica_migradores_hasta_el_actual() {
-        // Simulamos un mundo "v0" (un formato anterior) y comprobamos que la
-        // cadena se niega si no hay migrador.
         let mut save = WorldSave::new(1, 0);
         save.header.format_version = 0;
         let err = MigrationChain::with_builtins()
@@ -526,7 +803,6 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, SaveError::NoMigration { .. }));
 
-        // Con un migrador 0->1 deberia migrar.
         struct V0ToV1;
         impl WorldMigrator for V0ToV1 {
             fn from_version(&self) -> u32 {
@@ -544,22 +820,19 @@ mod tests {
 
     #[test]
     fn migrar_preserva_las_ediciones_del_jugador() {
-        // Lo critico de una migracion: los bloques que el jugador rompio/coloco
-        // NO se deben perder. Simulamos un mundo viejo con edits y migramos.
         let mut save = WorldSave::new(7, 999);
         save.header.format_version = 0;
 
         let mut column = Column::empty();
-        column.set(1, 2, 3, Block::Torch); // algo que el jugador puso
-        column.set(10, 4, 5, Block::Stone);
-        // Emulamos un registro v1: bloques SIN comprimir.
-        let mut original = ChunkRecord::from_column(&column, 0);
+        column.set(1, 2, 3, Block::Torch);
+        column.set(10, 100, 5, Block::Stone); // y=100 (fuera de la antigua seccion)
+        // Emulamos un registro v1: bloques sin comprimir.
+        let mut original = ChunkRecord::from_column(&column);
         original.blocks = original.decompressed_blocks();
         original.compressed = false;
         original.format_version = 1;
         save.set_chunk(ChunkPos::new(3, -2), original);
 
-        // Migrador 0->1 de prueba: solo sube la version (los datos no cambian).
         struct V0ToV1;
         impl WorldMigrator for V0ToV1 {
             fn from_version(&self) -> u32 {
@@ -574,39 +847,31 @@ mod tests {
                 r
             }
         }
-        // El builtin V1ToV2 se encarga de comprimir. La cadena completa es
-        // 0 -> 1 -> 2 (FORMAT_VERSION).
         let mut chain = MigrationChain::with_builtins();
         chain.push(Box::new(V0ToV1));
         let migrated = chain.migrate(save).unwrap();
 
         let record = migrated.chunks.get(&ChunkPos::new(3, -2)).unwrap();
         let blocks = record.decompressed_blocks();
-        // Los dos edits siguen ahi, en sus indices.
         let idx_torch = (2 * CHUNK_SIZE + 3) * CHUNK_SIZE + 1;
-        let idx_stone = (4 * CHUNK_SIZE + 5) * CHUNK_SIZE + 10;
+        let idx_stone = (100 * CHUNK_SIZE + 5) * CHUNK_SIZE + 10;
         assert_eq!(blocks[idx_torch], Block::Torch.id());
         assert_eq!(blocks[idx_stone], Block::Stone.id());
-        // Y el chunk quedo marcado con la version nueva.
         assert_eq!(record.format_version, FORMAT_VERSION);
     }
 
     #[test]
     fn un_mundo_viejo_se_puede_guardar_y_recargar_tras_migrar() {
-        // Punto a punto: guardar v0 en disco, migrar al cargar, y verificar que
-        // el resultado se puede volver a guardar/cargar sin corromperse.
         let mut save = WorldSave::new(5, 1);
         save.header.format_version = 0;
         let mut column = Column::empty();
         column.set(8, 8, 8, Block::Wood);
-        save.set_chunk(ChunkPos::new(0, 0), ChunkRecord::from_column(&column, 0));
+        save.set_chunk(ChunkPos::new(0, 0), ChunkRecord::from_column(&column));
 
         let path = temp_path("migrate_roundtrip");
         save.save_to(&path).unwrap();
-        // load_from no migra; load_and_migrate si (pero usa la cadena estandar,
-        // que no tiene 0->1). Cargamos y migramos a mano con el migrador.
         let loaded = WorldSave::load_from(&path).unwrap();
-        let _ = std::fs::remove_file(&path);
+        cleanup(&path);
 
         struct V0ToV1;
         impl WorldMigrator for V0ToV1 {
@@ -621,11 +886,10 @@ mod tests {
         chain.push(Box::new(V0ToV1));
         let migrated = chain.migrate(loaded).unwrap();
 
-        // Re-guardamos el mundo migrado y lo releemos: no debe fallar.
         let path2 = temp_path("migrate_roundtrip2");
         migrated.save_to(&path2).unwrap();
         let reopened = WorldSave::load_from(&path2).unwrap();
-        let _ = std::fs::remove_file(&path2);
+        cleanup(&path2);
         assert_eq!(reopened.header.format_version, FORMAT_VERSION);
         assert!(reopened.chunks.contains_key(&ChunkPos::new(0, 0)));
     }

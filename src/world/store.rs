@@ -17,7 +17,7 @@
 //! generacion en hilos con `rayon` es el objetivo de v0.5.1 completo; aqui
 //! dejamos la estructura lista (cola de peticiones) para anadirla encima.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::block::Block;
 use super::chunk::{CHUNK_SIZE, Column, SECTION_COUNT, WORLD_HEIGHT};
@@ -32,8 +32,11 @@ pub struct World {
     /// Columnas cargadas, por posicion de chunk.
     columns: HashMap<ChunkPos, Column>,
     /// Posiciones de las columnas que el jugador ha **modificado** (para
-    /// guardarlas y porque no hay que regenerarlas).
+    /// guardarlas y porque no hay que regenerarlas). El registro se reconstruye
+    /// de forma **perezosa** (al guardar/descargar), no en cada `set_block`.
     modified: HashMap<ChunkPos, ChunkRecord>,
+    /// Columnas cargadas con ediciones aun no volcadas a `modified`.
+    dirty: HashSet<ChunkPos>,
     /// Distancia de carga en chunks (radio, no diametro).
     view_radius: i32,
     /// Ultimo centro de carga (para no recalcular si no cambio).
@@ -54,6 +57,7 @@ impl World {
             generator: TerrainGenerator::new(seed),
             columns: HashMap::new(),
             modified: HashMap::new(),
+            dirty: HashSet::new(),
             view_radius,
             last_center: None,
             water: HashMap::new(),
@@ -144,9 +148,11 @@ impl World {
             return false;
         };
         column.set(local[0], local[1], local[2], block);
-        // Toda columna editada se guarda; registramos su chunk.
-        self.modified
-            .insert(pos, ChunkRecord::from_column(column, TERRAIN_SECTION));
+        // La columna queda sucia: el registro persistente se reconstruye al
+        // guardar o al descargar (no aqui: comprimir 98 KB por bloque seria
+        // carisimo). Asi el guardado captura tambien las ediciones por encima y
+        // por debajo de la antigua seccion fija.
+        self.dirty.insert(pos);
         // El agua: un bloque `Water` nuevo es fuente (sin desborde); cualquier
         // otro bloque borra el desborde previo. Ademas, los vecinos pueden
         // reaccionar (agua que cae a un hueco, etc.).
@@ -195,9 +201,10 @@ impl World {
         }
     }
 
-    /// ¿Esta el chunk en `pos` modificado por el jugador?
+    /// ¿Esta el chunk en `pos` modificado por el jugador? (Incluye ediciones
+    /// aun no volcadas a `modified`.)
     pub fn is_modified(&self, pos: ChunkPos) -> bool {
-        self.modified.contains_key(&pos)
+        self.modified.contains_key(&pos) || self.dirty.contains(&pos)
     }
 
     /// Itera las posiciones de las columnas cargadas.
@@ -439,6 +446,10 @@ impl World {
         }
         self.last_center = Some(center);
 
+        // Volcar las ediciones pendientes a sus registros ANTES de descargar:
+        // asi una columna editada no pierde nada al salir del radio.
+        self.sync_modified();
+
         // 1. Descargar lo que quede fuera del radio.
         let mut unloaded = Vec::new();
         self.columns.retain(|pos, _| {
@@ -470,7 +481,27 @@ impl World {
         self.columns.get(&pos)
     }
 
+    /// Reconstruye los registros persistentes de las columnas cargadas
+    /// pendientes (dirty) y limpia la marca. Se llama antes de guardar y antes
+    /// de descargar columnas.
+    pub fn sync_modified(&mut self) {
+        if self.dirty.is_empty() {
+            return;
+        }
+        let pending: Vec<ChunkPos> = self.dirty.iter().copied().collect();
+        for pos in pending {
+            if let Some(column) = self.columns.get(&pos) {
+                let record = ChunkRecord::from_column(column);
+                self.modified.insert(pos, record);
+            }
+        }
+        self.dirty.clear();
+    }
+
     /// Todos los registros modificados, para guardar el mundo.
+    ///
+    /// Llama antes a [`World::sync_modified`] si puede haber ediciones propias de
+    /// este frame sin volcar.
     pub fn modified_records(&self) -> &HashMap<ChunkPos, ChunkRecord> {
         &self.modified
     }
@@ -629,12 +660,15 @@ impl FluidGrid for World {
 pub const TERRAIN_SECTION: usize = 4;
 
 /// Aplica los bloques de un `ChunkRecord` a una columna (descomprime si hace
-/// falta).
+/// falta). Escribe `record.height` capas a partir de `record.y0`, de modo que
+/// los registros migrados de v3 (una seccion en `y=64`) y los nuevos (columna
+/// completa) conviven.
 pub fn apply_record(column: &mut Column, record: &ChunkRecord) {
     let blocks = record.decompressed_blocks();
-    let y0 = TERRAIN_SECTION * CHUNK_SIZE;
+    let y0 = record.y0 as usize;
+    let y_end = (y0 + record.height as usize).min(WORLD_HEIGHT);
     let mut i = 0usize;
-    for y in y0..(y0 + CHUNK_SIZE).min(WORLD_HEIGHT) {
+    for y in y0..y_end {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 if let Some(&id) = blocks.get(i) {

@@ -139,6 +139,9 @@ pub struct Renderer {
     pipeline: ScenePipeline,
     highlight_pipeline: HighlightPipeline,
     highlight_mesh: Option<Mesh>,
+    /// Bloque del ultimo resaltado, para no recrear la malla GPU si el jugador
+    /// sigue apuntando al mismo bloque (se recreaba cada frame).
+    highlight_hit: Option<[i32; 3]>,
 
     /// Pipeline de la interfaz 2D (hotbar/inventario) y su textura.
     ui: UiPipeline,
@@ -241,6 +244,7 @@ impl Renderer {
             pipeline,
             highlight_pipeline,
             highlight_mesh: None,
+            highlight_hit: None,
             ui,
             _gui_texture: gui_texture,
             world,
@@ -630,7 +634,16 @@ impl Renderer {
     }
 
     /// Actualiza el wireframe del bloque apuntado.
+    ///
+    /// No recrea la malla si el bloque apuntado no cambio: apuntar al mismo
+    /// bloque durante muchos frames es lo normal, y crear buffers GPU cada frame
+    /// era churn innecesario.
     pub fn set_highlight(&mut self, hit: Option<RayHit>) {
+        let key = hit.map(|h| h.block);
+        if key == self.highlight_hit {
+            return;
+        }
+        self.highlight_hit = key;
         self.highlight_mesh = hit.map(|h| {
             let (v, i) = cube_edges(
                 h.block[0] as f32 + 0.5,
@@ -642,8 +655,10 @@ impl Renderer {
         });
     }
 
-    /// Volca TODAS las columnas modificadas, para guardar el mundo.
-    pub fn snapshot_modified(&self) -> Vec<(ChunkPos, ChunkRecord)> {
+    /// Volca TODAS las columnas modificadas, para guardar el mundo. Antes de
+    /// clonarlas, vuelca al registro persistente las ediciones aun pendientes.
+    pub fn snapshot_modified(&mut self) -> Vec<(ChunkPos, ChunkRecord)> {
+        self.world.sync_modified();
         self.world
             .modified_records()
             .iter()

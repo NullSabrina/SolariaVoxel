@@ -8,20 +8,27 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.11` — Agua interactiva y antorcha corregida
+## Estado actual: `v0.8.12` — Persistencia v4 (columna completa y atómica)
 
-- **Agua**: el rayo **atraviesa** el agua/lava (no se apuntan), así puedes
-  romper/colocar el bloque del fondo o de detrás; el resaltado ya no marca el
-  líquido. La superficie queda **2/16 por debajo** del borde del bloque (como
-  Minecraft), no a tope.
-- **Antorcha**: se dibuja como en el `.bbmodel` (las caras visibles son las
-  **tablas cruzadas**; el palo usa la textura "blank").
-- Hereda de **v0.8.9**: inventario con todos los bloques. **v0.8.8**: agua como
-  líquido continuo. **v0.8.7**: cache de ruido 2D, decoración, cuevas.
+Primera fase de la auditoría maestra (corrección de datos, P0):
+
+- **Guardado vertical completo**: `ChunkRecord` persiste las **24 secciones** de
+  la columna (no solo `y=64..80`). Las ediciones en cualquier `y` (0…383)
+  sobreviven a cerrar/reabrir. `FORMAT_VERSION = 4` con **migrador v3→v4**.
+- **Guardado atómico**: `world.vf.tmp` → `world.vf` (rotando `.bak`); nunca queda
+  un archivo truncado a medias. El flag de guardado solo se marca si terminó bien
+  (reintentable).
+- **Registro perezoso** (dirty set): no se recomprime la columna en cada
+  `set_block`, sólo al guardar o descargar.
+- Al cargar se validan **chunks corruptos** e **IDs de bloque desconocidos**
+  (antes se convertían a aire en silencio).
+- El **highlight** reutiliza la malla GPU si el bloque apuntado no cambia.
+- Hereda de **v0.8.11**: agua interactiva + antorcha. **v0.8.9**: inventario con
+  todos los bloques.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (Etapa 2): **mobs** (usando
-`physics`).
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): streaming
+asíncrono, luz incremental, meshing async.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
