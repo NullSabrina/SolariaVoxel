@@ -191,6 +191,72 @@ pub fn craft_active() -> bool {
     std::env::var("SOLARIA_CRAFT").is_ok()
 }
 
+/// ¿Mostrar una poza de lava subterranea? (`SOLARIA_CAVE`).
+pub fn cave_active() -> bool {
+    std::env::var("SOLARIA_CAVE").is_ok()
+}
+
+/// Escena de cueva (`SOLARIA_CAVE=1`): busca una poza de lava real generada
+/// por el terreno, vacia una sala a su alrededor y coloca la camara dentro
+/// mirandola. Si no hay ninguna cerca, talla una de muestra y lo avisa.
+pub fn build_cave(renderer: &mut Renderer, camera: &mut Camera) {
+    let cx = camera.position.x.floor() as i32;
+    let cz = camera.position.z.floor() as i32;
+
+    // 1. Buscar lava generada en un radio de 48 (da igual que este tapada:
+    // la sala la deja al descubierto).
+    let mut found: Option<[i32; 3]> = None;
+    'scan: for dz in -48..=48 {
+        for dx in -48..=48 {
+            for y in 6..12 {
+                if renderer.block_at([cx + dx, y, cz + dz]) == Block::Lava {
+                    found = Some([cx + dx, y, cz + dz]);
+                    break 'scan;
+                }
+            }
+        }
+    }
+
+    let (lx, ly, lz, natural) = match found {
+        Some(p) => (p[0], p[1], p[2], true),
+        // Plan B: sala de muestra tallada a mano (el generador se verifica
+        // con tests; aqui importa el render y la luz).
+        None => (cx, 8, cz, false),
+    };
+
+    // 2. Vaciar una sala de 7x5x7 alrededor (se conserva el suelo y la lava:
+    // lo segundo es justo lo que venimos a ver).
+    let mut edits: Vec<([i32; 3], Block)> = Vec::new();
+    for dy in 0..5 {
+        for dz in -3..=3 {
+            for dx in -3..=3 {
+                let p = [lx + dx, ly + dy, lz + dz];
+                if renderer.block_at(p) != Block::Lava {
+                    edits.push((p, Block::Air));
+                }
+            }
+        }
+    }
+    if !natural {
+        // Poza de muestra 3x3 con suelo de obsidiana.
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                edits.push(([lx + dx, ly, lz + dz], Block::Lava));
+                edits.push(([lx + dx, ly - 1, lz + dz], Block::Obsidian));
+            }
+        }
+    }
+    renderer.set_blocks(&edits);
+
+    // 3. Camara dentro de la sala, mirando a la lava.
+    camera.position = Vec3::new(lx as f32 - 2.0, ly as f32 + 2.0, lz as f32 + 2.0);
+    camera.yaw_deg = 59.0;
+    camera.pitch_deg = -27.0;
+    camera.update_view();
+    renderer.set_highlight(None);
+    println!("[engine] demo: cueva en [{lx},{ly},{lz}] (natural: {natural})");
+}
+
 /// Escena de la mesa de crafteo (`SOLARIA_CRAFT=1`): parcela plana, una mesa
 /// delante y la interfaz abierta con 2x2 de tablones (resultado: mesa).
 /// Devuelve `(mesa, rejilla, resultado)` para que `App` abra la UI igual que

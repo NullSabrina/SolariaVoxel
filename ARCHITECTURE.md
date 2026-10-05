@@ -156,7 +156,7 @@ una migracion**; hay tests que lo verifican.
   directo a la GPU sin transponer.
 - **Un bloque = un `u8`** en el chunk (1 byte/voxel; 16^3 = 4096 bytes).
 - **`is_solid` vs `is_visible`**: `is_solid` = colisiona y ocluye caras;
-  `is_visible` = se dibuja pero no bloquea (antorcha, **agua** y **hojas**). El
+  `is_visible` = se dibuja pero no bloquea (antorcha, **liquidos** y **hojas**). El
   mesher dibuja `is_solid || is_visible` y solo oculta una cara si el vecino es
   solido. Las hojas, ademas, son **no solidas** y con **cutout** (huecos de alfa
   0): se atraviesan y se ven por sus huecos.

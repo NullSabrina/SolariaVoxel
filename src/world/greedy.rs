@@ -183,8 +183,9 @@ fn greedy_range(
                     }
 
                     // Emitimos el rectangulo. `v` local se convierte a coordenada
-                    // real del plano. El agua va a su propio buffer (translucido).
-                    let (target_v, target_i) = if key.block == Block::Water.id() {
+                    // real del plano. Los liquidos van a su propio buffer
+                    // (translucido).
+                    let (target_v, target_i) = if Block::from_u8(key.block).is_liquid() {
                         (&mut water_vertices, &mut water_indices)
                     } else {
                         (&mut vertices, &mut indices)
@@ -271,10 +272,11 @@ fn mask_value(
     // El vecino puede estar fuera de la columna (otro chunk): la query decide.
     let (nx, ny, nz) = (x as i32 + ox, y as i32 + oy, z as i32 + oz);
     let neighbor = query(nx, ny, nz);
-    if block == Block::Water {
-        // El agua es visible pero no solida: solo asoma su cara contra **aire**
-        // (no contra agua ni contra un solido, que la ocluye).
-        if neighbor == Block::Water || neighbor.is_solid() {
+    if block.is_liquid() {
+        // Los liquidos (agua, lava) son visibles pero no solidos: solo asoma
+        // su cara contra **aire** (no contra liquido ni contra un solido, que
+        // la ocluye).
+        if neighbor.is_liquid() || neighbor.is_solid() {
             return None;
         }
     } else if block == Block::Leaves {

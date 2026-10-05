@@ -725,6 +725,8 @@ impl ApplicationHandler for App {
                     demo::build_overview(camera);
                 } else if demo::collide_active() {
                     demo::build_collision(renderer, camera);
+                } else if demo::cave_active() {
+                    demo::build_cave(renderer, camera);
                 } else if demo::craft_active() {
                     let (table, grid, result) = demo::build_crafting(renderer, camera);
                     self.crafting_open = true;

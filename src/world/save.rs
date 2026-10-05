@@ -43,7 +43,9 @@ pub const FORMAT_VERSION: u32 = 3;
 /// * v6: **vegetacion**: arboles (tronco de madera + copa de hojas) por bioma.
 /// * v7: **clima/biomas avanzados** (temperatura+humedad), relieve por bioma
 ///   (ridged para montanas), superficie variada, cuevas 3D y acuiferos.
-pub const GENERATOR_VERSION: u32 = 7;
+/// * v8: **pozas de lava** en cuevas profundas (con suelo de obsidiana) y
+///   bloques `Lava`/`Obsidian`.
+pub const GENERATOR_VERSION: u32 = 8;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD"; // VoxelForge World / Solaria

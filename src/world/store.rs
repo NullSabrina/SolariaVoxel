@@ -498,14 +498,14 @@ impl World {
         }
         let below = [p[0], p[1] - 1, p[2]];
         let below_open = self.in_bounds(below)
-            && !self.get_block(below).is_solid()
+            && !self.get_block(below).blocks_fluid()
             && self.water_level(below) < MAX_LEVEL;
         if below_open {
             return false;
         }
         for d in [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] {
             let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
-            if !self.in_bounds(n) || self.get_block(n).is_solid() {
+            if !self.in_bounds(n) || self.get_block(n).blocks_fluid() {
                 continue;
             }
             if self.water_level(n) < MAX_LEVEL - 1 {
@@ -612,7 +612,8 @@ impl FluidGrid for World {
     }
 
     fn is_solid(&self, p: [i32; 3]) -> bool {
-        self.get_block(p).is_solid()
+        // Para el agua, la lava cuenta como obstaculo (no fluye dentro).
+        self.get_block(p).blocks_fluid()
     }
 
     fn fluid(&self, p: [i32; 3]) -> Fluid {
@@ -877,6 +878,32 @@ mod tests {
         assert!(world.water_at([8, 101, 8]).is_source(), "la fuente sigue");
         // El nivel decrece al alejarse de la fuente.
         assert!(world.water_level([8, 101, 8]) > world.water_level([9, 101, 8]));
+    }
+
+    #[test]
+    fn el_agua_no_fluye_dentro_de_la_lava() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 0, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        // Suelo de piedra y un canal: fuente de agua en x=8, lava en x=5.
+        for z in 7..=9i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                world.set_block([x, 100, z], Block::Stone);
+            }
+        }
+        world.set_block([5, 101, 8], Block::Lava);
+        world.set_block([8, 101, 8], Block::Water);
+        for _ in 0..60 {
+            world.tick_water(100_000);
+        }
+        // El agua llega hasta al lado, pero la celda de lava sigue intacta
+        // (bloque y sin fluido de agua dentro).
+        assert_eq!(world.get_block([5, 101, 8]), Block::Lava);
+        assert_eq!(world.water_at([5, 101, 8]), Fluid::None);
+        assert!(
+            world.water_at([6, 101, 8]).is_water() || world.water_at([4, 101, 8]).is_water(),
+            "el agua deberia acercarse a la lava"
+        );
     }
 
     #[test]

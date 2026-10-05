@@ -69,6 +69,11 @@ pub enum Block {
     Gravel,
     /// Podzol: suelo acido de taiga/bosque humedo (capa superior).
     Podzol,
+    /// Lava: liquido **estatico** que brilla (no entra en el sim de agua).
+    /// Nada en ella (flota igual que en agua) pero no hace dano todavia.
+    Lava,
+    /// Obsidiana: roca formada bajo las pozas de lava; dura y oscura.
+    Obsidian,
 }
 
 impl Default for Block {
@@ -97,6 +102,8 @@ impl Block {
             12 => Block::CoarseDirt,
             13 => Block::Gravel,
             14 => Block::Podzol,
+            15 => Block::Lava,
+            16 => Block::Obsidian,
             _ => Block::Air,
         }
     }
@@ -107,33 +114,45 @@ impl Block {
         self as u8
     }
 
-    /// ¿Ocupa espacio? (no bloquean: aire, antorcha, agua y **hojas**, que son
-    /// transparentes y se atraviesan).
+    /// ¿Ocupa espacio? (no bloquean: aire, antorcha, liquidos y **hojas**, que
+    /// son transparentes y se atraviesan).
     #[inline]
     pub fn is_solid(self) -> bool {
         !matches!(
             self,
-            Block::Air | Block::Torch | Block::Water | Block::Leaves
+            Block::Air | Block::Torch | Block::Water | Block::Lava | Block::Leaves
         )
     }
 
-    /// ¿Es un bloque que se dibuja pero no bloquea? (antorcha, agua y hojas).
+    /// ¿Es un bloque que se dibuja pero no bloquea? (antorcha, liquidos y hojas).
     #[inline]
     pub fn is_visible(self) -> bool {
-        matches!(self, Block::Torch | Block::Water | Block::Leaves)
+        matches!(
+            self,
+            Block::Torch | Block::Water | Block::Lava | Block::Leaves
+        )
     }
 
     /// ¿Es un liquido? (para la fisica de nado y el render translucido).
     #[inline]
     pub fn is_liquid(self) -> bool {
-        matches!(self, Block::Water)
+        matches!(self, Block::Water | Block::Lava)
     }
 
-    /// Luz que **emite** el bloque (0..15). La antorcha emite 14.
+    /// ¿Bloquea el paso del **agua** en la simulacion? Los solidos y la lava
+    /// (el agua no fluye dentro de la lava; la reaccion agua+lava queda para
+    /// mas adelante).
+    #[inline]
+    pub fn blocks_fluid(self) -> bool {
+        self.is_solid() || matches!(self, Block::Lava)
+    }
+
+    /// Luz que **emite** el bloque (0..15). La antorcha emite 14, la lava 15.
     #[inline]
     pub fn light_emission(self) -> u8 {
         match self {
             Block::Torch => 14,
+            Block::Lava => 15,
             _ => 0,
         }
     }
@@ -173,15 +192,17 @@ impl Block {
                 Face::NegY => 11, // base de tablones
                 _ => 12,          // lateral
             },
-            // Tierra gruesa: un tile propio (14) para distinguirla de la tierra.
             Block::CoarseDirt => 14,
-            // Grava (15): cantos grises.
             Block::Gravel => 15,
             // Podzol: capa superior propia (16); debajo, como la tierra.
             Block::Podzol => match face {
                 Face::PosY => 16,
                 _ => 2,
             },
+            // Lava brillante (tile con rojos/naranjas).
+            Block::Lava => 17,
+            // Obsidiana oscura con motas violaceas.
+            Block::Obsidian => 18,
         }
     }
 }
@@ -200,6 +221,8 @@ mod tests {
             Block::Water,
             Block::Planks,
             Block::CraftingTable,
+            Block::Lava,
+            Block::Obsidian,
         ] {
             assert_eq!(Block::from_u8(b.id()), b);
         }
@@ -256,9 +279,11 @@ mod tests {
             Block::CoarseDirt,
             Block::Gravel,
             Block::Podzol,
+            Block::Lava,
+            Block::Obsidian,
         ] {
             for face in Face::ALL {
-                assert!(b.face_tile(face) < 17, "{b:?} {face:?}");
+                assert!(b.face_tile(face) < 19, "{b:?} {face:?}");
             }
         }
         // Hierba: verde arriba, tierra abajo, lateral distinto.
@@ -283,5 +308,16 @@ mod tests {
         assert_eq!(Block::CraftingTable.face_tile(Face::PosY), 13);
         assert_eq!(Block::CraftingTable.face_tile(Face::NegY), 11);
         assert_eq!(Block::CraftingTable.face_tile(Face::PosX), 12);
+        // La lava es liquida visible que emite 15 y bloquea el flujo de agua.
+        assert!(Block::Lava.is_liquid());
+        assert!(Block::Lava.is_visible());
+        assert!(!Block::Lava.is_solid());
+        assert_eq!(Block::Lava.light_emission(), 15);
+        assert!(Block::Lava.blocks_fluid());
+        assert_eq!(Block::Lava.face_tile(Face::PosY), 17);
+        // La obsidiana es solida y no emite.
+        assert!(Block::Obsidian.is_solid());
+        assert_eq!(Block::Obsidian.light_emission(), 0);
+        assert_eq!(Block::Obsidian.face_tile(Face::PosY), 18);
     }
 }

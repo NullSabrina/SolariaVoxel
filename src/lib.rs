@@ -10,18 +10,16 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.5 — Clima, biomas avanzados y cuevas 3D
+//! ## Estado actual: v0.8.6 - Lava, obsidiana y texturas de tierras nuevas
 //!
-//! Worldgen de nueva generacion: mapa de **clima** (temperatura/humedad) -> 7
-//! biomas, **relieve por bioma** (ridged en montanas), superficie variada
-//! (`CoarseDirt`/`Gravel`/`Podzol`), **cuevas** spaghetti/cheese/pillar y
-//! **acuiferos**. Ademas: fuentes de agua 2x2 y oceanos en equilibrio a coste
-//! cero.
+//! * Bloques **`Lava`** (liquido estatico que emite 15) y **`Obsidian`**.
+//!   Atlas 64x64 -> **64x80** con los tiles 14-18 pintados.
+//! * **Pozas de lava** en cuevas profundas con suelo de obsidiana
+//!   (`GENERATOR_VERSION` 8); el agua no fluye dentro de la lava.
 //!
-//! Hereda de v0.8.4 (fisica AABB + agua), v0.8.3 (texturas + dim) y v0.8.2
-//! (mesa de crafteo).
+//! Hereda de v0.8.5 (clima, cuevas 3D, acuiferos).
 //!
-//! Siguiente (Etapa 2): **mobs** (usando `physics`) y **lava`.
+//! Siguiente (Etapa 2): **mobs** (usando `physics`).
 //!
 //! ## Organizacion del codigo
 //!

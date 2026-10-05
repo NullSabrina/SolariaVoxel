@@ -1367,6 +1367,32 @@ bloques; `atlas.rs` `TILES` 14 -> 17 (64x80) con tiles 14-16 procedurales;
 153 tests. **Asset pendiente**: `assets/atlas.png` es 64x64 y se ignora (medida
 esperada 64x80) hasta que la IA de diseno lo repinte; mientras, atlas procedural.
 
+### 2026-10-05 (v0.8.6) — Lava, obsidiana y texturas de tierras nuevas
+
+**Decision.** (1) Pintar en LibreSprite los tiles 14-16 pendientes
+(`CoarseDirt`, `Gravel`, `Podzol`) y crecer el atlas a 64x80. (2) Nuevos bloques
+`Lava` (id 15, tile 17, liquido estatico que emite 15) y `Obsidian` (id 16, tile
+18) con su arte (tiles 17-18). (3) Pozas de lava en cuevas profundas (y 6..11,
+celdas de 3x3) con suelo de obsidiana; `GENERATOR_VERSION` 7 -> 8.
+
+**Motivo.** El codigo v0.8.5 esperaba 17 tiles pero el PNG seguia en 64x64, asi
+que el juego usaba el fallback procedural (las tierras nuevas se veian "de
+codigo"). La lava/obsidiana las pidio el usuario para completar el set. La lava
+es estatica a proposito: el automata de agua no la mueve (nueva
+`Block::blocks_fluid`, usada en `FluidGrid::is_solid` y en equilibrio); el flujo
+de lava y la reaccion agua+lava quedan para mas adelante.
+
+**Alternativas descartadas.** (a) Lava con niveles del sim de agua: contaminaria
+el mapa de fluido y el render de superficies; estatica + emision 15 da el 90%
+visual con 0 riesgo. (b) Generar obsidiana como anillo por vecindad: necesita
+leer columnas vecinas (con otra superficie); el suelo horneado bajo la lava es
+local y siempre queda pegado a ella.
+
+**Consecuencia.** Rama de liquidos del greedy generalizada (`is_liquid`), lava
+al buffer translucido, nada en agua y flota igual. Demo `SOLARIA_CAVE=1` (busca
+una poza real; si no hay, talla muestra). 155 tests (pozas con suelo, agua que
+no entra en lava).
+
 ---
 
 ## Plantilla para futuras entradas

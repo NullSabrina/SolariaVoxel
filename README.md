@@ -8,7 +8,14 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.5` — Clima, biomas avanzados y cuevas 3D
+## Estado actual: `v0.8.6` — Lava, obsidiana y texturas de tierras nuevas
+
+- Nuevos bloques **`Lava`** (id 15, tile 17, liquido estatico que emite luz 15)
+  y **`Obsidian`** (id 16, tile 18, roca dura). Atlas 64x64 -> **64x80** con los
+  tiles 14-18 pintados (tierra gruesa, grava, podzol, lava, obsidiana).
+- **Pozas de lava** en cuevas profundas (y 6..11) con **suelo de obsidiana**;
+  `GENERATOR_VERSION` 7 -> 8. El agua no fluye dentro de la lava.
+- Hereda de **v0.8.5**: clima/biomas avanzados, cuevas 3D y acuiferos.
 
 Worldgen de nueva generación (`GENERATOR_VERSION = 7`):
 
@@ -25,12 +32,8 @@ Worldgen de nueva generación (`GENERATOR_VERSION = 7`):
   **v0.8.2**: mesa de crafteo.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar. Siguiente (Etapa 2): **mobs** (usando `physics`) y **lava**.
-
-> **Asset pendiente:** el atlas creció a 17 tiles (64x80). `assets/atlas.png`
-> sigue siendo 64x64, así que el juego usa el **atlas procedural** hasta que la
-> IA de diseño lo repinte a 64x80 con los tiles 14-16 (tierra gruesa, grava,
-> podzol).
+der = colocar (sobre una mesa, la abre). Siguiente (Etapa 2): **mobs** (usando
+`physics`).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

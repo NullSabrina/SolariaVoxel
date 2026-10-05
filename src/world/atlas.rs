@@ -15,7 +15,7 @@
 pub const TILE: u32 = 16;
 
 /// Numero de tiles en el atlas (0..TILES).
-pub const TILES: u32 = 17;
+pub const TILES: u32 = 19;
 
 /// Tiles por fila.
 pub const COLS: u32 = 4;
@@ -333,6 +333,28 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
                 i if i < -1 => [92, 64, 38],
                 i if i < 7 => [110, 78, 46],
                 _ => [128, 92, 54],
+            };
+            opaque(c)
+        }
+        // 17: lava (amarillos y naranjas incandescentes, opaca: brilla por
+        // emision, no por alfa).
+        17 => {
+            let g = grain(x, y, tile);
+            let c = match g {
+                i if i < -6 => [255, 214, 64],
+                i if i < 2 => [255, 178, 34],
+                i if i < 9 => [238, 122, 28],
+                _ => [198, 82, 22],
+            };
+            opaque(c)
+        }
+        // 18: obsidiana (casi negra violacea con motas mas claras).
+        18 => {
+            let g = grain(x, y, tile);
+            let c = match g {
+                i if i < -6 => [24, 18, 34],
+                i if i < 4 => [38, 28, 52],
+                _ => [58, 44, 78],
             };
             opaque(c)
         }

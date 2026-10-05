@@ -187,6 +187,38 @@ impl TerrainGenerator {
         30 + ((n * 0.5 + 0.5) * 26.0) as i32
     }
 
+    /// Altura maxima de las pozas de lava (profundas, sobre la bedrock).
+    pub const LAVA_TOP: i32 = 11;
+
+    /// ¿La columna `(x, z)` es el centro de una poza de lava? Celdas de 3x3 con
+    /// un 12% de probabilidad (hash determinista, independiente de la columna
+    /// vecina, para que el borde de obsidiana coincida).
+    fn is_lava_pool(x: i32, z: i32) -> bool {
+        hash01(x.div_euclid(3), z.div_euclid(3)) < 0.12
+    }
+
+    /// ¿`y` esta en la banda donde puede haber lava?
+    fn is_lava_band(y: usize) -> bool {
+        (super::caves::BEDROCK_CLEAR as usize) < y && y <= Self::LAVA_TOP as usize
+    }
+
+    /// ¿Nace lava en la celda `(x, y, z)`? Se cumplen tres cosas: estar en la
+    /// banda profunda, caer en una celda de poza y tener suelo firme (roca sin
+    /// cavar justo debajo, que se horneara a obsidiana).
+    fn is_lava_here(
+        caves: &CaveSystem,
+        x: i32,
+        y: usize,
+        z: i32,
+        surface: i32,
+        aquifer: i32,
+    ) -> bool {
+        Self::is_lava_band(y)
+            && Self::is_lava_pool(x, z)
+            && y > 0
+            && caves.carve(x, y as i32 - 1, z, surface, aquifer) == Carve::None
+    }
+
     /// Altura del terreno (numero de bloques solidos) en `(x, z)`.
     pub fn height(&self, world_x: i32, world_z: i32) -> usize {
         let biome = self.biome_at(world_x, world_z);
@@ -241,8 +273,38 @@ impl TerrainGenerator {
                     // Cuevas y acuiferos antes de colocar el terreno.
                     if has_caves {
                         match self.caves.carve(wx, y as i32, wz, height as i32, aquifer) {
-                            Carve::Air => continue,
+                            Carve::Air => {
+                                // ¿Poza de lava? Cueva con suelo firme en la
+                                // banda profunda: se rellena de lava y el suelo
+                                // se "hornea" a obsidiana.
+                                if Self::is_lava_here(
+                                    &self.caves,
+                                    wx,
+                                    y,
+                                    wz,
+                                    height as i32,
+                                    aquifer,
+                                ) {
+                                    column.set(x, y, z, Block::Lava);
+                                    column.set(x, y - 1, z, Block::Obsidian);
+                                }
+                                continue;
+                            }
                             Carve::Water => {
+                                // En una poza de lava el calor evapora el agua
+                                // del acuifero: tambien nace lava.
+                                if Self::is_lava_here(
+                                    &self.caves,
+                                    wx,
+                                    y,
+                                    wz,
+                                    height as i32,
+                                    aquifer,
+                                ) {
+                                    column.set(x, y, z, Block::Lava);
+                                    column.set(x, y - 1, z, Block::Obsidian);
+                                    continue;
+                                }
                                 column.set(x, y, z, Block::Water);
                                 continue;
                             }
@@ -680,5 +742,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn las_pozas_de_lava_nacen_profundas_con_suelo_de_obsidiana() {
+        let g = TerrainGenerator::new(13_371);
+        let mut lava = 0u32;
+        for cz in 0..4 {
+            for cx in 0..4 {
+                let column = g.generate_column(cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
+                for y in 0..24usize {
+                    for z in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            if column.get(x, y, z) != Block::Lava {
+                                continue;
+                            }
+                            assert!(
+                                (6..=11).contains(&y),
+                                "lava fuera de la banda profunda: y={y}"
+                            );
+                            assert_eq!(
+                                column.get(x, y - 1, z),
+                                Block::Obsidian,
+                                "lava sin suelo de obsidiana en ({x},{y},{z})"
+                            );
+                            lava += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(lava > 0, "deberia haber pozas de lava en 64x64");
     }
 }
