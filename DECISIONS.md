@@ -790,6 +790,26 @@ nuevos (pared, deslizamiento, espacio libre, no chocar con el suelo). Demo
 `SOLARIA_COLLIDE=1` empuja al jugador contra un muro para verificar en captura
 que se detiene delante (z=18.37 con el muro en 18).
 
+### 2026-10-05 (v0.7.0) — Biomas con ruido Worley
+
+**Decision.** El generador reparte el mundo en tres biomas (desierto, bosque,
+nieve) con un ruido **Worley** (cellular) de baja frecuencia (`0.02`, celdas de
+~50 bloques). El bioma decide el bloque de superficie: arena / hierba / nieve.
+Nuevo bloque `Snow` (id 8, tile 9) pintado en `assets/atlas.png` con LibreSprite.
+
+**Motivo.** Es el hito `v0.7.0` de la guia ("Biomas Simples") y cierra la etapa 1
+del roadmap ("mundo jugable"). Worley da regiones compactas (mejor que umbrales
+de Perlin, que dan franjas).
+
+**Alternativas descartadas.** Dos campos Perlin (temperatura/humedad) con
+umbrales: la guia pide Worley y las regiones de Worley son mas "bioma".
+
+**Consecuencia.** `Biome` y `TerrainGenerator::biome_at`. `GENERATOR_VERSION`
+sube a 1 -> 2 (cambia la generacion). Los mundos guardados siguen cargando: los
+bloques se guardan por id y `Snow` es un id nuevo sin colision. `TILES` pasa de
+9 a 10; el tile 9 ya cabia en el atlas 64x48.
+
+
 
 
 

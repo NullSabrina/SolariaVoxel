@@ -29,4 +29,4 @@ pub use save::{
     WorldHeader, WorldMigrator, WorldSave, load_and_migrate,
 };
 pub use store::{StreamChange, World};
-pub use terrain::TerrainGenerator;
+pub use terrain::{Biome, TerrainGenerator};

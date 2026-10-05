@@ -55,6 +55,8 @@ pub enum Block {
     Leaves,
     /// Antorcha: no es solida (se puede atravesar) pero **emite luz**.
     Torch,
+    /// Nieve: superficie de los biomas frios.
+    Snow,
 }
 
 impl Default for Block {
@@ -76,6 +78,7 @@ impl Block {
             5 => Block::Wood,
             6 => Block::Leaves,
             7 => Block::Torch,
+            8 => Block::Snow,
             _ => Block::Air,
         }
     }
@@ -130,6 +133,8 @@ impl Block {
             // La antorcha usa un tile propio. Desde v0.6.2 no se dibuja como
             // cubo, sino como dos quads cruzados (ver `emit_torch_cross`).
             Block::Torch => 8,
+            // Nieve (biomas frios).
+            Block::Snow => 9,
         }
     }
 }
@@ -177,9 +182,10 @@ mod tests {
             Block::Sand,
             Block::Wood,
             Block::Leaves,
+            Block::Snow,
         ] {
             for face in Face::ALL {
-                assert!(b.face_tile(face) < 9, "{b:?} {face:?}");
+                assert!(b.face_tile(face) < 10, "{b:?} {face:?}");
             }
         }
         // Hierba: verde arriba, tierra abajo, lateral distinto.
@@ -193,6 +199,11 @@ mod tests {
         // La antorcha usa siempre el tile 8.
         for face in Face::ALL {
             assert_eq!(Block::Torch.face_tile(face), 8);
+        }
+        // La nieve usa siempre el tile 9 y es solida.
+        assert!(Block::Snow.is_solid());
+        for face in Face::ALL {
+            assert_eq!(Block::Snow.face_tile(face), 9);
         }
     }
 }

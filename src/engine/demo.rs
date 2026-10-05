@@ -35,6 +35,21 @@ pub fn collide_active() -> bool {
     std::env::var("SOLARIA_COLLIDE").is_ok()
 }
 
+/// ¿Mostrar la vista aerea de biomas? (`SOLARIA_BIOMES`).
+pub fn biomes_active() -> bool {
+    std::env::var("SOLARIA_BIOMES").is_ok()
+}
+
+/// Vista aerea para ver los biomas (`SOLARIA_BIOMES=1`): sube la camara y mira
+/// hacia abajo, sin tocar el terreno, para apreciar las manchas de
+/// arena/hierba/nieve que reparte el ruido de Worley.
+pub fn build_overview(camera: &mut Camera) {
+    camera.position = Vec3::new(8.0, 150.0, 20.0);
+    camera.yaw_deg = 0.0;
+    camera.pitch_deg = -52.0;
+    camera.update_view();
+}
+
 /// Escena para **verificar la colision horizontal**: una pared solida delante y
 /// el jugador empujando hacia ella durante 3 s (sin input real: llamamos a
 /// `move_horizontal` en un bucle). Al capturar debe verse la pared de cerca y

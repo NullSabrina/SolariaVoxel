@@ -8,20 +8,20 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.6.5` — Colision horizontal (la camara no entra en bloques)
+## Estado actual: `v0.7.0` — Biomas (desierto, bosque, nieve)
 
-- El jugador ya **no atraviesa paredes**: se mueve eje a eje contra el mundo y se
-  **desliza** a lo largo de las paredes. Antes solo habia fisica vertical, asi
-  que la camara podia meterse dentro del terreno caminando en horizontal.
-- Hereda de v0.6.4: **ciclo dia/noche** (luz de cielo y de bloque separadas).
-- Hereda de v0.6.3: consolidacion (tests + `ARCHITECTURE.md`). v0.6.2: la
-  **antorcha como cruz fina** (dos quads + cutout) y el **atlas como array de
-  texturas**.
-- Sobre v0.6.1: block light. v0.6.0: luz de cielo. v0.5.x: LZ4 + streaming.
-  v0.4.x: romper/colocar, greedy, colisiones.
+- El generador reparte el mundo en **tres biomas** con ruido **Worley**:
+  desierto (arena), bosque (hierba) y nieve. Nuevo bloque **`Snow`** (tile 9,
+  pintado en `assets/atlas.png`).
+- **Cierra la etapa 1 del roadmap** ("mundo jugable": romper/colocar, versionado
+  de mundo, luz y biomas).
+- Hereda de v0.6.5: **colision horizontal** (la camara no entra en bloques).
+  v0.6.4: ciclo dia/noche. v0.6.3: consolidacion. v0.6.2: antorcha como cruz
+  fina + atlas de texturas. v0.6.1: block light. v0.6.0: luz de cielo.
+  v0.5.x: LZ4 + streaming. v0.4.x: romper/colocar, greedy, colisiones.
 
-Pendiente (anotado en `DECISIONS.md`): el palo 3D del `.bbmodel`, la antorcha de
-pared inclinada 22.5°, y los biomas (v0.7.x del roadmap).
+Siguiente (v0.7.x del roadmap): **cuevas** (v0.7.1) y **oceanos** (v0.7.2).
+Pendiente tambien el palo 3D del `.bbmodel` y la antorcha de pared.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

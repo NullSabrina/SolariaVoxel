@@ -354,7 +354,9 @@ impl ApplicationHandler for App {
         if self.demo {
             self.day_cycle = DayCycle::new(demo::time_of_day());
             if let (Some(renderer), Some(camera)) = (self.renderer.as_mut(), self.camera.as_mut()) {
-                if demo::collide_active() {
+                if demo::biomes_active() {
+                    demo::build_overview(camera);
+                } else if demo::collide_active() {
                     demo::build_collision(renderer, camera);
                 } else {
                     let torch = demo::build(renderer, camera);

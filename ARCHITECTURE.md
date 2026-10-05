@@ -89,7 +89,7 @@ Puntos clave:
 
 ```
 TerrainGenerator (semilla)
-      │  genera_column(x,z)
+      │  genera_column(x,z)  -> altura (Perlin) + bioma (Worley) + superficie
       v
    Column (24 x Chunk de 16^3, + arrays de luz cielo/bloque)
       │  greedy::greedy_section_query(query, light, section, origin)

@@ -15,7 +15,7 @@
 pub const TILE: u32 = 16;
 
 /// Numero de tiles en el atlas (0..TILES).
-pub const TILES: u32 = 9;
+pub const TILES: u32 = 10;
 
 /// Tiles por fila.
 pub const COLS: u32 = 4;
@@ -194,6 +194,19 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
             } else {
                 [0, 0, 0, 0] // fondo transparente
             }
+        }
+        // 9: nieve (blancos y azules claros), opaca.
+        9 => {
+            let c = if noise > 6 {
+                [255, 255, 255]
+            } else if noise > -3 {
+                [240, 246, 252]
+            } else if noise > -10 {
+                [216, 230, 242]
+            } else {
+                [192, 212, 228]
+            };
+            opaque(c)
         }
         _ => [0, 0, 0, 0],
     }

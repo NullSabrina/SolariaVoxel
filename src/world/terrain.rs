@@ -1,17 +1,19 @@
-//! Generacion de terreno procedural con ruido Perlin.
+//! Generacion de terreno procedural con ruido Perlin y **biomas**.
 //!
 //! Este modulo convierte una semilla + la posicion `(x, z)` de una columna en
-//! **altura** y **tipo de bloque de superficie**. Es el paso clave para pasar
-//! de una columna de ejemplo a un mundo continuo (en v0.3.1, de varios chunks).
+//! **altura**, **bioma** y **tipo de bloque de superficie**.
 //!
-//! Usamos dos capas de ruido Perlin (crate `noise`):
-//! * una de baja frecuencia para el relieve general (colinas y valles), y
-//! * otra de mas frecuencia para el detalle.
+//! Usamos:
+//! * dos capas de ruido Perlin (crate `noise`) para el relieve (colinas y
+//!   valles), y
+//! * un ruido **Worley** (cellular) para repartir el mundo en **biomas**
+//!   (desierto, bosque, nieve): cada celda de Worley tiene un valor y ese valor
+//!   decide el bioma.
 //!
-//! Mas adelante (v0.7.0) este generador se versionara y anadira biomas y
-//! cuevas; por eso ya vive en su propio tipo [`TerrainGenerator`].
+//! Mas adelante (v0.7.1) se anadiran cuevas; por eso el generador ya vive en su
+//! propio tipo [`TerrainGenerator`].
 
-use noise::{NoiseFn, Perlin};
+use noise::{NoiseFn, Perlin, Worley};
 
 use super::block::Block;
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
@@ -19,13 +21,26 @@ use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 /// Altura media del terreno, en bloques.
 pub const SEA_LEVEL: i32 = 64;
 
+/// Los biomas del mundo. El bioma decide el bloque de superficie.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Biome {
+    /// Arena (desierto).
+    Desert,
+    /// Hierba (bosque).
+    Forest,
+    /// Nieve (tundra).
+    Snow,
+}
+
 /// Generador deterministico: la misma semilla produce siempre el mismo mundo.
 pub struct TerrainGenerator {
     /// Ruido de baja frecuencia: el relieve grande.
     base: Perlin,
     /// Ruido de detalle: pequenas variaciones.
     detail: Perlin,
-    /// Semilla original (la guardaremos en el header del mundo en v0.5.0).
+    /// Ruido cellular para repartir los biomas.
+    biome: Worley,
+    /// Semilla original (la guardamos en el header del mundo).
     seed: u32,
 }
 
@@ -36,6 +51,8 @@ impl TerrainGenerator {
             base: Perlin::new(seed),
             // Otra semilla distinta para que los dos ruidos no sean iguales.
             detail: Perlin::new(seed.wrapping_mul(0x9E37_79B9).wrapping_add(1)),
+            // Worley de baja frecuencia: celdas de ~50 bloques.
+            biome: Worley::new(seed.wrapping_add(0xB1_0B1)).set_frequency(0.02),
             seed,
         }
     }
@@ -48,7 +65,7 @@ impl TerrainGenerator {
     /// Altura del terreno (numero de bloques solidos) en `(x, z)` del mundo.
     ///
     /// Sumamos una onda grande y otra pequena; el resultado queda en
-    /// `[48, 96]`, es decir, dentro de la seccion 3 (y en `48..64`).
+    /// `[48, 96]`.
     pub fn height(&self, world_x: i32, world_z: i32) -> usize {
         let x = world_x as f64;
         let z = world_z as f64;
@@ -59,6 +76,19 @@ impl TerrainGenerator {
         (h.round() as i32).clamp(48, 96) as usize
     }
 
+    /// Bioma en `(x, z)` del mundo. Worley (ReturnType::Value) devuelve un valor
+    /// pseudoaleatorio por celda en `[0, 1)`; lo partimos en tres tercios.
+    pub fn biome_at(&self, world_x: i32, world_z: i32) -> Biome {
+        let v = self.biome.get([world_x as f64, world_z as f64]);
+        if v < 0.34 {
+            Biome::Desert
+        } else if v < 0.67 {
+            Biome::Forest
+        } else {
+            Biome::Snow
+        }
+    }
+
     /// Rellena una columna del mundo con terreno segun su posicion `(world_x,
     /// world_z)`.
     pub fn generate_column(&self, world_x: i32, world_z: i32) -> Column {
@@ -67,9 +97,9 @@ impl TerrainGenerator {
 
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
+                let biome = self.biome_at(world_x + x as i32, world_z + z as i32);
                 for y in 0..height {
-                    let block = surface_block(y, height);
-                    column.set(x, y, z, block);
+                    column.set(x, y, z, surface_block(y, height, biome));
                 }
             }
         }
@@ -78,14 +108,24 @@ impl TerrainGenerator {
     }
 }
 
-/// Elige el bloque de la profundidad `y` para una columna de altura `height`.
-fn surface_block(y: usize, height: usize) -> Block {
+/// Elige el bloque de la profundidad `y` para una columna de altura `height` y
+/// bioma `biome`.
+fn surface_block(y: usize, height: usize, biome: Biome) -> Block {
     if y + 1 == height {
-        Block::Grass // la capa de arriba es hierba
+        // Capa de arriba segun el bioma.
+        match biome {
+            Biome::Desert => Block::Sand,
+            Biome::Forest => Block::Grass,
+            Biome::Snow => Block::Snow,
+        }
     } else if y + 4 >= height {
-        Block::Dirt // las 3 capas de debajo, tierra
+        // Sub-suelo: en el desierto tambien es arena; en el resto, tierra.
+        match biome {
+            Biome::Desert => Block::Sand,
+            _ => Block::Dirt,
+        }
     } else {
-        Block::Stone // el resto, piedra
+        Block::Stone
     }
 }
 
@@ -105,6 +145,7 @@ mod tests {
         let a = TerrainGenerator::new(1234);
         let b = TerrainGenerator::new(1234);
         assert_eq!(a.height(10, 20), b.height(10, 20));
+        assert_eq!(a.biome_at(10, 20), b.biome_at(10, 20));
     }
 
     #[test]
@@ -130,13 +171,51 @@ mod tests {
     }
 
     #[test]
-    fn la_columna_generada_tiene_superficie_y_subsuelo() {
+    fn hay_los_tres_biomas_en_un_area_grande() {
+        let generator = TerrainGenerator::new(13371);
+        let mut desert = false;
+        let mut forest = false;
+        let mut snow = false;
+        for x in -400..400 {
+            for z in -400..400 {
+                match generator.biome_at(x, z) {
+                    Biome::Desert => desert = true,
+                    Biome::Forest => forest = true,
+                    Biome::Snow => snow = true,
+                }
+            }
+        }
+        assert!(desert && forest && snow, "faltan biomas en la muestra");
+    }
+
+    #[test]
+    fn la_superficie_depende_del_bioma() {
         let generator = TerrainGenerator::new(99);
         let column = generator.generate_column(0, 0);
         let h = generator.height(0, 0);
-        assert_eq!(column.get(0, h - 1, 0), Block::Grass);
-        assert_eq!(column.get(0, h - 2, 0), Block::Dirt);
-        assert_eq!(column.get(0, 0, 0), Block::Stone);
+        // La capa de arriba debe ser la del bioma de esa columna.
+        let expected = match generator.biome_at(0, 0) {
+            Biome::Desert => Block::Sand,
+            Biome::Forest => Block::Grass,
+            Biome::Snow => Block::Snow,
+        };
+        assert_eq!(column.get(0, h - 1, 0), expected);
+        // El subsuelo no es aire y la superficie tiene aire encima.
+        assert!(column.get(0, h - 2, 0).is_solid());
         assert_eq!(column.get(0, h, 0), Block::Air);
+        assert_eq!(column.get(0, 0, 0), Block::Stone);
+    }
+
+    #[test]
+    fn el_desierto_es_arena_hasta_el_subsuelo() {
+        // surface_block directo: en el desierto las 4 capas de arriba son arena.
+        for y in (0..64).rev() {
+            let h = 64;
+            if y + 4 >= h {
+                assert_eq!(surface_block(y, h, Biome::Desert), Block::Sand);
+            } else {
+                assert_eq!(surface_block(y, h, Biome::Desert), Block::Stone);
+            }
+        }
     }
 }

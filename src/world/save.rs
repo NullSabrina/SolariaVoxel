@@ -32,7 +32,10 @@ use super::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Column, WORLD_HEIGHT};
 pub const FORMAT_VERSION: u32 = 2;
 
 /// Version actual del generador de terreno.
-pub const GENERATOR_VERSION: u32 = 1;
+///
+/// * v1: solo colinas (Perlin), superficie de hierba/tierra/piedra.
+/// * v2: biomas (Worley) con superficie de arena/hierba/nieve.
+pub const GENERATOR_VERSION: u32 = 2;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD"; // VoxelForge World / Solaria
