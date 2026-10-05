@@ -127,8 +127,8 @@ impl Block {
                 _ => 5,                       // corteza
             },
             Block::Leaves => 7,
-            // La antorcha usa un tile propio (cruz de textura, en v0.6.1 lo
-            // representamos como un bloque pequeno con esta cara).
+            // La antorcha usa un tile propio. Desde v0.6.2 no se dibuja como
+            // cubo, sino como dos quads cruzados (ver `emit_torch_cross`).
             Block::Torch => 8,
         }
     }
@@ -154,5 +154,15 @@ mod tests {
     fn solo_el_aire_no_es_solido() {
         assert!(!Block::Air.is_solid());
         assert!(Block::Grass.is_solid());
+    }
+
+    #[test]
+    fn la_antorcha_es_visible_pero_no_solida() {
+        assert!(!Block::Torch.is_solid());
+        assert!(Block::Torch.is_visible());
+        // Y emite luz, que es su razon de ser.
+        assert_eq!(Block::Torch.light_emission(), 14);
+        // Los solidos no son "visibles no solidos".
+        assert!(!Block::Stone.is_visible());
     }
 }

@@ -18,7 +18,6 @@
 //! Nota: dos caras del mismo bloque pero distinto `tile` (p.ej. la hierba tiene
 //! cara lateral distinta a la de arriba) NO se fusionan.
 
-use super::atlas::tile_uv_rect;
 use super::block::{Block, Face};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 use crate::render::mesh::Vertex;
@@ -177,6 +176,32 @@ fn greedy_range(
         }
     }
 
+    // Antorchas: geometria propia (dos quads cruzados), no entra en el greedy
+    // porque cada una es un objeto fino, no una cara de cubo. Las caras de los
+    // bloques solidos vecinos ya se han emitido arriba: una antorcha no ocluye
+    // (el vecino solo oculta si es solido).
+    for y in y_start..y_end {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                if query(x as i32, y as i32, z as i32) != Block::Torch {
+                    continue;
+                }
+                let level = light(x as i32, y as i32, z as i32);
+                let light_f = level as f32 / super::chunk::MAX_LIGHT as f32;
+                super::mesher::emit_torch_cross(
+                    &mut vertices,
+                    &mut indices,
+                    origin,
+                    x,
+                    y,
+                    z,
+                    Block::Torch,
+                    light_f,
+                );
+            }
+        }
+    }
+
     (vertices, indices)
 }
 
@@ -201,8 +226,10 @@ fn mask_value(
     };
 
     let block = query(x as i32, y as i32, z as i32);
-    // Se dibuja lo solido y lo "visible no solido" (la antorcha).
-    if !block.is_solid() && !block.is_visible() {
+    // Solo los bloques solidos aportan caras de cubo. La antorcha (visible pero
+    // no solida) se emite aparte, como una cruz de dos planos (ver el bucle de
+    // antorchas en `greedy_range`).
+    if !block.is_solid() {
         return None;
     }
     let (ox, oy, oz) = face.offset();
@@ -238,7 +265,6 @@ fn emit_quad(
 ) {
     let block = super::block::Block::from_u8(key.block);
     let tile = block.face_tile(face);
-    let [tu0, tv0, tu1, tv1] = tile_uv_rect(tile);
 
     // Las 4 esquinas en coordenadas de mundo, segun la cara. `du`/`dv` son los
     // incrementos del plano (ya en unidades de bloque). El rectangulo va de
@@ -246,6 +272,10 @@ fn emit_quad(
     let (u0, v0) = (u as f32, v as f32);
     let (u1, v1) = ((u + width) as f32, (v + height) as f32);
     let cf = c as f32;
+
+    // UVs en unidades de tile: una cara de W x H bloques usa 0..W, 0..H para
+    // que el tile se repita por bloque (el sampler repite). Asi no se estira.
+    let (w, h) = (width as f32, height as f32);
 
     // `origin` desplaza la columna a su sitio del mundo.
     let (ox, oy, oz) = (origin[0], origin[1], origin[2]);
@@ -257,14 +287,14 @@ fn emit_quad(
             let x = cf + 1.0;
             (
                 [[x, v0, u1], [x, v0, u0], [x, v1, u0], [x, v1, u1]],
-                [[tu0, tv0], [tu1, tv0], [tu1, tv1], [tu0, tv1]],
+                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
             )
         }
         Face::NegX => {
             let x = cf;
             (
                 [[x, v0, u0], [x, v0, u1], [x, v1, u1], [x, v1, u0]],
-                [[tu0, tv0], [tu1, tv0], [tu1, tv1], [tu0, tv1]],
+                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
             )
         }
         Face::PosY => {
@@ -272,14 +302,14 @@ fn emit_quad(
             let y = cf + 1.0;
             (
                 [[u0, y, v0], [u1, y, v0], [u1, y, v1], [u0, y, v1]],
-                [[tu0, tv0], [tu1, tv0], [tu1, tv1], [tu0, tv1]],
+                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
             )
         }
         Face::NegY => {
             let y = cf;
             (
                 [[u0, y, v1], [u1, y, v1], [u1, y, v0], [u0, y, v0]],
-                [[tu0, tv0], [tu1, tv0], [tu1, tv1], [tu0, tv1]],
+                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
             )
         }
         Face::PosZ => {
@@ -287,14 +317,14 @@ fn emit_quad(
             let z = cf + 1.0;
             (
                 [[u0, v0, z], [u1, v0, z], [u1, v1, z], [u0, v1, z]],
-                [[tu0, tv0], [tu1, tv0], [tu1, tv1], [tu0, tv1]],
+                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
             )
         }
         Face::NegZ => {
             let z = cf;
             (
                 [[u1, v0, z], [u0, v0, z], [u0, v1, z], [u1, v1, z]],
-                [[tu0, tv0], [tu1, tv0], [tu1, tv1], [tu0, tv1]],
+                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
             )
         }
     };
@@ -307,6 +337,7 @@ fn emit_quad(
             [corner[0] + ox, corner[1] + oy, corner[2] + oz],
             *uv,
             light,
+            tile as u32,
         ));
     }
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -375,5 +406,26 @@ mod tests {
             .sum();
         // Al menos un 80% menos de indices.
         assert!(gi.len() * 5 < naive, "greedy {} vs naive {naive}", gi.len());
+    }
+
+    #[test]
+    fn la_antorcha_se_dibuja_como_cruz_no_como_cubo() {
+        let mut column = Column::empty();
+        column.set(8, 8, 8, Block::Torch);
+        let (vertices, indices) = greedy_column(&column, [0.0; 3]);
+        // Dos planos x 4 vertices, dos planos x 2 triangulos (nada de 6 caras).
+        assert_eq!(vertices.len(), 8, "dos quads cruzados");
+        assert_eq!(indices.len(), 12);
+        assert!(vertices.iter().all(|v| v.tile == 8));
+    }
+
+    #[test]
+    fn la_antorcha_no_oculta_las_caras_vecinas() {
+        // Piedra con antorcha en su cara +X: la cara de la piedra se conserva.
+        let mut column = Column::empty();
+        column.set(8, 8, 8, Block::Stone);
+        column.set(9, 8, 8, Block::Torch);
+        let (vertices, _) = greedy_column(&column, [0.0; 3]);
+        assert_eq!(vertices.len(), 6 * 4 + 8, "6 caras de piedra + cruz");
     }
 }

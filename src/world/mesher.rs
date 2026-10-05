@@ -8,9 +8,8 @@
 //! que las caras entre dos secciones apiladas se descartan correctamente. Solo
 //! generamos las caras que dan al aire (*face culling*).
 
-use super::atlas::tile_uv_rect;
-use super::block::Face;
-use super::chunk::{CHUNK_SIZE, Column, SECTION_COUNT, WORLD_HEIGHT};
+use super::block::{Block, Face};
+use super::chunk::{CHUNK_SIZE, Column, MAX_LIGHT, SECTION_COUNT, WORLD_HEIGHT};
 use crate::render::mesh::Vertex;
 
 /// La malla de una seccion concreta de la columna.
@@ -35,11 +34,27 @@ pub fn mesh_column(column: &Column, origin: [f32; 3]) -> Vec<SectionMesh> {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let block = column.get(x, y, z);
+                let section = &mut per_section[y / CHUNK_SIZE];
+
+                // La antorcha no es un cubo: se dibuja como dos quads cruzados.
+                if block == Block::Torch {
+                    let light = combined_light_f(column, x, y, z);
+                    emit_torch_cross(
+                        &mut section.0,
+                        &mut section.1,
+                        origin,
+                        x,
+                        y,
+                        z,
+                        block,
+                        light,
+                    );
+                    continue;
+                }
                 if !block.is_solid() {
                     continue;
                 }
 
-                let section = &mut per_section[y / CHUNK_SIZE];
                 let (xi, yi, zi) = (x as i32, y as i32, z as i32);
 
                 for face in Face::ALL {
@@ -82,6 +97,13 @@ pub fn mesh_section(column: &Column, section: usize, origin: [f32; 3]) -> Sectio
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let block = column.get(x, y, z);
+
+                // La antorcha no es un cubo: se dibuja como dos quads cruzados.
+                if block == Block::Torch {
+                    let light = combined_light_f(column, x, y, z);
+                    emit_torch_cross(&mut vertices, &mut indices, origin, x, y, z, block, light);
+                    continue;
+                }
                 if !block.is_solid() {
                     continue;
                 }
@@ -135,14 +157,65 @@ fn add_face(
         Face::NegZ => [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]],
     };
 
-    let [u0, v0, u1, v1] = tile_uv_rect(tile);
-    let uvs = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+    // Una cara de 1x1 usa el tile entero (0..1); el array de texturas lo aisla.
+    let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
 
     let base = vertices.len() as u32;
     for (corner, uv) in corners.iter().zip(uvs.iter()) {
-        vertices.push(Vertex::new(*corner, *uv));
+        vertices.push(Vertex::new(*corner, *uv, tile as u32));
     }
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+/// Luz combinada (cielo vs bloque) de una celda, normalizada a 0..1.
+fn combined_light_f(column: &Column, x: usize, y: usize, z: usize) -> f32 {
+    column.combined_light(x, y, z) as f32 / MAX_LIGHT as f32
+}
+
+/// Emite la geometria de una antorcha: **dos quads verticales cruzados**, uno en
+/// el plano `X = centro` y otro en el plano `Z = centro` del voxel (la "cruz"
+/// que se ve desde arriba). Ambos usan el tile entero de la antorcha; el shader
+/// descarta el alfa bajo (cutout), asi que solo se ve la llama y el palo, no el
+/// fondo transparente.
+///
+/// El pipeline dibuja sin *culling* (caras traseras incluidas), asi que cada
+/// plano se emite una sola vez y se ve por sus dos caras.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_torch_cross(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    origin: [f32; 3],
+    x: usize,
+    y: usize,
+    z: usize,
+    block: Block,
+    light: f32,
+) {
+    let (x0, y0, z0) = (
+        origin[0] + x as f32,
+        origin[1] + y as f32,
+        origin[2] + z as f32,
+    );
+    let (x1, y1, z1) = (x0 + 1.0, y0 + 1.0, z0 + 1.0);
+    let (cx, cz) = (x0 + 0.5, z0 + 0.5);
+    let tile = block.face_tile(Face::PosY) as u32;
+
+    // UVs con `v = 0` arriba y `v = 1` abajo: el tile tiene la llama en la parte
+    // alta y el palo debajo, como en el modelo de Blockbench.
+    let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+
+    // Plano X = centro: recorre Z (u) e Y (v).
+    let plane_x = [[cx, y0, z1], [cx, y0, z0], [cx, y1, z0], [cx, y1, z1]];
+    // Plano Z = centro: recorre X (u) e Y (v).
+    let plane_z = [[x0, y0, cz], [x1, y0, cz], [x1, y1, cz], [x0, y1, cz]];
+
+    for corners in [plane_x, plane_z] {
+        let base = vertices.len() as u32;
+        for (corner, uv) in corners.iter().zip(uvs.iter()) {
+            vertices.push(Vertex::with_light(*corner, *uv, light, tile));
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
 }
 
 #[cfg(test)]
@@ -193,5 +266,37 @@ mod tests {
             assert!(s.indices.iter().all(|&i| (i as usize) < s.vertices.len()));
             assert_eq!(s.indices.len() % 3, 0);
         }
+    }
+
+    #[test]
+    fn la_antorcha_emite_dos_quads_cruzados() {
+        let mut column = Column::empty();
+        column.set(8, 8, 8, Block::Torch);
+        let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
+        assert_eq!(sections.len(), 1);
+        // Dos planos x 4 vertices, dos planos x 2 triangulos.
+        assert_eq!(sections[0].vertices.len(), 8);
+        assert_eq!(sections[0].indices.len(), 12);
+        // Todas las caras usan el tile de la antorcha.
+        assert!(sections[0].vertices.iter().all(|v| v.tile == 8));
+        assert!(
+            sections[0]
+                .indices
+                .iter()
+                .all(|&i| (i as usize) < sections[0].vertices.len())
+        );
+    }
+
+    #[test]
+    fn la_antorcha_no_tapa_las_caras_vecinas() {
+        // Piedra con una antorcha pegada a su cara +X: la cara de la piedra que
+        // da a la antorcha sigue dibujandose (la antorcha no ocluye).
+        let mut column = Column::empty();
+        column.set(8, 8, 8, Block::Stone);
+        column.set(9, 8, 8, Block::Torch);
+        let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
+        let total: usize = sections.iter().map(|s| s.vertices.len()).sum();
+        // 6 caras de la piedra (24) + 2 quads de la antorcha (8).
+        assert_eq!(total, 32);
     }
 }

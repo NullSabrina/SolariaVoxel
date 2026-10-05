@@ -24,8 +24,8 @@ pub fn cube_edges(cx: f32, cy: f32, cz: f32, inflate: f32) -> ([Vertex; 8], [u32
         [cx + h, cy + h, cz + h], // 6
         [cx - h, cy + h, cz + h], // 7
     ];
-    // UV sin usar, a cero.
-    let vertices = corners.map(|p| Vertex::new(p, [0.0, 0.0]));
+    // UV y tile sin usar (el shader de resaltado los ignora).
+    let vertices = corners.map(|p| Vertex::new(p, [0.0, 0.0], 0));
     // 12 aristas (pares de esquinas).
     let indices = [
         0, 1, 1, 2, 2, 3, 3, 0, // cara -Z

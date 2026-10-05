@@ -61,6 +61,9 @@ impl ScenePipeline {
         let (atlas_texture, atlas_view) = Self::create_atlas_texture(device, queue);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene.atlas.sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
@@ -88,7 +91,7 @@ impl ScenePipeline {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -186,16 +189,18 @@ impl ScenePipeline {
         }
     }
 
-    /// Crea la textura del atlas a partir de los pixels generados en
-    /// [`crate::world::atlas::build_pixels`] y los sube a la GPU.
+    /// Crea el array de texturas (una capa de 16x16 por tile) a partir del atlas
+    /// y lo sube a la GPU. Cada capa es un tile aislado, asi que las UVs pueden
+    /// repetirse por bloque sin sangrado entre tiles.
     fn create_atlas_texture(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> (wgpu::Texture, wgpu::TextureView) {
+        use crate::world::atlas::{TILE, TILES};
         let size = wgpu::Extent3d {
-            width: atlas::WIDTH,
-            height: atlas::HEIGHT,
-            depth_or_array_layers: 1,
+            width: TILE,
+            height: TILE,
+            depth_or_array_layers: TILES,
         };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene.atlas"),
@@ -208,7 +213,7 @@ impl ScenePipeline {
             view_formats: &[],
         });
 
-        let pixels = atlas::build_pixels();
+        let tiles = atlas::split_tiles(&atlas::load_pixels());
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -216,16 +221,19 @@ impl ScenePipeline {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &pixels,
+            &tiles,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(atlas::WIDTH * 4),
-                rows_per_image: Some(atlas::HEIGHT),
+                bytes_per_row: Some(TILE * 4),
+                rows_per_image: Some(TILE),
             },
             size,
         );
 
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         (texture, view)
     }
 

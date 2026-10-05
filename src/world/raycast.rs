@@ -1,8 +1,12 @@
 //! Raycast sobre la rejilla de voxeles (algoritmo de Amanatides y Woo).
 //!
 //! Lanza un rayo desde el ojo del jugador en la direccion en que mira y devuelve
-//! el primer **bloque solido** que golpea, junto con la **cara** por la que entra
-//! (para poder colocar el bloque nuevo justo al lado).
+//! el primer **bloque golpeable** que toca, junto con la **cara** por la que
+//! entra (para poder colocar el bloque nuevo justo al lado).
+//!
+//! Que es "golpeable" lo decide el llamante con un predicado. El juego usa
+//! `is_solid || is_visible`, para poder apuntar y romper tambien la antorcha
+//! (solida no, pero visible si).
 //!
 //! El algoritmo recorre las celdas de la rejilla en el orden en que el rayo las
 //! atraviesa (DDA 3D): en cada paso avanza por el eje cuyo siguiente cruce esta
@@ -16,23 +20,24 @@ use super::block::{Block, Face};
 /// Resultado de un impacto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RayHit {
-    /// Coordenadas del bloque solido golpeado (en voxeles, no en metros).
+    /// Coordenadas del bloque golpeado (en voxeles, no en metros).
     pub block: [i32; 3],
     /// Cara del bloque por la que ha entrado el rayo.
     pub face: Face,
 }
 
 /// Lanza un rayo desde `origin` en direccion `dir` (no hace falta normalizar) y
-/// devuelve el primer bloque solido a una distancia menor que `max_distance`.
+/// devuelve el primer bloque golpeable a una distancia menor que `max_distance`.
 ///
-/// `is_solid` consulta el bloque en coordenadas de voxel; devuelve `true` si es
-/// solido. Mantener esta funcion como parametro desacopla el raycast del mundo
-/// concreto y permite testearlo con un plano simple.
+/// `is_hit` consulta el bloque en coordenadas de voxel; devuelve `true` si el
+/// rayo debe detenerse ahi (bloque solido, o visible no solido como la antorcha).
+/// Mantener esta funcion como parametro desacopla el raycast del mundo concreto
+/// y permite testearlo con un plano simple.
 pub fn raycast(
     origin: Vec3,
     dir: Vec3,
     max_distance: f32,
-    is_solid: impl Fn(i32, i32, i32) -> bool,
+    is_hit: impl Fn(i32, i32, i32) -> bool,
 ) -> Option<RayHit> {
     let dir = dir.normalize();
     if dir == Vec3::ZERO {
@@ -59,8 +64,8 @@ pub fn raycast(
         first_crossing(origin.z, voxel[2], dir.z),
     ];
 
-    // Si empezamos dentro de un bloque solido, no hay cara de entrada clara.
-    if is_solid(voxel[0], voxel[1], voxel[2]) {
+    // Si empezamos dentro de un bloque golpeable, no hay cara de entrada clara.
+    if is_hit(voxel[0], voxel[1], voxel[2]) {
         return Some(RayHit {
             block: voxel,
             face: Face::PosY,
@@ -85,7 +90,7 @@ pub fn raycast(
         voxel[axis] += step[axis];
         t_max[axis] += t_delta[axis];
 
-        if is_solid(voxel[0], voxel[1], voxel[2]) {
+        if is_hit(voxel[0], voxel[1], voxel[2]) {
             // La cara golpeada es la opuesta al avance en ese eje.
             let face = face_from_step(axis, step[axis]);
             return Some(RayHit { block: voxel, face });
@@ -193,6 +198,18 @@ mod tests {
         let is_solid = |x: i32, _y: i32, _z: i32| x == 3;
         let hit = raycast(origin, dir, 10.0, is_solid).expect("golpe");
         assert_eq!(hit.block, [3, 0, 0]);
+        assert_eq!(hit.face, Face::NegX);
+    }
+
+    #[test]
+    fn golpea_un_bloque_visible_no_solido() {
+        // Simula una antorcha: una celda golpeable en x=4 que no seria "solida".
+        // El raycast no distingue: se detiene en el primer `is_hit`.
+        let origin = Vec3::new(0.5, 0.5, 0.5);
+        let dir = Vec3::new(1.0, 0.0, 0.0);
+        let is_hit = |x: i32, y: i32, z: i32| y == 0 && z == 0 && x == 4;
+        let hit = raycast(origin, dir, 10.0, is_hit).expect("deberia golpear la antorcha");
+        assert_eq!(hit.block, [4, 0, 0]);
         assert_eq!(hit.face, Face::NegX);
     }
 }

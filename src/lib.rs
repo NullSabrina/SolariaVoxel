@@ -10,14 +10,23 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.6.1 — Block light (antorchas)
+//! ## Estado actual: v0.6.2 — La antorcha se dibuja como cruz fina
 //!
-//! * Bloque `Torch`: no solido, se dibuja y **emite luz 14**.
-//! * `Column::compute_block_light` propaga la luz con un **flood-fill BFS**
-//!   que pierde 1 por paso y no atraviesa bloques solidos.
-//! * La luz dibujada es `max(cielo, bloque)`. Con las teclas 1/2/3 se elige
-//!   piedra/madera/antorcha a colocar.
-//! * Sobre v0.6.0: luz de cielo; v0.5.x: LZ4, mundo en memoria + streaming.
+//! * La antorcha ya **no es un cubo**: el mesher emite **dos quads cruzados**
+//!   (planos `X = centro` y `Z = centro`) con el tile 8, y el shader hace
+//!   *cutout* (descarta alfa < 0.5): se ve el palo fino y la llama, con el fondo
+//!   transparente, como el modelo de Blockbench.
+//! * El **raycast** golpea tambien bloques visibles no solidos (`is_solid ||
+//!   is_visible`), asi que la antorcha se puede apuntar, resaltar y romper.
+//! * Las caras de los bloques solidos vecinos a una antorcha se siguen
+//!   dibujando (una antorcha no ocluye).
+//! * Sobre v0.6.1: block light (antorchas, flood-fill BFS) y atlas cargado de
+//!   `assets/atlas.png` como array de texturas con cutout. v0.6.0: luz de cielo;
+//!   v0.5.x: LZ4, mundo en memoria + streaming.
+//!
+//! Pendiente (anotado en DECISIONS.md): el **palo 3D** del `.bbmodel` (cubo
+//! `7,0,7→9,10,9`) y la **antorcha de pared** inclinada 22.5°, para una version
+//! posterior dedicada al modelo de la antorcha.
 //!
 //! ## Organizacion del codigo
 //!

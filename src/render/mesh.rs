@@ -16,37 +16,42 @@ use wgpu::util::DeviceExt;
 pub struct Vertex {
     /// Posicion en el espacio del mundo (x, y, z).
     pub position: [f32; 3],
-    /// Coordenadas de textura dentro del atlas (u, v).
+    /// Coordenadas de textura **dentro del tile**, en unidades de tile (una cara
+    /// fusionada de W x H bloques usa 0..W, 0..H; el sampler repite).
     pub uv: [f32; 2],
     /// Nivel de luz de cielo (0..1) que llega a este vertice. El shader lo usa
     /// para modular el color.
     pub light: f32,
+    /// Indice del tile dentro del array de texturas (0..TILES).
+    pub tile: u32,
 }
 
 impl Vertex {
     /// Constructor de conveniencia (luz a pleno sol por defecto).
-    pub const fn new(position: [f32; 3], uv: [f32; 2]) -> Self {
+    pub const fn new(position: [f32; 3], uv: [f32; 2], tile: u32) -> Self {
         Self {
             position,
             uv,
             light: 1.0,
+            tile,
         }
     }
 
     /// Constructor con luz explicita (0..1).
-    pub const fn with_light(position: [f32; 3], uv: [f32; 2], light: f32) -> Self {
+    pub const fn with_light(position: [f32; 3], uv: [f32; 2], light: f32, tile: u32) -> Self {
         Self {
             position,
             uv,
             light,
+            tile,
         }
     }
 
     /// Atributos: location 0 -> vec3 posicion, location 1 -> vec2 uv,
-    /// location 2 -> float luz.
+    /// location 2 -> float luz, location 3 -> uint tile.
     /// Es una constante porque `layout` devuelve una referencia `'static`.
-    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32];
+    const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32, 3 => Uint32];
 
     /// Describe como leer este vertice desde un buffer. Debe coincidir con los
     /// `@location` del shader (`scene.wgsl`).

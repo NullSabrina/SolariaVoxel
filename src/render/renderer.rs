@@ -290,11 +290,14 @@ impl Renderer {
         ])
     }
 
-    /// Lanza un rayo y devuelve el primer bloque solido golpeado (cualquier
-    /// columna cargada).
+    /// Lanza un rayo y devuelve el primer bloque **golpeable** (solido, o visible
+    /// no solido como la antorcha) de cualquier columna cargada.
     pub fn raycast(&self, origin: Vec3, dir: Vec3, max_distance: f32) -> Option<RayHit> {
-        let is_solid = |x: i32, y: i32, z: i32| -> bool { self.world.is_solid([x, y, z]) };
-        raycast(origin, dir, max_distance, is_solid)
+        let is_hit = |x: i32, y: i32, z: i32| -> bool {
+            let block = self.world.get_block([x, y, z]);
+            block.is_solid() || block.is_visible()
+        };
+        raycast(origin, dir, max_distance, is_hit)
     }
 
     /// Cambia un bloque (coordenadas de mundo) y regenera las mallas afectadas.

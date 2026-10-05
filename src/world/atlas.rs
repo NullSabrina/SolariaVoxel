@@ -5,8 +5,11 @@
 //! mundo sin cambiar de textura: el mesher solo asigna a cada cara las
 //! coordenadas UV del tile que le toca.
 //!
-//! Layout: `COLS` tiles por fila, cada uno de `TILE`x`TILE` pixels. Generamos
-//! los pixels por codigo (arte procedural sencillo) para no depender de assets.
+//! Layout: `COLS` (4) tiles por fila de `TILE` (16)x`TILE` pixels.
+//!
+//! Desde v0.6.2 el atlas se **carga de `assets/atlas.png`** (pintado a mano en
+//! LibreSprite). Si el archivo no existe, se cae al generador procedural de
+//! [`build_pixels`], para que el juego siga arrancando en un clon sin assets.
 
 /// Lado de cada tile, en pixels.
 pub const TILE: u32 = 16;
@@ -26,27 +29,95 @@ pub const WIDTH: u32 = COLS * TILE;
 /// Alto del atlas en pixels.
 pub const HEIGHT: u32 = ROWS * TILE;
 
-/// Rectangulo UV de un tile: `[u0, v0, u1, v1]`, con medio texel de margen para
-/// que el filtrado no coja pixels del tile vecino.
-pub fn tile_uv_rect(tile: u16) -> [f32; 4] {
-    let t = tile as u32;
-    let col = t % COLS;
-    let row = t / COLS;
+/// Trocea el atlas en sus tiles: devuelve `TILES` bloques de `TILE`x`TILE`
+/// pixels RGBA contiguos (fila a fila), listos para subir como capas de un
+/// array de texturas.
+pub fn split_tiles(atlas: &[u8]) -> Vec<u8> {
+    assert_eq!(atlas.len(), (WIDTH * HEIGHT * 4) as usize);
+    let mut out = vec![0u8; (TILES * TILE * TILE * 4) as usize];
+    for tile in 0..TILES {
+        let (col, row) = (tile % COLS, tile / COLS);
+        for y in 0..TILE {
+            for x in 0..TILE {
+                let src = (((row * TILE + y) * WIDTH + (col * TILE + x)) * 4) as usize;
+                let dst = (((tile * TILE + y) * TILE + x) * 4) as usize;
+                out[dst..dst + 4].copy_from_slice(&atlas[src..src + 4]);
+            }
+        }
+    }
+    out
+}
 
-    // Medio texel de inset.
-    let du = 0.5 / WIDTH as f32;
-    let dv = 0.5 / HEIGHT as f32;
+/// Ruta del atlas en disco (relativa al directorio de trabajo).
+pub const ATLAS_PATH: &str = "assets/atlas.png";
 
-    [
-        (col * TILE) as f32 / WIDTH as f32 + du,
-        (row * TILE) as f32 / HEIGHT as f32 + dv,
-        ((col + 1) * TILE) as f32 / WIDTH as f32 - du,
-        ((row + 1) * TILE) as f32 / HEIGHT as f32 - dv,
-    ]
+/// Carga el atlas de `assets/atlas.png` (RGBA8, sRGB). Si no existe o no se
+/// puede decodificar, devuelve el atlas procedural de [`build_pixels`].
+///
+/// La imagen debe medir exactamente `WIDTH` x `HEIGHT` (64x48); si no, se
+/// ignora y se usa el procedural.
+pub fn load_pixels() -> Vec<u8> {
+    match try_load_pixels() {
+        Some(p) => {
+            println!("[atlas] cargado {ATLAS_PATH} ({WIDTH}x{HEIGHT})");
+            p
+        }
+        None => {
+            println!("[atlas] sin {ATLAS_PATH}; uso el atlas procedural");
+            build_pixels()
+        }
+    }
+}
+
+/// Intenta decodificar `assets/atlas.png` a RGBA8. `None` si falla o el tamano
+/// no coincide.
+fn try_load_pixels() -> Option<Vec<u8>> {
+    let file = std::fs::File::open(ATLAS_PATH).ok()?;
+    let decoder = png::Decoder::new(std::io::BufReader::new(file));
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+
+    // Rechazamos tamanos que no encajen con el layout del atlas.
+    if info.width != WIDTH || info.height != HEIGHT {
+        eprintln!(
+            "[atlas] {ATLAS_PATH} mide {}x{} (esperado {WIDTH}x{HEIGHT}); ignorado",
+            info.width, info.height
+        );
+        return None;
+    }
+
+    // Normalizamos a RGBA8 (por si el PNG viniera en RGB o escala de grises).
+    let channels = match info.color_type {
+        png::ColorType::Rgba => 4,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Indexed => 1,
+    };
+    if channels == 4 {
+        return Some(buf);
+    }
+    let count = (WIDTH * HEIGHT) as usize;
+    let mut rgba = vec![0u8; count * 4];
+    for i in 0..count {
+        let s = i * channels;
+        let (r, g, b, a) = match channels {
+            3 => (buf[s], buf[s + 1], buf[s + 2], 255),
+            1 => (buf[s], buf[s], buf[s], 255),
+            2 => (buf[s], buf[s], buf[s], buf[s + 1]),
+            _ => (0, 0, 0, 255),
+        };
+        rgba[i * 4] = r;
+        rgba[i * 4 + 1] = g;
+        rgba[i * 4 + 2] = b;
+        rgba[i * 4 + 3] = a;
+    }
+    Some(rgba)
 }
 
 /// Genera la imagen RGBA del atlas (en sRGB, que es como la interpreta la
-/// textura `Rgba8UnormSrgb`).
+/// textura `Rgba8UnormSrgb`). Es el fallback sin assets.
 pub fn build_pixels() -> Vec<u8> {
     let mut pixels = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
 
@@ -172,11 +243,22 @@ mod tests {
     }
 
     #[test]
-    fn las_uvs_quedan_dentro_de_su_tile() {
+    fn trocear_conserva_los_pixeles_de_cada_tile() {
+        let pixels = build_pixels();
+        let tiles = split_tiles(&pixels);
+        assert_eq!(tiles.len(), (TILES * TILE * TILE * 4) as usize);
+        // El pixel (x,y) del tile t debe coincidir con el del atlas.
         for tile in 0..TILES {
-            let [u0, v0, u1, v1] = tile_uv_rect(tile as u16);
-            assert!(u0 < u1 && v0 < v1);
-            assert!(u0 >= 0.0 && u1 <= 1.0 && v0 >= 0.0 && v1 <= 1.0);
+            let (col, row) = (tile % COLS, tile / COLS);
+            for (y, x) in [(0, 0), (5, 7), (15, 15)] {
+                let src = (((row * TILE + y) * WIDTH + (col * TILE + x)) * 4) as usize;
+                let dst = (((tile * TILE + y) * TILE + x) * 4) as usize;
+                assert_eq!(
+                    &tiles[dst..dst + 4],
+                    &pixels[src..src + 4],
+                    "tile {tile} pixel ({x},{y})"
+                );
+            }
         }
     }
 }

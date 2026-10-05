@@ -8,16 +8,22 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.6.1` — Block light (antorchas)
+## Estado actual: `v0.6.2` — La antorcha como cruz fina (cutout)
 
-- Bloque **antorcha**: no solido, se dibuja y **emite luz**. Se coloca con
-  **click derecho** (teclas **1/2/3** eligen piedra/madera/antorcha).
-- **Luz de bloque** con flood-fill (BFS que pierde 1 por paso y no atraviesa
-  solidos). La luz dibujada es `max(cielo, bloque)`, asi que una antorcha
-  ilumina una cueva a oscuras.
-- Sobre v0.6.0: luz de cielo. Sobre v0.5.x: LZ4, mundo en memoria + streaming.
+- La **antorcha ya no es un cubo**: se dibuja como **dos quads cruzados** (planos
+  X y Z por el centro del voxel) con su tile, y el shader hace **cutout** (alfa <
+  0.5 se descarta). Se ve el palo fino y la llama, con el fondo transparente.
+- El **raycast** golpea tambien bloques visibles no solidos: la antorcha se puede
+  apuntar, resaltar y **romper**. Sus bloques vecinos no quedan ocluidos.
+- **Atlas como array de texturas**: una capa 16x16 por tile, cargado de
+  `assets/atlas.png` (con fallback procedural si no existe).
+- Sobre v0.6.1: block light (antorcha emite 14, flood-fill BFS). v0.6.0: luz de
+  cielo. v0.5.x: LZ4, mundo en memoria + streaming.
 - Sobre v0.4.x: romper/colocar, greedy meshing, colisiones.
-- Suite de tests (66 tests).
+- Suite de tests (72 tests).
+
+Pendiente (anotado en `DECISIONS.md`): el palo 3D del `.bbmodel` y la antorcha de
+pared inclinada 22.5°, para una version posterior dedicada al modelo.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

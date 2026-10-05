@@ -635,6 +635,49 @@ necesitaria geometria no cubica y un pase de transparencia. Queda para pulido.
 **Motivo.** Permite capturar el efecto de la luz sin interactuar (yo no puedo
 hacer click en la app). No afecta al juego normal si la variable no esta.
 
+### 2026-10-04 (v0.6.2) — La antorcha se dibuja como cruz de dos planos, no cubo
+
+**Decision.** El mesher deja de emitir el cubo de 6 caras para `Block::Torch` y
+emite **dos quads verticales cruzados** (planos `X = centro` y `Z = centro` del
+voxel), ambos con el tile 8 completo. El mesher naive gana `emit_torch_cross`;
+el greedy lo llama desde una pasada aparte (la antorcha no entra en el greedy,
+porque es geometria propia, no una cara de cubo).
+
+**Motivo.** Es el aspecto clasico de la antorcha (fina, con la llama). El shader
+ya descarta alfa < 0.5 (cutout), asi que el fondo transparente del tile
+desaparece solo y no hace falta blending ni ordenar triangulos. El pipeline se
+dibuja sin *culling* (`cull_mode: None`), de modo que cada plano se ve por sus
+dos caras emitiendose una sola vez.
+
+**Alternativas descartadas.** (a) Mantener el cubo: daba una caja opaca negra a
+sombra (v0.6.1). (b) Emitir los planos como caras dobles explicitas: innecesario
+sin culling.
+
+### 2026-10-04 (v0.6.2) — El raycast golpea bloques visibles no solidos
+
+**Decision.** El predicado del raycast pasa de `is_solid` a `is_solid ||
+is_visible` (en `Renderer::raycast`). El algoritmo ya no habla de "solido": es
+un predicado `is_hit` generico.
+
+**Motivo.** Antes la antorcha no se podia apuntar ni romper (no era "solida").
+Es coherente con Minecraft: se apunta a cualquier bloque interactuable. Se
+mantiene la cara de entrada para colocar el bloque nuevo al lado.
+
+**Consecuencia.** La antorcha tambien se resalta con el wireframe (el resaltado
+usa el mismo `RayHit`).
+
+### 2026-10-04 (v0.6.2) — Pendiente: palo 3D y antorcha de pared
+
+**Decision (para una version posterior).** El `.bbmodel` de Blockbench tiene el
+palo como **cubo** `7,0,7→9,10,9` ademas de los dos planos. En v0.6.2 solo se
+emiten los dos planos (el palo va dibujado dentro de la textura). Tampoco hay
+aun **antorcha de pared** (inclinada 22.5 grados sobre una cara vertical).
+
+**Motivo.** Para no duplicar el palo (cubo 3D + dibujado en la textura) habria
+que separar la textura de la llama de la del palo; es mas limpio hacerlo en una
+version dedicada al modelo completo, junto con la orientacion en pared.
+
+
 ---
 
 ## Plantilla para futuras entradas

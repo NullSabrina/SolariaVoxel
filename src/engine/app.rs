@@ -57,6 +57,10 @@ pub struct App {
     world_saved: bool,
     /// Marca de tiempo del frame anterior, para calcular el `dt`.
     last_frame: Option<Instant>,
+    /// Modo demo (`SOLARIA_DEMO`): congela la camara y elige la escena de la
+    /// captura. La fisica y el resaltado se desactivan para que la vista no se
+    /// desplace antes de la foto.
+    demo: bool,
 }
 
 /// Ruta del archivo de mundo por defecto (junto al ejecutable de trabajo).
@@ -142,6 +146,12 @@ impl App {
         // Movimiento horizontal (el vertical lo resuelve la fisica).
         if forward != 0.0 || right != 0.0 {
             camera.walk(forward, right, 0.0, dt);
+        }
+
+        // En modo demo la camara queda fija: no aplicamos la fisica, para que la
+        // vista de la captura no se desplace antes de la foto.
+        if self.demo {
+            return;
         }
 
         // Fisica vertical. La consulta de solido mira el mundo en coordenadas de
@@ -327,8 +337,8 @@ impl ApplicationHandler for App {
 
         // Camara FPS: en el centro del chunk, a ras de suelo. La fisica la
         // posara sobre el terreno antes del primer frame.
-        let mut camera = Camera::new(Vec3::new(8.0, 78.0, 8.0));
-        camera.pitch_deg = -8.0;
+        let mut camera = Camera::new(Vec3::new(8.0, 76.0, 20.0));
+        camera.pitch_deg = -12.0;
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
         camera.update_view();
@@ -341,39 +351,47 @@ impl ApplicationHandler for App {
         println!("[engine] jugador posado en y={:.2}", camera.position.y);
         self.camera = Some(camera);
 
-        // Modo demo (SOLARIA_DEMO=1): coloca antorchas cerca para lucir la luz
-        // de bloque en las capturas, sin tener que hacer click.
-        if std::env::var("SOLARIA_DEMO").is_ok() {
+        // Modo demo (SOLARIA_DEMO=1): escena minima para la captura. Alisa una
+        // parcela de hierba plana, planta UNA antorcha y apunta la camara a ella
+        // desde cerca para ver la cruz de dos planos (cutout). Sin gravedad ni
+        // resaltado (ver `demo`), asi la vista no se mueve antes de la foto.
+        self.demo = std::env::var("SOLARIA_DEMO").is_ok();
+        if self.demo {
             let cam = self.camera.as_ref().unwrap();
-            let bx = cam.position.x.floor() as i32;
-            let bz = cam.position.z.floor() as i32;
+            let cx = cam.position.x.floor() as i32;
+            let cz = cam.position.z.floor() as i32;
             let feet = (cam.position.y - crate::player::EYE_HEIGHT).floor() as i32;
+            // Plataforma: solidos hasta `plateau`, aire por encima.
+            let plateau = feet + 1;
+
             if let Some(renderer) = self.renderer.as_mut() {
-                // Buscamos la primera capa de aire (encima del suelo) en cada
-                // punto y ponemos la antorcha ahi.
-                for (dx, dz) in [(4, 0), (-4, 0), (0, 4), (0, -4)] {
-                    let (x, z) = (bx + dx, bz + dz);
-                    let mut y = feet + 2;
-                    while y > feet - 3 {
-                        let solid_below = renderer.is_solid_at(Vec3::new(
-                            x as f32 + 0.5,
-                            (y - 1) as f32 + 0.5,
-                            z as f32 + 0.5,
-                        ));
-                        let air_here = !renderer.is_solid_at(Vec3::new(
-                            x as f32 + 0.5,
-                            y as f32 + 0.5,
-                            z as f32 + 0.5,
-                        ));
-                        if solid_below && air_here {
-                            renderer.set_block([x, y, z], crate::world::Block::Torch);
-                            break;
+                // 1. Alisamos una parcela pequena (7x7) alrededor del jugador.
+                for x in (cx - 3)..=(cx + 3) {
+                    for z in (cz - 6)..=(cz + 3) {
+                        renderer.set_block([x, plateau, z], crate::world::Block::Grass);
+                        for y in (plateau + 1)..(plateau + 8) {
+                            renderer.set_block([x, y, z], crate::world::Block::Air);
                         }
-                        y -= 1;
                     }
                 }
+
+                // 2. UNA antorcha a 5 bloques al frente (-Z).
+                let torch = [cx, plateau + 1, cz - 5];
+                renderer.set_block(torch, crate::world::Block::Torch);
+
+                // 3. Camara: a 2.3 del suelo y 5.0 al frente, mirando a la
+                //    antorcha (v = (0,-1.1,-4.5), d^=(0,-0.238,-0.971)).
+                if let Some(camera) = self.camera.as_mut() {
+                    camera.position =
+                        Vec3::new(cx as f32 + 0.5, plateau as f32 + 2.3, cz as f32 - 0.5);
+                    camera.yaw_deg = 0.0;
+                    camera.pitch_deg = -13.7;
+                    camera.update_view();
+                }
+                // Sin resaltado: queremos ver el modelo limpio.
+                renderer.set_highlight(None);
             }
-            println!("[engine] demo: antorchas colocadas");
+            println!("[engine] demo: antorcha simple lista");
         }
 
         self.last_frame = Some(Instant::now());
@@ -487,7 +505,10 @@ impl ApplicationHandler for App {
                 let dt = dt.clamp(0.0, 0.1);
 
                 self.update(dt);
-                self.update_selection();
+                // En modo demo no resaltamos (queremos ver el modelo limpio).
+                if !self.demo {
+                    self.update_selection();
+                }
 
                 // Dibujamos con la matriz de la camara actual (proyeccion * vista).
                 if let (Some(renderer), Some(camera)) =
