@@ -24,7 +24,8 @@ use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
 use crate::world::{
-    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, World, greedy, raycast,
+    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, StreamChange, World, greedy,
+    raycast,
 };
 
 /// Errores que pueden ocurrir al inicializar el renderer.
@@ -68,6 +69,24 @@ fn sky_color_from_srgb(c: [f32; 3]) -> wgpu::Color {
 
 /// Mallas de una columna: una `Option<Mesh>` por seccion.
 type ColumnMeshes = [Option<Mesh>; SECTION_COUNT];
+
+/// Columnas ya cargadas cuyas mallas hay que reconstruir tras un cambio de
+/// streaming: las **colindantes** (4-vecinos) de cada columna cargada o
+/// descargada. Sus caras de borde cambian al aparecer/desaparecer el vecino.
+/// Se deduplica y se excluyen las propias columnas cargadas (ya se acaban de
+/// meshear en `sync_streaming`).
+fn columns_to_remesh(change: &StreamChange, is_loaded: impl Fn(ChunkPos) -> bool) -> Vec<ChunkPos> {
+    let mut out: Vec<ChunkPos> = Vec::new();
+    for pos in change.loaded.iter().chain(change.unloaded.iter()) {
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+            if is_loaded(n) && !out.contains(&n) {
+                out.push(n);
+            }
+        }
+    }
+    out
+}
 
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
@@ -213,6 +232,14 @@ impl Renderer {
 
     /// Actualiza el streaming del mundo y sincroniza las mallas: libera las de
     /// las columnas descargadas y construye las de las nuevas.
+    ///
+    /// Ojo con las **caras de borde**: al meshear una columna se mira el bloque
+    /// del vecino, asi que el resultado depende de que columnas esten cargadas
+    /// en ese momento. Si una columna se mesheo con su vecina ausente, al llegar
+    /// la vecina conserva un **muro** (y oscuro, porque la luz de la celda de
+    /// delante es 0); si la vecina se descarga, queda un **hueco**. Por eso, tras
+    /// cargar/descargar, reconstruimos tambien las columnas **colindantes** ya
+    /// mesheadas.
     pub fn sync_streaming(&mut self, player_pos: Vec3) {
         let change = self
             .world
@@ -228,6 +255,15 @@ impl Renderer {
         for pos in &change.loaded {
             let meshes = self.build_column_meshes(*pos);
             self.meshes.insert(*pos, Box::new(meshes));
+        }
+        // Reconstruir vecinas afectadas (las propias cargadas ya se hicieron).
+        let to_remesh = {
+            let loaded = &self.world;
+            columns_to_remesh(&change, |p| loaded.is_loaded(p))
+        };
+        for pos in to_remesh {
+            let meshes = self.build_column_meshes(pos);
+            self.meshes.insert(pos, Box::new(meshes));
         }
         if !change.loaded.is_empty() || !change.unloaded.is_empty() {
             println!(
@@ -259,6 +295,12 @@ impl Renderer {
 
         let mut out: ColumnMeshes = std::array::from_fn(|_| None);
         for (section, slot) in out.iter_mut().enumerate() {
+            // Las secciones sin nada que dibujar no generan geometria; saltarlas
+            // evita 24 pasadas de greedy por columna (y hace barato el re-mesheo
+            // de vecinas del streaming).
+            if self.world.section_is_empty(pos, section) {
+                continue;
+            }
             let (v, i) = greedy::greedy_section_query(&query, &light, section, origin);
             if !v.is_empty() {
                 *slot = Some(Mesh::new(
@@ -454,5 +496,38 @@ impl Renderer {
 
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(frame);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn columnas_a_remeshear_son_las_vecinas_cargadas() {
+        let change = StreamChange {
+            loaded: vec![ChunkPos::new(1, 0)],
+            unloaded: vec![ChunkPos::new(5, 0)],
+        };
+        let loaded: HashSet<ChunkPos> = [
+            ChunkPos::new(1, 0), // la cargada (no debe re-meshearse aparte)
+            ChunkPos::new(0, 0), // vecina de la cargada
+            ChunkPos::new(2, 0), // vecina de la cargada
+            ChunkPos::new(6, 0), // vecina de la descargada
+        ]
+        .into_iter()
+        .collect();
+
+        let out = columns_to_remesh(&change, |p| loaded.contains(&p));
+
+        assert!(out.contains(&ChunkPos::new(0, 0)));
+        assert!(out.contains(&ChunkPos::new(2, 0)));
+        assert!(out.contains(&ChunkPos::new(6, 0)));
+        // La propia columna cargada ya se meshea en el bucle de `loaded`.
+        assert!(!out.contains(&ChunkPos::new(1, 0)));
+        // Sin duplicados.
+        let unique: HashSet<ChunkPos> = out.iter().copied().collect();
+        assert_eq!(out.len(), unique.len());
     }
 }

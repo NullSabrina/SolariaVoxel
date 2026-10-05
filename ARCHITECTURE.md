@@ -76,10 +76,14 @@ about_to_wait() -> window.request_redraw()   (bucle continuo)
 Puntos clave:
 
 - **Streaming**: `World::update_streaming` devuelve un `StreamChange` con las
-  columnas que entran y salen. Solo se construyen/liberan las mallas de esas
-  columnas; no se regenera el mundo entero.
+  columnas que entran y salen. Se construyen/liberan las mallas de esas columnas
+  **y las de sus vecinas de borde** (`columns_to_remesh`): las caras de borde
+  dependen de si el vecino esta cargado, asi que al entrar/salir una columna hay
+  que re-meshear las colindantes (si no, quedan muros oscuros o huecos). No se
+  regenera el mundo entero.
 - **Una malla por (columna, seccion)**: una columna tiene 24 secciones; la
-  mayoria estan vacias y no generan malla (`ColumnMeshes = [Option<Mesh>; 24]`).
+  mayoria estan vacias y se **saltan sin meshear** (`World::section_is_empty`);
+  solo se guardan las que tienen geometria (`ColumnMeshes = [Option<Mesh>; 24]`).
 - **Dos luces**: `compute_skylight` (cielo, por columna vertical) y
   `compute_block_light` (antorchas, flood-fill BFS). El vertice lleva ambas por
   separado; el shader dibuja `max(cielo * day_factor, bloque)`, de modo que la

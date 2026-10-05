@@ -635,7 +635,12 @@ mod tests {
 
     #[test]
     fn caminata_por_terreno_real_no_queda_embebido() {
-        let seed = 13_371;
+        for seed in [13_371u32, 7, 42, 9999] {
+            simula_caminata(seed);
+        }
+    }
+
+    fn simula_caminata(seed: u32) {
         let mut world = crate::world::World::new(seed, 4, vec![]);
         world.update_streaming([8.0, 74.0, 20.0]);
 
@@ -646,11 +651,11 @@ mod tests {
 
         assert!(
             !box_overlaps_solid(camera.position, &world),
-            "el spawn ya nace embebido: {:?}",
+            "semilla {seed}: el spawn nace embebido: {:?}",
             camera.position
         );
 
-        let mut rng: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut rng: u64 = 0x9E37_79B9_7F4A_7C15 ^ (seed as u64);
         let mut fwd = 1.0f32;
         let mut right = 0.0f32;
         for frame in 0..20_000 {
@@ -663,25 +668,23 @@ mod tests {
                 right = a.sin();
                 camera.yaw_deg = ((rng >> 24) % 360) as f32;
             }
-            player.move_horizontal(
-                &mut camera,
-                |p| world_solid(&world, p),
-                fwd,
-                right,
-                1.0 / 60.0,
-            );
+            // Saltamos de vez en cuando para ejercitar el techo (huella).
+            let jump = (rng & 0xFF) == 0;
+            // `dt` variable, incluido el maximo real de la app (0.1 s).
+            let dt = if frame % 97 == 0 { 0.1 } else { 1.0 / 60.0 };
+            player.move_horizontal(&mut camera, |p| world_solid(&world, p), fwd, right, dt);
             player.update(
                 &mut camera,
                 |p| world_solid(&world, p),
                 0.0,
                 false,
-                false,
-                1.0 / 60.0,
+                jump,
+                dt,
             );
             world.update_streaming([camera.position.x, camera.position.y, camera.position.z]);
             assert!(
                 !box_overlaps_solid(camera.position, &world),
-                "frame {frame}: jugador embebido en el terreno en {:?}",
+                "semilla {seed}, frame {frame}: jugador embebido en {:?}",
                 camera.position
             );
         }

@@ -8,22 +8,22 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.7.2` — Colision vertical por huella + auto-escalon
+## Estado actual: `v0.7.3` — Caras de borde del streaming (muros/grietas)
 
-- La fisica vertical y el `settle` usan la **huella completa** del jugador (no el
-  punto central): ya no se hunde al pisar un escalon ni queda embebido en el
-  terreno (bug detectado sobre el terreno por bloque de v0.7.1).
-- **Auto-escalon** (`STEP_HEIGHT = 1.0`): las colinas de 1 bloque se suben
-  andando; un muro de 2 bloques sigue exigiendo salto.
-- Sobre **v0.7.1**: altura y bioma **por bloque** (colinas suaves, no mesetas de
-  16x16); `GENERATOR_VERSION` 3. **v0.7.0**: biomas (desierto/bosque/nieve) con
-  ruido **Worley** y el bloque `Snow`; cierra la etapa 1 ("mundo jugable").
-  v0.6.5: colision horizontal. v0.6.4: ciclo dia/noche. v0.6.3: consolidacion.
-  v0.6.2: antorcha como cruz fina + atlas de texturas. v0.6.1: block light.
-  v0.6.0: luz de cielo. v0.5.x: LZ4 + streaming. v0.4.x: romper/colocar, greedy,
-  colisiones.
+- Al cargar/descargar columnas se **reconstruyen las vecinas** de borde: se
+  acaban los **muros oscuros** (caras de mas) y los **huecos** (caras de menos)
+  que aparecian en el limite entre chunks al moverse.
+- `build_column_meshes` **salta secciones vacias** (solo meshea las que tienen
+  geometria), lo que abarata el re-mesheo de vecinas.
+- Sobre **v0.7.2**: colision vertical por **huella** + **auto-escalon** (la
+  camara ya no se queda embebida en escalones). **v0.7.1**: altura y bioma por
+  bloque (colinas suaves). **v0.7.0**: biomas (desierto/bosque/nieve) con ruido
+  **Worley** y el bloque `Snow`; cierra la etapa 1 ("mundo jugable"). v0.6.5:
+  colision horizontal. v0.6.4: ciclo dia/noche. v0.6.3: consolidacion. v0.6.2:
+  antorcha como cruz fina + atlas de texturas. v0.6.1: block light. v0.6.0: luz
+  de cielo. v0.5.x: LZ4 + streaming. v0.4.x: romper/colocar, greedy, colisiones.
 
-Siguiente (v0.7.x del roadmap): **cuevas** (v0.7.3) y **oceanos** (v0.7.4).
+Siguiente (v0.7.x del roadmap): **cuevas** (v0.7.4) y **oceanos** (v0.7.5).
 Pendiente tambien el palo 3D del `.bbmodel` y la antorcha de pared.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en

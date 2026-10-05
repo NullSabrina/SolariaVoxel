@@ -97,6 +97,14 @@ impl World {
         self.columns.contains_key(&pos)
     }
 
+    /// ¿La seccion `section` de la columna `pos` no tiene geometria que dibujar?
+    /// (Si la columna no esta cargada, la tratamos como vacia.)
+    pub fn section_is_empty(&self, pos: ChunkPos, section: usize) -> bool {
+        self.columns
+            .get(&pos)
+            .is_none_or(|c| c.section_is_empty(section))
+    }
+
     /// Lee un bloque en coordenadas de mundo. Devuelve `Air` si la columna no
     /// esta cargada o `y` esta fuera del mundo.
     pub fn get_block(&self, world: [i32; 3]) -> Block {

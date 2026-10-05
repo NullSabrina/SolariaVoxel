@@ -881,6 +881,43 @@ v0.7.1 habia asignado a las cuevas: las **cuevas** pasan a **v0.7.3** y los
 calendario. `GENERATOR_VERSION` **no** cambia (la generacion de terreno es
 identica; esto es fisica).
 
+### 2026-10-05 (v0.7.3) — Re-mesheo de vecinas al hacer streaming
+
+**Decision.** Al cargar o descargar columnas por streaming, ademas de meshear las
+que entran/salen, se **reconstruyen las mallas de sus 4-vecinas** ya cargadas
+(`columns_to_remesh`). Y `build_column_meshes` **salta las secciones vacias**
+para que ese re-mesheo extra salga barato.
+
+**Motivo.** Las **caras de borde** de una columna se calculan consultando el
+bloque del vecino (`greedy_section_query` mira fuera de la columna). Por tanto el
+resultado depende de *que columnas estaban cargadas al meshear*. Los muros
+internos entre chunks ya no aparecen... pero solo si el vecino estaba cargado en
+ese momento. Al moverse:
+* una columna mesheada con su vecina **ausente** conserva una cara de borde que
+  ya no toca (un **muro**), y encima **oscuro**, porque la celda de aire de
+  delante es "fuera de lo cargado" y su luz es 0;
+* una columna mesheada con su vecina **presente** se queda sin la cara; al
+  descargarse la vecina aparece un **hueco** por el que se ve a traves.
+
+Se veia como lineas oscuras y grietas en el terreno (era el bug reportado como
+"la camara se bugea en los bloques", aunque este es de render). Se confirmo
+leyendo `renderer.rs` (solo se mesheaban las columnas del `StreamChange`).
+
+**Alternativas descartadas.** (a) Meshear **todo** el radio al cruzar de chunk:
+correcto pero carisimo. (b) No re-meshear y aceptar el artefacto: son visibles en
+cuanto andas. (c) Retrasar el meshing hasta tener todo el anillo cargado: no
+resuelve el caso simetrico de la **descarga** (hueco), que necesita re-meshear la
+vecina que se queda.
+
+**Consecuencia.** Nuevo `columns_to_remesh` (+ test). `World::section_is_empty` y
+`Column::section_is_empty`; `build_column_meshes` ya no hace 24 pasadas de greedy
+por columna (solo de las secciones con geometria). `Chunk::is_empty` pasa a
+contar tambien los bloques **visibles-no-solidos**: antes una seccion con solo
+una antorcha se habria saltado (bug latente; hay test). 103 tests.
+
+**Desplazamiento de roadmap.** Cuevas pasa a **v0.7.4** y oceanos a **v0.7.5**.
+`GENERATOR_VERSION` sigue en 3 (el terreno no cambia).
+
 
 
 

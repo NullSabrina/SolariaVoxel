@@ -56,10 +56,12 @@ impl Chunk {
         self.blocks[Self::index(x, y, z)] = block;
     }
 
-    /// ¿Hay algun bloque solido en esta seccion? Sirve para saltarnos secciones
-    /// vacias al generar la malla.
+    /// ¿Esta seccion no tiene **nada dibujable** (ni solido ni visible)? Sirve
+    /// para saltarnos secciones sin geometria al generar la malla. Contamos los
+    /// visibles-no-solidos (la antorcha): una seccion con solo una antorcha no
+    /// esta vacia.
     pub fn is_empty(&self) -> bool {
-        self.blocks.iter().all(|b| !b.is_solid())
+        self.blocks.iter().all(|b| !b.is_solid() && !b.is_visible())
     }
 }
 
@@ -250,6 +252,13 @@ impl Column {
         self.combined_light(x, y, z)
     }
 
+    /// ¿La seccion `section` no tiene geometria que dibujar? Atajo para no
+    /// meshear secciones vacias (la mayoria de las 24 de una columna).
+    #[inline]
+    pub fn section_is_empty(&self, section: usize) -> bool {
+        self.sections[section].is_empty()
+    }
+
     /// Lee un bloque con `y` global (0..WORLD_HEIGHT).
     #[inline]
     pub fn get(&self, x: usize, y: usize, z: usize) -> Block {
@@ -360,6 +369,15 @@ mod tests {
         assert!(Chunk::empty().is_empty());
         let mut chunk = Chunk::empty();
         chunk.set(3, 3, 3, Block::Stone);
+        assert!(!chunk.is_empty());
+    }
+
+    #[test]
+    fn una_seccion_con_solo_antorcha_no_esta_vacia() {
+        // La antorcha es visible-no-solida: si la contasemos como vacia, su cruz
+        // no se meshearia nunca.
+        let mut chunk = Chunk::empty();
+        chunk.set(3, 3, 3, Block::Torch);
         assert!(!chunk.is_empty());
     }
 

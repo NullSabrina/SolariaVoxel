@@ -10,19 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.2 — Colision vertical por huella + auto-escalon
+//! ## Estado actual: v0.7.3 — Caras de borde del streaming (muros/grietas)
 //!
-//! * La fisica vertical y el `settle` miran la **huella completa** del jugador
-//!   (no solo el punto central): ya no se hunde al pisar un escalon ni queda
-//!   embebido en el terreno.
-//! * **Auto-escalon** (`STEP_HEIGHT = 1.0`): las colinas de 1 bloque se suben
-//!   andando; un muro de 2 bloques sigue exigiendo salto.
-//! * Sobre v0.7.1: altura y bioma **por bloque** (colinas suaves). v0.7.0:
-//!   biomas (Worley) y bloque `Snow`. v0.6.5: colision horizontal. v0.6.4:
-//!   ciclo dia/noche. v0.6.3: consolidacion. v0.6.2: antorcha como cruz fina.
-//!   v0.6.1: block light. v0.6.0: luz de cielo. v0.5.x: LZ4 + streaming.
+//! * Al cargar/descargar columnas se **reconstruyen las vecinas** de borde: ya
+//!   no aparecen muros oscuros (caras de mas) ni huecos (caras de menos) en el
+//!   limite entre chunks.
+//! * `build_column_meshes` **salta secciones vacias** (no hace greedy de las 24;
+//!   solo de las que tienen geometria), lo que abarata el re-mesheo.
+//! * Sobre v0.7.2: colision vertical por huella + auto-escalon. v0.7.1: altura y
+//!   bioma por bloque. v0.7.0: biomas (Worley) y bloque `Snow`. v0.6.5: colision
+//!   horizontal. v0.6.4: ciclo dia/noche. v0.6.3: consolidacion. v0.6.2: antorcha
+//!   como cruz fina. v0.6.1: block light. v0.6.0: luz de cielo. v0.5.x: LZ4 +
+//!   streaming.
 //!
-//! Siguiente (v0.7.x del roadmap): cuevas (v0.7.3) y oceanos (v0.7.4). Pendiente
+//! Siguiente (v0.7.x del roadmap): cuevas (v0.7.4) y oceanos (v0.7.5). Pendiente
 //! tambien el **palo 3D** del `.bbmodel` y la **antorcha de pared**.
 //!
 //! ## Organizacion del codigo

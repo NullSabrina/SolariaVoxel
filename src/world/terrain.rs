@@ -10,7 +10,7 @@
 //!   (desierto, bosque, nieve): cada celda de Worley tiene un valor y ese valor
 //!   decide el bioma.
 //!
-//! Mas adelante (v0.7.3) se anadiran cuevas; por eso el generador ya vive en su
+//! Mas adelante (v0.7.4) se anadiran cuevas; por eso el generador ya vive en su
 //! propio tipo [`TerrainGenerator`].
 
 use noise::{NoiseFn, Perlin, Worley};
