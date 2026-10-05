@@ -809,6 +809,40 @@ sube a 1 -> 2 (cambia la generacion). Los mundos guardados siguen cargando: los
 bloques se guardan por id y `Snow` es un id nuevo sin colision. `TILES` pasa de
 9 a 10; el tile 9 ya cabia en el atlas 64x48.
 
+### 2026-10-05 (v0.7.1) — Altura y bioma por bloque (terreno suave)
+
+**Decision.** `generate_column` calcula `height(world_x + x, world_z + z)` y
+`biome_at(world_x + x, world_z + z)` **para cada bloque** de la columna, en
+lugar de consultar una sola altura/bioma en el origen del chunk y repetirla en
+los 16x16. `GENERATOR_VERSION` sube de 2 a 3.
+
+**Motivo.** Con una altura por chunk, cada columna de 16x16 era una **meseta
+plana** y el limite entre chunks producia **escalones de 16 bloques** (visibles
+en `screenshots/terreno_actual.png`). El ruido Perlin ya era continuo: el fallo
+no estaba en el ruido sino en *donde* se muestreaba. Muestrear por bloque cuesta
+la misma generacion (16x16 = 256 llamadas a Perlin/Worley por columna, que es
+despreciable) y da **colinas suaves** de escalones de 1 bloque
+(`screenshots/terreno_suave.png` / `v0.7.1_terreno.png`).
+
+**Alternativas descartadas.** (a) Interpolar la altura entre esquinas del chunk:
+suavizaria dentro del chunk pero no arreglaria los saltos entre chunks vecinos.
+(b) Subir la frecuencia del ruido: no elimina las mesetas, solo las hace mas
+pequenas. La causa era el muestreo, no la escala.
+
+**Nota.** El bioma tambien pasa a ser por bloque. En la practica Worley varía
+lento (celdas de ~50 bloques), asi que el cambio apenas se nota, pero es
+coherente: cada bloque pregunta su propio bioma.
+
+**Desplazamiento de roadmap.** La guia situaba las **cuevas en v0.7.1** y los
+**oceanos en v0.7.2**. Como v0.7.1 se dedica a cerrar este bug de terreno (que
+la etapa "mundo jugable" dejaba visible), cuevas pasa a **v0.7.2** y oceanos a
+**v0.7.3**. No se adelanta ninguna feature nueva: solo se corre el calendario.
+
+**Consecuencia.** `TerrainGenerator::generate_column` mueve `height`/`biome` al
+bucle interno. Los tests siguen verdes (98). `GENERATOR_VERSION = 3`; los mundos
+v3 se reproducen igual, los v2 conservan sus ediciones guardadas (los bloques se
+guardan por id).
+
 
 
 

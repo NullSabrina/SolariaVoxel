@@ -8,19 +8,20 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.7.0` — Biomas (desierto, bosque, nieve)
+## Estado actual: `v0.7.1` — Terreno suave (altura por bloque)
 
-- El generador reparte el mundo en **tres biomas** con ruido **Worley**:
-  desierto (arena), bosque (hierba) y nieve. Nuevo bloque **`Snow`** (tile 9,
-  pintado en `assets/atlas.png`).
-- **Cierra la etapa 1 del roadmap** ("mundo jugable": romper/colocar, versionado
-  de mundo, luz y biomas).
-- Hereda de v0.6.5: **colision horizontal** (la camara no entra en bloques).
-  v0.6.4: ciclo dia/noche. v0.6.3: consolidacion. v0.6.2: antorcha como cruz
-  fina + atlas de texturas. v0.6.1: block light. v0.6.0: luz de cielo.
-  v0.5.x: LZ4 + streaming. v0.4.x: romper/colocar, greedy, colisiones.
+- `generate_column` calcula **altura y bioma por bloque** (`world_x + x`), no
+  una altura por chunk: el terreno forma **colinas suaves** en vez de mesetas
+  planas de 16x16 con escalones.
+- `GENERATOR_VERSION` sube a 3 (cambia el algoritmo de generacion).
+- Sobre **v0.7.0**: biomas (desierto/bosque/nieve) con ruido **Worley** y el
+  bloque `Snow` (tile 9, `assets/atlas.png`); cierra la etapa 1 ("mundo
+  jugable"). v0.6.5: colision horizontal. v0.6.4: ciclo dia/noche. v0.6.3:
+  consolidacion. v0.6.2: antorcha como cruz fina + atlas de texturas. v0.6.1:
+  block light. v0.6.0: luz de cielo. v0.5.x: LZ4 + streaming. v0.4.x:
+  romper/colocar, greedy, colisiones.
 
-Siguiente (v0.7.x del roadmap): **cuevas** (v0.7.1) y **oceanos** (v0.7.2).
+Siguiente (v0.7.x del roadmap): **cuevas** (v0.7.2) y **oceanos** (v0.7.3).
 Pendiente tambien el palo 3D del `.bbmodel` y la antorcha de pared.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en

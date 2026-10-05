@@ -10,7 +10,7 @@
 //!   (desierto, bosque, nieve): cada celda de Worley tiene un valor y ese valor
 //!   decide el bioma.
 //!
-//! Mas adelante (v0.7.1) se anadiran cuevas; por eso el generador ya vive en su
+//! Mas adelante (v0.7.2) se anadiran cuevas; por eso el generador ya vive en su
 //! propio tipo [`TerrainGenerator`].
 
 use noise::{NoiseFn, Perlin, Worley};
@@ -91,13 +91,19 @@ impl TerrainGenerator {
 
     /// Rellena una columna del mundo con terreno segun su posicion `(world_x,
     /// world_z)`.
+    ///
+    /// La altura se calcula **por bloque** (`world_x + x`, `world_z + z`), no una
+    /// sola vez por chunk: asi el terreno forma colinas suaves y no mesetas
+    /// planas de 16x16 con escalones.
     pub fn generate_column(&self, world_x: i32, world_z: i32) -> Column {
         let mut column = Column::empty();
-        let height = self.height(world_x, world_z);
 
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                let biome = self.biome_at(world_x + x as i32, world_z + z as i32);
+                let wx = world_x + x as i32;
+                let wz = world_z + z as i32;
+                let height = self.height(wx, wz);
+                let biome = self.biome_at(wx, wz);
                 for y in 0..height {
                     column.set(x, y, z, surface_block(y, height, biome));
                 }

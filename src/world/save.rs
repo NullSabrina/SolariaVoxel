@@ -35,7 +35,9 @@ pub const FORMAT_VERSION: u32 = 2;
 ///
 /// * v1: solo colinas (Perlin), superficie de hierba/tierra/piedra.
 /// * v2: biomas (Worley) con superficie de arena/hierba/nieve.
-pub const GENERATOR_VERSION: u32 = 2;
+/// * v3: altura y bioma calculados **por bloque** (colinas suaves, no mesetas
+///   planas de 16x16).
+pub const GENERATOR_VERSION: u32 = 3;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD"; // VoxelForge World / Solaria

@@ -10,18 +10,18 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.0 — Biomas (desierto, bosque, nieve)
+//! ## Estado actual: v0.7.1 — Terreno suave (altura por bloque)
 //!
-//! * El generador reparte el mundo en **tres biomas** con ruido **Worley**
-//!   (cellular): desierto (arena), bosque (hierba) y nieve.
-//! * Nuevo bloque `Snow` (id 8, tile 9, pintado en `assets/atlas.png`).
-//! * `GENERATOR_VERSION` sube a 2 (cambio de generacion de terreno).
-//! * Cierra la etapa 1 del roadmap ("mundo jugable": romper/colocar, versionado,
-//!   luz, biomas). Sobre v0.6.5: colision horizontal. v0.6.4: ciclo dia/noche.
+//! * `generate_column` calcula **altura y bioma por bloque** (`world_x + x`),
+//!   no una altura por chunk: el terreno forma colinas suaves en vez de mesetas
+//!   planas de 16x16 con escalones.
+//! * `GENERATOR_VERSION` sube a 3 (el algoritmo de terreno cambia).
+//! * Sobre v0.7.0: biomas (desierto, bosque, nieve) con ruido **Worley** y el
+//!   bloque `Snow`. v0.6.5: colision horizontal. v0.6.4: ciclo dia/noche.
 //!   v0.6.3: consolidacion. v0.6.2: antorcha como cruz fina. v0.6.1: block
 //!   light. v0.6.0: luz de cielo. v0.5.x: LZ4 + streaming.
 //!
-//! Siguiente (v0.7.x del roadmap): cuevas (v0.7.1) y oceanos (v0.7.2). Pendiente
+//! Siguiente (v0.7.x del roadmap): cuevas (v0.7.2) y oceanos (v0.7.3). Pendiente
 //! tambien el **palo 3D** del `.bbmodel` y la **antorcha de pared**.
 //!
 //! ## Organizacion del codigo
