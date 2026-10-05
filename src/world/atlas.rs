@@ -15,7 +15,7 @@
 pub const TILE: u32 = 16;
 
 /// Numero de tiles en el atlas (0..TILES).
-pub const TILES: u32 = 14;
+pub const TILES: u32 = 17;
 
 /// Tiles por fila.
 pub const COLS: u32 = 4;
@@ -307,6 +307,34 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
             } else {
                 opaque(tint([154, 107, 63], noise / 2))
             }
+        }
+        // 14: tierra gruesa (dirt con mas contraste: gravilla gruesa).
+        14 => {
+            let grain = grain(x, y, tile);
+            opaque(dirt_shade((grain * 3) / 2))
+        }
+        // 15: grava (cantos grises variados con algun tono calido).
+        15 => {
+            let g = grain(x, y, tile);
+            let c = match g {
+                i if i < -8 => [92, 88, 84],
+                i if i < -2 => [110, 106, 100],
+                i if i < 5 => [128, 124, 118],
+                i if i < 11 => [150, 144, 136],
+                _ => [176, 168, 156],
+            };
+            opaque(c)
+        }
+        // 16: podzol (capa superior: marron oscuro con vetas rojizas).
+        16 => {
+            let g = grain(x, y, tile);
+            let c = match g {
+                i if i < -8 => [74, 52, 30],
+                i if i < -1 => [92, 64, 38],
+                i if i < 7 => [110, 78, 46],
+                _ => [128, 92, 54],
+            };
+            opaque(c)
         }
         _ => [0, 0, 0, 0],
     }

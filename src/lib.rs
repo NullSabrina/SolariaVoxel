@@ -10,22 +10,25 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.4 — Fisica AABB de entidades + agua que fluye
+//! ## Estado actual: v0.8.5 — Clima, biomas avanzados y cuevas 3D
 //!
-//! Dos mecanicas de la Etapa 2: **fisica de entidades** con caja AABB
-//! (`physics`) y **simulacion de agua** con niveles, 10 Hz (`world::water`).
+//! Worldgen de nueva generacion: mapa de **clima** (temperatura/humedad) -> 7
+//! biomas, **relieve por bioma** (ridged en montanas), superficie variada
+//! (`CoarseDirt`/`Gravel`/`Podzol`), **cuevas** spaghetti/cheese/pillar y
+//! **acuiferos**. Ademas: fuentes de agua 2x2 y oceanos en equilibrio a coste
+//! cero.
 //!
-//! Hereda de v0.8.3 (texturas + dim), v0.8.2 (mesa de crafteo) y v0.8.0
-//! (hotbar, inventario, guardado de posicion).
+//! Hereda de v0.8.4 (fisica AABB + agua), v0.8.3 (texturas + dim) y v0.8.2
+//! (mesa de crafteo).
 //!
-//! Siguiente (Etapa 2): **mobs** (usando `physics`) y **lava**.
+//! Siguiente (Etapa 2): **mobs** (usando `physics`) y **lava`.
 //!
 //! ## Organizacion del codigo
 //!
 //! * [`engine`] — ciclo de vida de la app y bucle de eventos.
 //! * [`render`] — la capa de GPU (una fina envoltura sobre wgpu).
 //! * [`scene`] — que hay en el mundo (camara).
-//! * [`world`] — bloques, chunks, generacion, meshing, raycast y agua.
+//! * [`world`] — bloques, chunks, generacion (terreno/cuevas), meshing, agua.
 //! * [`player`] — fisica del jugador (gravedad, suelo, salto, vuelo).
 //! * [`physics`] — fisica AABB de entidades (base de los mobs).
 //! * [`math`] — matematicas 3D propias (`Vec3`, `Mat4`).

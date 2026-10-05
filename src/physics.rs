@@ -82,6 +82,13 @@ pub struct MoveResult {
     pub on_ground: bool,
 }
 
+/// Flotabilidad escalada por la **fraccion sumergida** (0..1). El motor de agua
+/// reporta el nivel (`Fluid`) y la entidad sube mas cuanto mas hundida esta; en
+/// la superficie el empuje baja a cero.
+pub fn buoyancy_for(fill: f32) -> f32 {
+    WATER_BUOYANCY * fill.clamp(0.0, 1.0)
+}
+
 /// Mueve una entidad AABB un tick de fisica, resolviendo la colision con el
 /// mundo en el orden **X, Z, Y**.
 ///
@@ -378,5 +385,14 @@ mod tests {
         let c = Aabb::from_feet(Vec3::new(3.0, 0.0, 0.5), half());
         assert!(a.overlaps(&b));
         assert!(!a.overlaps(&c));
+    }
+
+    #[test]
+    fn la_flotabilidad_escala_con_la_inmersion() {
+        assert_eq!(buoyancy_for(0.0), 0.0);
+        assert!(buoyancy_for(0.5) > 0.0);
+        assert!(buoyancy_for(1.0) > buoyancy_for(0.5));
+        // Se satura por encima de 1 (no sube sin limite si el dato se pasa).
+        assert_eq!(buoyancy_for(2.0), buoyancy_for(1.0));
     }
 }

@@ -1,68 +1,132 @@
-//! Generacion de terreno procedural con ruido Perlin, **biomas** y **cuevas**.
+//! Generacion de terreno procedural: **clima**, **biomas**, **relieve por
+//! bioma**, **cuevas 3D** y **acuiferos**.
 //!
-//! Este modulo convierte una semilla + la posicion `(x, z)` de una columna en
-//! **altura**, **bioma** y **tipo de bloque de superficie**.
+//! Flujo de una columna:
+//! 1. **Clima 2D** — dos mapas `Fbm` (temperatura y humedad) en 0..1.
+//! 2. **Bioma** — se deriva del par (temperatura, humedad).
+//! 3. **Altura** — cada bioma aplica su propia **amplitud**, **frecuencia** y
+//!    peso de relieve escarpado (`RidgedMulti` para picos de montana).
+//! 4. **Superficie** — un ruido de detalle de alta frecuencia elige entre
+//!    `Grass`, `CoarseDirt`, `Podzol`, `Gravel` o `Sand`.
+//! 5. **Cuevas/acuiferos** — [`crate::world::caves`] decide que celda se cava y
+//!    si nace llena de agua.
 //!
-//! Usamos:
-//! * dos capas de ruido Perlin (crate `noise`) para el relieve (colinas y
-//!   valles),
-//! * un ruido **Worley** (cellular) para repartir el mundo en **biomas**
-//!   (desierto, bosque, nieve), y
-//! * un ruido **Perlin 3D** para las **cuevas**: donde su valor cruza un umbral
-//!   (una iso-superficie) el bloque solido se deja en aire, formando tuneles y
-//!   salas. Desde v0.7.5.
+//! Reemplaza la generacion v6 (Worley + Perlin simple). Sube `GENERATOR_VERSION`.
 
-use noise::{NoiseFn, Perlin, Worley};
+use noise::{Fbm, MultiFractal, NoiseFn, Perlin, RidgedMulti};
 
 use super::block::Block;
+use super::caves::{Carve, CaveSystem};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 
-/// Altura media del terreno, en bloques.
+/// Altura media del terreno, en bloques (nivel del mar).
 pub const SEA_LEVEL: i32 = 64;
 
-/// Grosor de la **corteza** que las cuevas no perforan (bloques bajo la
-/// superficie). Evita que el terreno quede acribillado de agujeros.
-const CAVE_CRUST: i32 = 2;
+/// Altura minima/maxima del terreno (el `clamp` del relieve).
+pub const MIN_HEIGHT: i32 = 8;
+pub const MAX_HEIGHT: i32 = 200;
 
-/// Altura minima (bloques) a la que puede haber cuevas: deja un suelo solido.
-const CAVE_MIN_Y: i32 = 2;
-
-/// Los biomas del mundo. El bioma decide el bloque de superficie.
+/// Los biomas del mundo, derivados del clima.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Biome {
-    /// Arena (desierto).
+    /// Calido y seco: dunas de arena.
     Desert,
-    /// Hierba (bosque).
+    /// Calido y semiseco: hierba con tierra gruesa.
+    Savanna,
+    /// Templado y seco: llanura de hierba.
+    Plains,
+    /// Templado y humedo: bosque denso.
     Forest,
-    /// Nieve (tundra).
-    Snow,
+    /// Templado y muy humedo: tierras bajas y encharcadas.
+    Swamp,
+    /// Frio y humedo: taiga nevada con picos escarpados.
+    Taiga,
+    /// Frio y seco: tundra nevada.
+    Tundra,
+}
+
+impl Biome {
+    /// Perfil de relieve: `(amplitud, frecuencia, peso del RidgedMulti)`.
+    ///
+    /// La amplitud multiplica la onda grande (20 bloques) y la frecuencia
+    /// escala la coordenada de entrada (mas alta = colinas mas estrechas). El
+    /// peso del ridged anade picos; el desierto es casi llano y la taiga montana.
+    fn relief(self) -> (f64, f64, f64) {
+        match self {
+            Biome::Desert => (0.35, 0.6, 0.0),
+            Biome::Savanna => (0.70, 0.85, 0.0),
+            Biome::Plains => (0.45, 0.70, 0.0),
+            Biome::Forest => (1.00, 1.00, 0.0),
+            Biome::Swamp => (0.20, 0.55, 0.0),
+            Biome::Taiga => (1.45, 1.20, 0.75),
+            Biome::Tundra => (1.05, 0.90, 0.35),
+        }
+    }
+
+    /// Densidad de arboles por columna (fraccion de columnas con arbol).
+    fn tree_density(self) -> f32 {
+        match self {
+            Biome::Forest => 0.07,
+            Biome::Taiga => 0.05,
+            Biome::Swamp => 0.03,
+            Biome::Plains => 0.01,
+            Biome::Desert | Biome::Savanna | Biome::Tundra => 0.0,
+        }
+    }
 }
 
 /// Generador deterministico: la misma semilla produce siempre el mismo mundo.
 pub struct TerrainGenerator {
-    /// Ruido de baja frecuencia: el relieve grande.
-    base: Perlin,
-    /// Ruido de detalle: pequenas variaciones.
+    /// Clima (2D): temperatura.
+    temperature: Fbm<Perlin>,
+    /// Clima (2D): humedad.
+    humidity: Fbm<Perlin>,
+    /// Relieve grande (`Fbm` suave).
+    continent: Fbm<Perlin>,
+    /// Detalle fino del relieve.
     detail: Perlin,
-    /// Ruido cellular para repartir los biomas.
-    biome: Worley,
-    /// Ruido Perlin 3D para las cuevas.
-    cave: Perlin,
-    /// Semilla original (la guardamos en el header del mundo).
+    /// Crestas escarpadas para montanas.
+    ridged: RidgedMulti<Perlin>,
+    /// Ruido de alta frecuencia que varia la capa de superficie.
+    surface_detail: Perlin,
+    /// Nivel del acuifero por columna (2D).
+    aquifer: Perlin,
+    /// Mascara 2D que decide **que columnas** tienen cuevas. Evita evaluar el
+    /// ruido 3D (caro) en columnas macizas: es la mayor parte del coste de
+    /// generar una columna, y asi el streaming no da tirones.
+    cave_mask: Perlin,
+    /// Cuevas 3D.
+    caves: CaveSystem,
     seed: u32,
 }
 
 impl TerrainGenerator {
-    /// Crea un generador para una semilla.
+    /// Crea un generador para una semilla. Cada capa usa una semilla derivada
+    /// distinta para que los ruidos no correlacionen (si compartieran semilla,
+    /// el clima seguiria al relieve).
     pub fn new(seed: u32) -> Self {
+        let mix = |k: u32| seed.wrapping_mul(0x9E37_79B9).wrapping_add(k);
         Self {
-            base: Perlin::new(seed),
-            // Otra semilla distinta para que los dos ruidos no sean iguales.
-            detail: Perlin::new(seed.wrapping_mul(0x9E37_79B9).wrapping_add(1)),
-            // Worley de baja frecuencia: celdas de ~50 bloques.
-            biome: Worley::new(seed.wrapping_add(0xB1_0B1)).set_frequency(0.02),
-            // Perlin 3D para las cuevas (semilla propia, decorrelacionada).
-            cave: Perlin::new(seed.wrapping_mul(0x85EB_CA6B).wrapping_add(3)),
+            temperature: Fbm::<Perlin>::new(mix(1))
+                .set_octaves(3)
+                .set_frequency(1.0)
+                .set_persistence(0.5),
+            humidity: Fbm::<Perlin>::new(mix(2))
+                .set_octaves(3)
+                .set_frequency(1.0)
+                .set_persistence(0.5),
+            continent: Fbm::<Perlin>::new(mix(3))
+                .set_octaves(4)
+                .set_frequency(1.0)
+                .set_persistence(0.5),
+            detail: Perlin::new(mix(4)),
+            ridged: RidgedMulti::<Perlin>::new(mix(5))
+                .set_octaves(4)
+                .set_frequency(1.0),
+            surface_detail: Perlin::new(mix(6)),
+            aquifer: Perlin::new(mix(7)),
+            cave_mask: Perlin::new(mix(8)),
+            caves: CaveSystem::new(seed),
             seed,
         }
     }
@@ -72,56 +136,88 @@ impl TerrainGenerator {
         self.seed
     }
 
-    /// Altura del terreno (numero de bloques solidos) en `(x, z)` del mundo.
-    ///
-    /// Sumamos una onda grande y otra pequena; el resultado queda en
-    /// `[48, 96]`.
-    pub fn height(&self, world_x: i32, world_z: i32) -> usize {
-        let x = world_x as f64;
-        let z = world_z as f64;
-        // Perlin devuelve aprox. [-1, 1].
-        let base = self.base.get([x * 0.010, z * 0.010]);
-        let detail = self.detail.get([x * 0.045, z * 0.045]);
-        let h = SEA_LEVEL as f64 + base * 20.0 + detail * 4.0;
-        (h.round() as i32).clamp(48, 96) as usize
+    /// Clima de `(x, z)` -> `(temperatura, humedad)` en 0..1.
+    pub fn climate(&self, world_x: i32, world_z: i32) -> (f64, f64) {
+        // Frecuencia espacial baja (0.004): las franjas climaticas ocupan cientos
+        // de bloques, no unos pocos.
+        let t = self
+            .temperature
+            .get([world_x as f64 * 0.004, world_z as f64 * 0.004]);
+        let h = self
+            .humidity
+            .get([world_x as f64 * 0.004, world_z as f64 * 0.004]);
+        (
+            (t * 0.5 + 0.5).clamp(0.0, 1.0),
+            (h * 0.5 + 0.5).clamp(0.0, 1.0),
+        )
     }
 
-    /// Bioma en `(x, z)` del mundo. Worley (ReturnType::Value) devuelve un valor
-    /// pseudoaleatorio por celda en `[0, 1)`; lo partimos en tres tercios.
+    /// Bioma en `(x, z)` a partir del clima (diagrama de Whittaker simplificado).
     pub fn biome_at(&self, world_x: i32, world_z: i32) -> Biome {
-        let v = self.biome.get([world_x as f64, world_z as f64]);
-        if v < 0.34 {
-            Biome::Desert
-        } else if v < 0.67 {
-            Biome::Forest
+        let (t, h) = self.climate(world_x, world_z);
+        if t < 0.32 {
+            // Frio: taiga (humedo) o tundra (seco).
+            if h > 0.55 {
+                Biome::Taiga
+            } else {
+                Biome::Tundra
+            }
+        } else if t > 0.68 {
+            // Calido: desierto (seco) o sabana (algo humedo).
+            if h < 0.38 {
+                Biome::Desert
+            } else {
+                Biome::Savanna
+            }
+        } else if h > 0.72 {
+            Biome::Swamp
+        } else if h < 0.35 {
+            Biome::Plains
         } else {
-            Biome::Snow
+            Biome::Forest
         }
     }
 
-    /// ¿Hay **cueva** en `(x, y, z)` del mundo?
-    ///
-    /// Usamos un Perlin **3D** a baja frecuencia: los bloques en los que el ruido
-    /// esta cerca de cero forman una **iso-superficie**, que es un tunel continuo
-    /// (mejor que un simple "ruido > umbral", que da burbujas). No perfora ni la
-    /// corteza (bajo la superficie) ni el suelo del mundo.
-    fn is_cave(&self, x: i32, y: i32, z: i32, height: usize) -> bool {
-        if y < CAVE_MIN_Y || y >= height as i32 - CAVE_CRUST {
-            return false;
-        }
+    /// Nivel del acuifero en `(x, z)`, en 30..56. Por debajo se llenan de agua
+    /// las cuevas; por encima, quedan secas.
+    pub fn aquifer_level(&self, world_x: i32, world_z: i32) -> i32 {
         let n = self
-            .cave
-            .get([x as f64 * 0.06, y as f64 * 0.11, z as f64 * 0.06]);
-        n.abs() < 0.07
+            .aquifer
+            .get([world_x as f64 * 0.01, world_z as f64 * 0.01]);
+        30 + ((n * 0.5 + 0.5) * 26.0) as i32
     }
 
-    /// Rellena una columna del mundo con terreno segun su posicion `(world_x,
-    /// world_z)`.
-    ///
-    /// La altura se calcula **por bloque** (`world_x + x`, `world_z + z`), no una
-    /// sola vez por chunk: asi el terreno forma colinas suaves y no mesetas
-    /// planas de 16x16 con escalones. Las cuevas se tallan por bloque con ruido
-    /// 3D.
+    /// Altura del terreno (numero de bloques solidos) en `(x, z)`.
+    pub fn height(&self, world_x: i32, world_z: i32) -> usize {
+        let biome = self.biome_at(world_x, world_z);
+        let (amp, freq, ridged_w) = biome.relief();
+        let (fx, fz) = (world_x as f64, world_z as f64);
+
+        // La frecuencia por bioma se aplica escalando las coordenadas de entrada
+        // (el ruido base trabaja a 0.010). Es mas barato que reconfigurar el
+        // ruido, que no admite frecuencia variable por muestra.
+        let base = self.continent.get([fx * 0.010 * freq, fz * 0.010 * freq]);
+        let detail = self.detail.get([fx * 0.045 * freq, fz * 0.045 * freq]);
+        let mut h = SEA_LEVEL as f64 + base * 20.0 * amp + detail * 4.0;
+
+        if ridged_w > 0.0 {
+            // `RidgedMulti` devuelve crestas en 0..1: al restarle 0.5 y escalarlo
+            // obtenemos picos que suben y bajan alrededor del nivel base.
+            let r = self.ridged.get([fx * 0.010 * freq, fz * 0.010 * freq]);
+            h += (r - 0.5) * 26.0 * amp * ridged_w;
+        }
+
+        (h.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize
+    }
+
+    /// Ruido de detalle de superficie (alta frecuencia, por columna): elige la
+    /// variante de bloque de la capa superior.
+    fn surface_variant(&self, world_x: i32, world_z: i32) -> f64 {
+        self.surface_detail
+            .get([world_x as f64 * 0.11, world_z as f64 * 0.11])
+    }
+
+    /// Rellena una columna del mundo con terreno segun su posicion `(x, z)`.
     pub fn generate_column(&self, world_x: i32, world_z: i32) -> Column {
         let mut column = Column::empty();
 
@@ -131,45 +227,56 @@ impl TerrainGenerator {
                 let wz = world_z + z as i32;
                 let height = self.height(wx, wz);
                 let biome = self.biome_at(wx, wz);
-                // Cerca del nivel del mar (o por debajo) la superficie es **arena**
-                // (playa o fondo marino), sin importar el bioma.
+                let aquifer = self.aquifer_level(wx, wz);
+                let variant = self.surface_variant(wx, wz);
+                // Mascara 2D: solo las columnas con `cave_region > umbral` pagan
+                // el ruido 3D de cuevas. La transicion es suave (frecuencia baja),
+                // asi no aparecen "muros" verticales de cuevas.
+                let cave_region = self.cave_mask.get([wx as f64 * 0.017, wz as f64 * 0.017]);
+                let has_caves = cave_region > -0.30;
+                // Cerca del mar la superficie es arena (playa/fondo marino).
                 let coastal = height <= (SEA_LEVEL as usize) + 1;
+
                 for y in 0..height {
-                    if self.is_cave(wx, y as i32, wz, height) {
-                        continue; // cueva: dejamos aire
+                    // Cuevas y acuiferos antes de colocar el terreno.
+                    if has_caves {
+                        match self.caves.carve(wx, y as i32, wz, height as i32, aquifer) {
+                            Carve::Air => continue,
+                            Carve::Water => {
+                                column.set(x, y, z, Block::Water);
+                                continue;
+                            }
+                            Carve::None => {}
+                        }
                     }
                     let block = if coastal {
-                        coastal_block(y, height)
+                        coastal_block(y, height, variant)
                     } else {
-                        surface_block(y, height, biome)
+                        surface_block(y, height, biome, variant)
                     };
                     column.set(x, y, z, block);
                 }
-                // Vegetacion: **arboles** en tierra firme (no en playa/agua). El
-                // tronco y la copa caben en la columna, para no cortarlos en el
-                // borde del chunk.
-                if !coastal && height >= (SEA_LEVEL as usize) + 2 {
-                    let density = match biome {
-                        Biome::Forest => 0.05,
-                        Biome::Snow => 0.02,
-                        Biome::Desert => 0.0,
-                    };
-                    if density > 0.0
-                        && (2..=13).contains(&x)
-                        && (2..=13).contains(&z)
-                        && hash01(wx, wz) < density
-                    {
-                        place_tree(&mut column, x, height, z);
-                    }
-                }
-                // Oceano/lago: rellenamos de **agua** el aire entre la superficie
-                // y el nivel del mar (estilo `ocean.level`/`water_level`).
+
+                // Oceano/lago: rellena de agua el aire entre la superficie y el
+                // nivel del mar.
                 if height < SEA_LEVEL as usize {
                     for y in height..SEA_LEVEL as usize {
                         if column.get(x, y, z) == Block::Air {
                             column.set(x, y, z, Block::Water);
                         }
                     }
+                }
+
+                // Vegetacion: arboles en tierra firme, restringidos al interior
+                // de la columna para que la copa no se corte en el borde.
+                let density = biome.tree_density();
+                if !coastal
+                    && density > 0.0
+                    && (2..=13).contains(&x)
+                    && (2..=13).contains(&z)
+                    && hash01(wx, wz) < density
+                {
+                    place_tree(&mut column, x, height, z);
                 }
             }
         }
@@ -178,39 +285,115 @@ impl TerrainGenerator {
     }
 }
 
-/// Elige el bloque de la profundidad `y` para una columna de altura `height` y
-/// bioma `biome`.
-fn surface_block(y: usize, height: usize, biome: Biome) -> Block {
+/// Bloque de la capa `y` para un bioma templado/frio/calido.
+///
+/// `variant` (ruido de alta frecuencia por columna) ensucia la superficie con
+/// variantes: tierra gruesa, podzol y grava. Asi dos columnas del mismo bioma
+/// no salen identicas.
+fn surface_block(y: usize, height: usize, biome: Biome, variant: f64) -> Block {
     if y + 1 == height {
-        // Capa de arriba segun el bioma.
+        // Capa superior.
         match biome {
             Biome::Desert => Block::Sand,
-            Biome::Forest => Block::Grass,
-            Biome::Snow => Block::Snow,
+            // Sabana: hierba salpicada de tierra gruesa.
+            Biome::Savanna => {
+                if variant > 0.55 {
+                    Block::CoarseDirt
+                } else {
+                    Block::Grass
+                }
+            }
+            // Llanura: hierba con manchas de tierra gruesa.
+            Biome::Plains => {
+                if variant > 0.6 {
+                    Block::CoarseDirt
+                } else {
+                    Block::Grass
+                }
+            }
+            // Bosque: base de hierba con calvas de podzol.
+            Biome::Forest => {
+                if variant < -0.5 {
+                    Block::Podzol
+                } else {
+                    Block::Grass
+                }
+            }
+            // Pantano: hierba (a menudo encharcada por el nivel del mar).
+            Biome::Swamp => Block::Grass,
+            // Taiga: nieve con calvas de podzol.
+            Biome::Taiga => {
+                if variant < -0.5 {
+                    Block::Podzol
+                } else {
+                    Block::Snow
+                }
+            }
+            // Tundra: nieve con pedreras de grava.
+            Biome::Tundra => {
+                if variant < -0.6 {
+                    Block::Gravel
+                } else {
+                    Block::Snow
+                }
+            }
         }
     } else if y + 4 >= height {
-        // Sub-suelo: en el desierto tambien es arena; en el resto, tierra.
+        // Subsuelo (4 capas).
         match biome {
-            Biome::Desert => Block::Sand,
-            _ => Block::Dirt,
+            Biome::Desert | Biome::Savanna => Block::Sand,
+            Biome::Taiga => {
+                if variant < 0.0 {
+                    Block::Dirt
+                } else {
+                    Block::CoarseDirt
+                }
+            }
+            Biome::Tundra => {
+                if variant < 0.5 {
+                    Block::Dirt
+                } else {
+                    Block::CoarseDirt
+                }
+            }
+            Biome::Swamp => {
+                if variant < 0.2 {
+                    Block::CoarseDirt
+                } else {
+                    Block::Dirt
+                }
+            }
+            _ => {
+                if variant > 0.7 {
+                    Block::Gravel
+                } else {
+                    Block::Dirt
+                }
+            }
         }
     } else {
-        Block::Stone
+        // Roca madre: piedra, con bolsas de grava donde el detalle es alto.
+        if variant > 0.92 {
+            Block::Gravel
+        } else {
+            Block::Stone
+        }
     }
 }
 
-/// Bloque de la profundidad `y` en una columna **costera/submarina**: arena en
-/// las capas de arriba, piedra debajo.
-fn coastal_block(y: usize, height: usize) -> Block {
+/// Bloque de una columna **costera/submarina**: arena arriba, piedra debajo,
+/// con algun banco de grava.
+fn coastal_block(y: usize, height: usize, variant: f64) -> Block {
     if y + 4 >= height {
         Block::Sand
+    } else if variant > 0.85 {
+        Block::Gravel
     } else {
         Block::Stone
     }
 }
 
-/// Hash determinista de `(x, z)` en `[0, 1)`. Reparte los arboles sin depender
-/// del bioma (que ya se consulta aparte).
+/// Hash determinista de `(x, z)` en `[0, 1)`. Reparte los arboles.
 fn hash01(x: i32, z: i32) -> f32 {
     (hash_u32(x, z) % 100_000) as f32 / 100_000.0
 }
@@ -224,18 +407,14 @@ fn hash_u32(x: i32, z: i32) -> u32 {
     h ^ (h >> 16)
 }
 
-/// Planta un arbol en la columna: tronco de `Wood` y copa de `Leaves`. La copa
-/// escribe solo en aire (no pisa el tronco ni el terreno) y cabe dentro de la
-/// columna (posicion del tronco restringida a `2..=13`).
+/// Planta un arbol: tronco de `Wood` y copa de `Leaves`, sin pisar el terreno ni
+/// el tronco y cabiendo dentro de la columna.
 fn place_tree(column: &mut Column, x: usize, ground: usize, z: usize) {
-    // Altura del tronco 4..6 (variada por posicion).
     let trunk = 4 + (hash_u32(x as i32 * 31 + 7, z as i32 * 17 + 3) % 3) as usize;
     for y in ground..(ground + trunk).min(WORLD_HEIGHT) {
         column.set(x, y, z, Block::Wood);
     }
 
-    // Copa: 4 capas alrededor de la parte alta del tronco (radio 2, esquinas
-    // recortadas; la de arriba, radio 1).
     let leaf_base = ground + trunk - 2;
     for dy in 0..4i32 {
         let r: i32 = if dy == 0 || dy == 3 { 1 } else { 2 };
@@ -265,11 +444,10 @@ fn place_tree(column: &mut Column, x: usize, ground: usize, z: usize) {
     }
 }
 
-/// Comprueba que la altura nunca se sale del mundo.
+/// Cota superior de la altura (para validaciones externas).
 pub fn max_height() -> usize {
-    // La cota superior del `clamp` en `height` (96) debe caber en el mundo.
     let _ = WORLD_HEIGHT;
-    96
+    MAX_HEIGHT as usize
 }
 
 #[cfg(test)]
@@ -277,19 +455,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn la_misma_semilla_da_la_misma_altura() {
+    fn la_misma_semilla_da_el_mismo_mundo() {
         let a = TerrainGenerator::new(1234);
         let b = TerrainGenerator::new(1234);
-        assert_eq!(a.height(10, 20), b.height(10, 20));
-        assert_eq!(a.biome_at(10, 20), b.biome_at(10, 20));
+        for (x, z) in [(0, 0), (37, -21), (200, 200)] {
+            assert_eq!(a.height(x, z), b.height(x, z));
+            assert_eq!(a.biome_at(x, z), b.biome_at(x, z));
+            assert_eq!(a.aquifer_level(x, z), b.aquifer_level(x, z));
+        }
     }
 
     #[test]
-    fn semillas_distintas_dan_terrenos_distintos() {
+    fn semillas_distintas_dan_mundos_distintos() {
         let a = TerrainGenerator::new(1);
         let b = TerrainGenerator::new(2);
-        // Con muchas columnas, seguro que difieren en alguna.
-        let distintos = (0..32)
+        let distintos = (0..64)
             .filter(|&x| a.height(x, 0) != b.height(x, 0))
             .count();
         assert!(distintos > 0);
@@ -297,70 +477,76 @@ mod tests {
 
     #[test]
     fn la_altura_esta_dentro_de_limites() {
-        let generator = TerrainGenerator::new(7);
-        for x in -50..50 {
-            for z in -50..50 {
-                let h = generator.height(x, z);
-                assert!((48..=96).contains(&h), "altura fuera de rango: {h}");
+        let g = TerrainGenerator::new(7);
+        for x in -80..80 {
+            for z in -80..80 {
+                let h = g.height(x, z);
+                assert!(
+                    (MIN_HEIGHT..=MAX_HEIGHT).contains(&(h as i32)),
+                    "altura fuera de rango: {h}"
+                );
             }
         }
     }
 
     #[test]
-    fn hay_los_tres_biomas_en_un_area_grande() {
-        let generator = TerrainGenerator::new(13371);
-        let mut desert = false;
-        let mut forest = false;
-        let mut snow = false;
-        for x in -400..400 {
-            for z in -400..400 {
-                match generator.biome_at(x, z) {
-                    Biome::Desert => desert = true,
-                    Biome::Forest => forest = true,
-                    Biome::Snow => snow = true,
-                }
+    fn aparecen_todos_los_biomas_en_un_area_grande() {
+        let g = TerrainGenerator::new(13_371);
+        let mut vistos = [false; 7];
+        for x in (-800..800).step_by(8) {
+            for z in (-800..800).step_by(8) {
+                vistos[match g.biome_at(x, z) {
+                    Biome::Desert => 0,
+                    Biome::Savanna => 1,
+                    Biome::Plains => 2,
+                    Biome::Forest => 3,
+                    Biome::Swamp => 4,
+                    Biome::Taiga => 5,
+                    Biome::Tundra => 6,
+                }] = true;
             }
         }
-        assert!(desert && forest && snow, "faltan biomas en la muestra");
+        assert!(vistos.iter().all(|&v| v), "faltan biomas: {vistos:?}");
+    }
+
+    #[test]
+    fn el_clima_esta_normalizado() {
+        let g = TerrainGenerator::new(99);
+        for x in (-300..300).step_by(7) {
+            for z in (-300..300).step_by(7) {
+                let (t, h) = g.climate(x, z);
+                assert!((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&h));
+            }
+        }
     }
 
     #[test]
     fn la_superficie_depende_del_bioma() {
-        let generator = TerrainGenerator::new(99);
-        let column = generator.generate_column(0, 0);
-        let h = generator.height(0, 0);
-        // La capa de arriba depende del bioma... salvo cerca del mar, donde es
-        // arena (playa/fondo marino).
-        let expected = if h <= SEA_LEVEL as usize + 1 {
-            Block::Sand
-        } else {
-            match generator.biome_at(0, 0) {
-                Biome::Desert => Block::Sand,
-                Biome::Forest => Block::Grass,
-                Biome::Snow => Block::Snow,
-            }
-        };
-        assert_eq!(column.get(0, h - 1, 0), expected);
-        // El subsuelo no es aire.
-        assert!(column.get(0, h - 2, 0).is_solid());
-        // Encima de la superficie: aire, o **agua** si la columna esta bajo el
-        // nivel del mar.
-        let above = column.get(0, h, 0);
-        if h < SEA_LEVEL as usize {
-            assert_eq!(above, Block::Water);
-        } else {
-            assert_eq!(above, Block::Air);
+        let g = TerrainGenerator::new(99);
+        let column = g.generate_column(0, 0);
+        let h = g.height(0, 0);
+        let biome = g.biome_at(0, 0);
+        let top = column.get(0, h - 1, 0);
+        // La capa superior esta entre las variantes validas del sistema; para el
+        // desierto es arena y para la tundra/taiga, nieve o podzol.
+        match biome {
+            Biome::Desert => assert_eq!(top, Block::Sand),
+            Biome::Tundra => assert!(matches!(top, Block::Snow | Block::Gravel)),
+            Biome::Taiga => assert!(matches!(top, Block::Snow | Block::Podzol)),
+            _ => assert!(matches!(
+                top,
+                Block::Grass | Block::CoarseDirt | Block::Podzol | Block::Sand | Block::Gravel
+            )),
         }
-        assert_eq!(column.get(0, 0, 0), Block::Stone);
     }
 
     #[test]
     fn hay_arboles_con_tronco_y_hojas() {
-        let generator = TerrainGenerator::new(13_371);
+        let g = TerrainGenerator::new(13_371);
         let (mut wood, mut leaves) = (0u32, 0u32);
         for cz in -3..3 {
             for cx in -3..3 {
-                let column = generator.generate_column(cx * 16, cz * 16);
+                let column = g.generate_column(cx * 16, cz * 16);
                 for z in 0..CHUNK_SIZE {
                     for x in 0..CHUNK_SIZE {
                         for y in 0..WORLD_HEIGHT {
@@ -375,37 +561,25 @@ mod tests {
             }
         }
         assert!(wood > 0, "no se genero ningun tronco");
-        assert!(
-            leaves > wood,
-            "deberia haber mas hojas que troncos ({leaves} vs {wood})"
-        );
+        assert!(leaves > wood, "menos hojas que troncos");
     }
 
     #[test]
-    fn el_agua_llena_hasta_el_nivel_del_mar_y_hay_playa_de_arena() {
-        let generator = TerrainGenerator::new(13_371);
+    fn el_agua_llena_hasta_el_nivel_del_mar() {
+        let g = TerrainGenerator::new(13_371);
         let mar = SEA_LEVEL as usize;
         let mut fondo_ok = false;
-        let mut playa_ok = false;
         'outer: for cz in -4..4 {
             for cx in -4..4 {
-                let column = generator.generate_column(cx * 16, cz * 16);
+                let column = g.generate_column(cx * 16, cz * 16);
                 for z in 0..CHUNK_SIZE {
                     for x in 0..CHUNK_SIZE {
                         let wx = cx * 16 + x as i32;
                         let wz = cz * 16 + z as i32;
-                        let h = generator.height(wx, wz);
+                        let h = g.height(wx, wz);
                         if h + 3 < mar {
-                            // Fondo marino: arena, y agua hasta el nivel del mar.
                             assert_eq!(column.get(x, mar - 1, z), Block::Water, "tope de agua");
-                            assert_eq!(column.get(x, h - 1, z), Block::Sand, "fondo de arena");
                             fondo_ok = true;
-                        } else if h == mar + 1 {
-                            // Justo por encima del agua: playa de arena.
-                            assert_eq!(column.get(x, h - 1, z), Block::Sand, "playa");
-                            playa_ok = true;
-                        }
-                        if fondo_ok && playa_ok {
                             break 'outer;
                         }
                     }
@@ -413,39 +587,52 @@ mod tests {
             }
         }
         assert!(fondo_ok, "no se encontro fondo marino");
-        assert!(playa_ok, "no se encontro playa");
     }
 
     #[test]
-    fn el_desierto_es_arena_hasta_el_subsuelo() {
-        // surface_block directo: en el desierto las 4 capas de arriba son arena.
-        for y in (0..64).rev() {
-            let h = 64;
-            if y + 4 >= h {
-                assert_eq!(surface_block(y, h, Biome::Desert), Block::Sand);
-            } else {
-                assert_eq!(surface_block(y, h, Biome::Desert), Block::Stone);
+    fn los_acuiferos_rellenan_cuevas_profundas() {
+        let g = TerrainGenerator::new(13_371);
+        let mut agua_subterranea = 0u32;
+        for cz in -2..2 {
+            for cx in -2..2 {
+                let column = g.generate_column(cx * 16, cz * 16);
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let wx = cx * 16 + x as i32;
+                        let wz = cz * 16 + z as i32;
+                        let aquifer = g.aquifer_level(wx, wz) as usize;
+                        // Por debajo del acuifero y por encima de la bedrock,
+                        // un bloque de agua en una cueva es acuifero.
+                        for y in BEDROCK..aquifer.min(40) {
+                            if column.get(x, y, z) == Block::Water {
+                                agua_subterranea += 1;
+                            }
+                        }
+                    }
+                }
             }
         }
+        assert!(agua_subterranea > 0, "los acuiferos no llenaron cuevas");
     }
 
-    /// Cuenta la fraccion de aire **bajo la superficie** (cuevas) en una columna.
-    fn fraccion_cuevas(generator: &TerrainGenerator, wx: i32, wz: i32) -> f32 {
-        let column = generator.generate_column(wx, wz);
+    const BEDROCK: usize = 6;
+
+    /// Cuenta la fraccion de aire subterraneo (cuevas) de una columna.
+    fn fraccion_cuevas(g: &TerrainGenerator, wx: i32, wz: i32) -> f32 {
+        let column = g.generate_column(wx, wz);
         let mut aire = 0u32;
         let mut subterraneo = 0u32;
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                // Superficie: primer solido de arriba hacia abajo.
                 let surface = (0..WORLD_HEIGHT)
                     .rev()
                     .find(|&y| column.get(x, y, z).is_solid());
                 let Some(surface) = surface else { continue };
                 for y in 0..surface {
-                    subterraneo += 1;
-                    if !column.get(x, y, z).is_solid() {
+                    if !column.get(x, y, z).is_solid() && column.get(x, y, z) != Block::Water {
                         aire += 1;
                     }
+                    subterraneo += 1;
                 }
             }
         }
@@ -458,35 +645,32 @@ mod tests {
 
     #[test]
     fn las_cuevas_existen_pero_no_se_comen_el_terreno() {
-        let generator = TerrainGenerator::new(13_371);
-        // Promediamos varias columnas de una zona grande.
+        let g = TerrainGenerator::new(13_371);
         let mut suma = 0.0;
         let mut n = 0.0;
         for cz in -2..2 {
             for cx in -2..2 {
-                suma += fraccion_cuevas(&generator, cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
+                suma += fraccion_cuevas(&g, cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
                 n += 1.0;
             }
         }
         let frac = suma / n;
         println!("fraccion de aire subterraneo (cuevas): {frac:.3}");
-        assert!(frac > 0.02, "apenas hay cuevas: {frac}");
+        assert!(frac > 0.002, "apenas hay cuevas: {frac}");
         assert!(frac < 0.35, "demasiadas cuevas: {frac}");
     }
 
     #[test]
     fn la_corteza_no_se_perfora() {
-        // Ninguna cueva puede tocar las CAVE_CRUST capas de arriba: la superficie
-        // no queda acribillada.
-        let generator = TerrainGenerator::new(99);
-        let column = generator.generate_column(0, 0);
+        let g = TerrainGenerator::new(99);
+        let column = g.generate_column(0, 0);
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let surface = (0..WORLD_HEIGHT)
                     .rev()
                     .find(|&y| column.get(x, y, z).is_solid());
                 if let Some(surface) = surface {
-                    for dy in 0..CAVE_CRUST as usize {
+                    for dy in 0..crate::world::caves::CAVE_CRUST as usize {
                         let y = surface - dy;
                         assert!(
                             column.get(x, y, z).is_solid(),

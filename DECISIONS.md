@@ -1329,6 +1329,44 @@ charca 16x16 en ~2 ms (~0.02 ms/tick); el objetivo de "1M de bloques activos <
 16 ms" **no** se alcanza con este diseno (sin paralelismo por chunk ni
 almacenamiento compacto). 143 tests.
 
+### 2026-10-05 (v0.8.5) — Clima, biomas avanzados, cuevas 3D y acuiferos
+
+**Decision.** Reescribir la generacion del mundo (`GENERATOR_VERSION` 6 -> 7):
+
+1. **Clima 2D** (`Fbm` de temperatura y humedad) -> **7 biomas** (desierto,
+   sabana, llanura, bosque, pantano, taiga, tundra) por diagrama de Whittaker.
+2. **Relieve por bioma**: `(amplitud, frecuencia, peso ridged)` por bioma; la
+   taiga montana usa `RidgedMulti` para picos. La frecuencia se aplica escalando
+   la coordenada (el ruido no admite frecuencia variable por muestra).
+3. **Superficie variada**: un ruido de alta frecuencia por columna elige entre
+   `Grass`, `CoarseDirt`, `Gravel`, `Podzol`, `Sand` y `Snow` (bloques nuevos
+   `CoarseDirt`/`Gravel`/`Podzol`, ids 12-14).
+4. **Cuevas** (`src/world/caves.rs` nuevo): spaghetti (`|Fbm|` pequeno),
+   cheese (umbral en `Fbm` de baja frecuencia) y pillar (columnas solidas),
+   con umbral que crece con la profundidad; protege bedrock y corteza.
+5. **Acuiferos**: las cuevas bajo un nivel 2D (30..56) nacen con `Block::Water`,
+   de modo que el automata a 10 Hz no inunda cavernas enteras.
+6. **Agua**: fuentes **2x2** (un flujo con 2+ fuentes ortogonales se fija) y
+   **equilibrio** (fuentes con fondo bloqueado y vecinos a tope se saltan: los
+   oceanos generados cuestan cero).
+
+**Motivo.** El usuario pidio el prompt de worldgen "vasto y realista". La
+generacion v6 (Worley + Perlin simple) daba biomas de 3 tipos y cuevas de un
+solo ruido.
+
+**Alternativas descartadas.** (a) Frecuencia de ruido variable por bioma: habria
+que reconstruir el `Fbm` por muestra; escalar la coordenada es equivalente y
+barato. (b) Sin mascara 2D de cuevas: evaluar 3 `Fbm` 3D por celda en *todas* las
+columnas hizo la suite subir de 7 a 47 s; la mascara 2D baja a ~6 s y reduce el
+tiron de streaming. (c) Cuevas por "ruido > umbral" simple: da burbujas, no
+tuneles. (d) Persistir niveles de flujo: sigue fuera de alcance.
+
+**Consecuencia.** `terrain.rs` reescrito; `caves.rs` nuevo; `block.rs` +3
+bloques; `atlas.rs` `TILES` 14 -> 17 (64x80) con tiles 14-16 procedurales;
+`water.rs` fuentes 2x2; `World::water_in_equilibrium`; `physics::buoyancy_for`.
+153 tests. **Asset pendiente**: `assets/atlas.png` es 64x64 y se ignora (medida
+esperada 64x80) hasta que la IA de diseno lo repinte; mientras, atlas procedural.
+
 ---
 
 ## Plantilla para futuras entradas

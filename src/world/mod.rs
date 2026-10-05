@@ -12,6 +12,7 @@
 
 pub mod atlas;
 pub mod block;
+pub mod caves;
 pub mod chunk;
 pub mod greedy;
 pub mod mesher;

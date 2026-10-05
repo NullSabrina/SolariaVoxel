@@ -103,6 +103,23 @@ pub fn step_cell<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
     let mut level = f.level();
     let mut changed = false;
 
+    // Fuentes 2x2 (regla clasica): el agua que fluye con **dos o mas fuentes
+    // ortogonales** contiguas se convierte en fuente. Asi, apoyar dos cubos de
+    // agua junto a otros dos los fija como manantial permanente.
+    if matches!(f, Fluid::Flow(_)) {
+        let fuentes = H_DIRS
+            .iter()
+            .filter(|d| {
+                let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+                grid.in_bounds(n) && grid.fluid(n).is_source()
+            })
+            .count();
+        if fuentes >= 2 {
+            grid.set_fluid(p, Fluid::Source);
+            return true;
+        }
+    }
+
     // 1. Caida: el agua prefiere bajar.
     let below = [p[0], p[1] - 1, p[2]];
     let mut below_blocked = true;
@@ -415,5 +432,23 @@ mod tests {
         }
         // No debe existir agua por debajo del suelo.
         assert!(g.cells.keys().all(|&[_, y, _]| y > 0));
+    }
+
+    #[test]
+    fn un_flujo_junto_a_dos_fuentes_se_vuelve_fuente() {
+        // Esquinas de un 2x2: tres fuentes y un flujo; el flujo se fija.
+        let mut g = TestGrid::new(0);
+        g.set([0, 1, 0], Fluid::Source);
+        g.set([1, 1, 0], Fluid::Source);
+        g.set([0, 1, 1], Fluid::Source);
+        g.set([1, 1, 1], Fluid::Flow(MAX_LEVEL));
+        for _ in 0..4 {
+            tick_all(&mut g);
+        }
+        assert_eq!(
+            g.fluid([1, 1, 1]),
+            Fluid::Source,
+            "el flujo con dos fuentes contiguas deberia volverse fuente"
+        );
     }
 }

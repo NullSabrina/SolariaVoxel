@@ -63,6 +63,12 @@ pub enum Block {
     Planks,
     /// Mesa de crafteo: click derecho sobre ella abre la interfaz de crafteo.
     CraftingTable,
+    /// Tierra gruesa: superficie de sabana y bosque sin vegetacion densa.
+    CoarseDirt,
+    /// Grava: lechos de rio y laderas de montana.
+    Gravel,
+    /// Podzol: suelo acido de taiga/bosque humedo (capa superior).
+    Podzol,
 }
 
 impl Default for Block {
@@ -88,6 +94,9 @@ impl Block {
             9 => Block::Water,
             10 => Block::Planks,
             11 => Block::CraftingTable,
+            12 => Block::CoarseDirt,
+            13 => Block::Gravel,
+            14 => Block::Podzol,
             _ => Block::Air,
         }
     }
@@ -164,6 +173,15 @@ impl Block {
                 Face::NegY => 11, // base de tablones
                 _ => 12,          // lateral
             },
+            // Tierra gruesa: un tile propio (14) para distinguirla de la tierra.
+            Block::CoarseDirt => 14,
+            // Grava (15): cantos grises.
+            Block::Gravel => 15,
+            // Podzol: capa superior propia (16); debajo, como la tierra.
+            Block::Podzol => match face {
+                Face::PosY => 16,
+                _ => 2,
+            },
         }
     }
 }
@@ -235,9 +253,12 @@ mod tests {
             Block::Water,
             Block::Planks,
             Block::CraftingTable,
+            Block::CoarseDirt,
+            Block::Gravel,
+            Block::Podzol,
         ] {
             for face in Face::ALL {
-                assert!(b.face_tile(face) < 14, "{b:?} {face:?}");
+                assert!(b.face_tile(face) < 17, "{b:?} {face:?}");
             }
         }
         // Hierba: verde arriba, tierra abajo, lateral distinto.

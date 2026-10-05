@@ -23,7 +23,7 @@ use super::block::Block;
 use super::chunk::{CHUNK_SIZE, Column, SECTION_COUNT, WORLD_HEIGHT};
 use super::save::{ChunkPos, ChunkRecord};
 use super::terrain::TerrainGenerator;
-use super::water::{self, Fluid, FluidGrid};
+use super::water::{self, Fluid, FluidGrid, MAX_LEVEL};
 
 /// Un mundo vivo: columnas cargadas + cache + generador.
 pub struct World {
@@ -489,6 +489,32 @@ impl World {
         self.water_at(world).level()
     }
 
+    /// ¿Es una **fuente ya en equilibrio** que no hace falta simular? Ocurre
+    /// cuando el fondo esta bloqueado o lleno y los 4 vecinos horizontales estan
+    /// a tope. Asi los oceanos generados no cuestan CPU en el tick.
+    fn water_in_equilibrium(&self, p: [i32; 3]) -> bool {
+        if !self.water_at(p).is_source() {
+            return false;
+        }
+        let below = [p[0], p[1] - 1, p[2]];
+        let below_open = self.in_bounds(below)
+            && !self.get_block(below).is_solid()
+            && self.water_level(below) < MAX_LEVEL;
+        if below_open {
+            return false;
+        }
+        for d in [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] {
+            let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+            if !self.in_bounds(n) || self.get_block(n).is_solid() {
+                continue;
+            }
+            if self.water_level(n) < MAX_LEVEL - 1 {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Encela una celda de agua pendiente (si la columna esta cargada).
     fn enqueue_water(&mut self, world: [i32; 3]) {
         if !(0..WORLD_HEIGHT as i32).contains(&world[1]) {
@@ -546,6 +572,10 @@ impl World {
             }
             let (pos, _) = Self::world_to_local(p);
             if !self.columns.contains_key(&pos) {
+                continue;
+            }
+            // Oceanos/fuentes en equilibrio: coste cero.
+            if self.water_in_equilibrium(p) {
                 continue;
             }
             if water::step_cell(self, p) {

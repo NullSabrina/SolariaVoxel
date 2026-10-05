@@ -8,22 +8,29 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.4` — Fisica AABB de entidades + simulacion de agua
+## Estado actual: `v0.8.5` — Clima, biomas avanzados y cuevas 3D
 
-Primeras "mecanicas" de la Etapa 2, adaptadas al motor (1 byte por voxel):
+Worldgen de nueva generación (`GENERATOR_VERSION = 7`):
 
-- **Fisica AABB de entidades** (`src/physics.rs`): gravedad, colision eje a eje
-  (X, Z, Y), anti-tunelado, friccion y **flotabilidad** en agua. Es la base de
-  los futuros **mobs**.
-- **Agua que fluye** (`src/world/water.rs`): automata con niveles 1-8, caida,
-  propagacion con perdida por bloque, igualacion de superficies, fuentes
-  inagotables y conservacion. Corre a **10 Hz** aparte de la fisica y el render.
-  El mar y el agua colocada son **fuentes**; cavar bajo el agua la hace fluir.
-- Hereda de **v0.8.3**: texturas + dim. **v0.8.2**: mesa de crafteo.
-  **v0.8.0**: hotbar, inventario, guardado de posicion.
+- **Clima 2D** (temperatura + humedad, ruido `Fbm`) → **7 biomas**: desierto,
+  sabana, llanura, bosque, pantano, taiga y tundra.
+- **Relieve por bioma**: cada bioma tiene su amplitud/frecuencia; la taiga usa
+  `RidgedMulti` para picos escarpados.
+- **Superficie variada** con ruido de alta frecuencia: `CoarseDirt`, `Gravel` y
+  `Podzol` junto a hierba/arena/nieve.
+- **Cuevas 3D** (spaghetti + cheese + pillar) con densidad por profundidad, y
+  **acuíferos** que nacen llenos de agua (no inundan el motor de fluidos).
+- Agua: **fuentes 2x2** y océanos en equilibrio a coste cero.
+- Hereda de **v0.8.4**: física AABB + agua. **v0.8.3**: texturas + dim.
+  **v0.8.2**: mesa de crafteo.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
 der = colocar. Siguiente (Etapa 2): **mobs** (usando `physics`) y **lava**.
+
+> **Asset pendiente:** el atlas creció a 17 tiles (64x80). `assets/atlas.png`
+> sigue siendo 64x64, así que el juego usa el **atlas procedural** hasta que la
+> IA de diseño lo repinte a 64x80 con los tiles 14-16 (tierra gruesa, grava,
+> podzol).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -85,7 +92,8 @@ src/
 │   ├── block.rs     Tipos de bloque y su tile del atlas.
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas (carga assets/atlas.png; fallback).
-│   ├── terrain.rs   Generacion: altura/bioma por bloque, cuevas y oceanos.
+│   ├── terrain.rs   Generacion: clima/biomas, relieve, superficie y acuiferos.
+│   ├── caves.rs     Cuevas 3D (spaghetti/cheese/pillar) con densidad por Y.
 │   ├── mesher.rs    Meshing naive con face culling (referencia).
 │   ├── greedy.rs    Greedy meshing (fusiona caras; separa el agua).
 │   ├── raycast.rs   Raycast de voxeles (que bloque se apunta).
