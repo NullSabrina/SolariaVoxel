@@ -43,7 +43,7 @@ impl Face {
 
 /// Tipo de bloque. El valor numerico (`u8`) es lo que se guarda en el chunk.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Block {
     /// Aire: no es solido, no se dibuja.
     Air = 0,
@@ -61,6 +61,8 @@ pub enum Block {
     Water,
     /// Tablones de madera (para crafteo en la etapa 2).
     Planks,
+    /// Mesa de crafteo: click derecho sobre ella abre la interfaz de crafteo.
+    CraftingTable,
 }
 
 impl Default for Block {
@@ -85,6 +87,7 @@ impl Block {
             8 => Block::Snow,
             9 => Block::Water,
             10 => Block::Planks,
+            11 => Block::CraftingTable,
             _ => Block::Air,
         }
     }
@@ -155,6 +158,12 @@ impl Block {
             Block::Water => 10,
             // Tablones.
             Block::Planks => 11,
+            // Mesa de crafteo: tapa distinta (13) del lateral (12).
+            Block::CraftingTable => match face {
+                Face::PosY => 13, // tapa
+                Face::NegY => 11, // base de tablones
+                _ => 12,          // lateral
+            },
         }
     }
 }
@@ -172,6 +181,7 @@ mod tests {
             Block::Wood,
             Block::Water,
             Block::Planks,
+            Block::CraftingTable,
         ] {
             assert_eq!(Block::from_u8(b.id()), b);
         }
@@ -224,9 +234,10 @@ mod tests {
             Block::Snow,
             Block::Water,
             Block::Planks,
+            Block::CraftingTable,
         ] {
             for face in Face::ALL {
-                assert!(b.face_tile(face) < 12, "{b:?} {face:?}");
+                assert!(b.face_tile(face) < 14, "{b:?} {face:?}");
             }
         }
         // Hierba: verde arriba, tierra abajo, lateral distinto.
@@ -246,5 +257,10 @@ mod tests {
         for face in Face::ALL {
             assert_eq!(Block::Snow.face_tile(face), 9);
         }
+        // La mesa: tapa 13, base 11, lateral 12; solida.
+        assert!(Block::CraftingTable.is_solid());
+        assert_eq!(Block::CraftingTable.face_tile(Face::PosY), 13);
+        assert_eq!(Block::CraftingTable.face_tile(Face::NegY), 11);
+        assert_eq!(Block::CraftingTable.face_tile(Face::PosX), 12);
     }
 }

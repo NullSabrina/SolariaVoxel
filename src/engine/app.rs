@@ -54,6 +54,12 @@ pub struct App {
     hotbar_sel: usize,
     /// ¿Esta abierto el inventario? (`E`).
     inventory_open: bool,
+    /// ¿Esta abierta la mesa de crafteo? (click derecho sobre una mesa).
+    crafting_open: bool,
+    /// Rejilla 3x3 de la mesa (fila a fila). Sin conteos: creativo.
+    craft_grid: [Option<crate::world::Block>; 9],
+    /// Resultado actual de la receta (`None` si no casa ninguna).
+    craft_result: Option<crate::world::Block>,
     /// Ultima posicion del cursor en pixels (para el inventario).
     cursor: (f32, f32),
     /// Semilla del mundo (de la partida o cargada de disco).
@@ -89,13 +95,16 @@ fn now_unix() -> u64 {
 }
 
 /// Bloques disponibles en la barra rapida y en el inventario.
+///
+/// Los tablones NO estan aqui: se obtienen crafteando madera (1) en la mesa.
+/// La mesa SI esta: es la puerta de entrada al crafteo.
 const ITEMS: [crate::world::Block; 9] = [
     crate::world::Block::Stone,
     crate::world::Block::Dirt,
     crate::world::Block::Grass,
     crate::world::Block::Sand,
     crate::world::Block::Wood,
-    crate::world::Block::Planks,
+    crate::world::Block::CraftingTable,
     crate::world::Block::Leaves,
     crate::world::Block::Snow,
     crate::world::Block::Torch,
@@ -380,9 +389,13 @@ impl App {
             uv: region_uv(gui::HOTBAR),
             layer: -1,
         });
-        for (i, item) in self.hotbar.iter().enumerate() {
-            let sx = bar_x + (1.0 + i as f32 * gui::SLOT as f32) * UI_SCALE;
-            let sy = bar_y + UI_SCALE;
+        for (i, (cell, item)) in self
+            .hotbar_cells(win_w, win_h)
+            .iter()
+            .zip(self.hotbar.iter())
+            .enumerate()
+        {
+            let [sx, sy, _, _] = *cell;
             if i == self.hotbar_sel {
                 quads.push(UiQuad {
                     rect: [sx, sy, slot, slot],
@@ -400,6 +413,52 @@ impl App {
                 uv: [0.0, 0.0, 1.0, 1.0],
                 layer: item.face_tile(Face::PosY) as i32,
             });
+        }
+
+        // Mesa de crafteo: rejilla 3x3 + flecha + resultado (nuestra hotbar
+        // sigue abajo; el inventario tambien se muestra como fuente).
+        if self.crafting_open {
+            let (cells, arrow, result) = self.crafting_layout(win_w, win_h);
+            for (j, cell) in cells.iter().enumerate() {
+                let [cx, cy, cw, ch] = *cell;
+                quads.push(UiQuad {
+                    rect: [cx, cy, cw, ch],
+                    uv: region_uv(gui::SLOT_REGION),
+                    layer: -1,
+                });
+                if let Some(b) = self.craft_grid[j] {
+                    quads.push(UiQuad {
+                        rect: [cx + inset, cy + inset, cw - 2.0 * inset, ch - 2.0 * inset],
+                        uv: [0.0, 0.0, 1.0, 1.0],
+                        layer: b.face_tile(Face::PosY) as i32,
+                    });
+                }
+            }
+            quads.push(UiQuad {
+                rect: arrow,
+                uv: region_uv(gui::ARROW),
+                layer: -1,
+            });
+            {
+                let [rx, ry, rw, rh] = result;
+                quads.push(UiQuad {
+                    rect: [rx, ry, rw, rh],
+                    uv: region_uv(gui::SLOT_REGION),
+                    layer: -1,
+                });
+                if let Some(b) = self.craft_result {
+                    quads.push(UiQuad {
+                        rect: [rx + inset, ry + inset, rw - 2.0 * inset, rh - 2.0 * inset],
+                        uv: [0.0, 0.0, 1.0, 1.0],
+                        layer: b.face_tile(Face::PosY) as i32,
+                    });
+                    quads.push(UiQuad {
+                        rect: [rx, ry, rw, rh],
+                        uv: region_uv(gui::SELECTION),
+                        layer: -1,
+                    });
+                }
+            }
         }
 
         // Inventario: rejilla 3x3 con todos los bloques disponibles.
@@ -430,6 +489,116 @@ impl App {
             if mx >= x && mx < x + w && my >= y && my < y + h {
                 self.hotbar[self.hotbar_sel] = *item;
                 println!("[engine] ranura {} = {item:?}", self.hotbar_sel + 1);
+                return;
+            }
+        }
+    }
+
+    /// Rectangulos de las 9 ranuras de la hotbar (misma matematica que
+    /// `build_ui`, para que clic y dibujo coincidan).
+    fn hotbar_cells(&self, win_w: f32, win_h: f32) -> Vec<[f32; 4]> {
+        use crate::render::gui;
+        let slot = gui::SLOT as f32 * UI_SCALE;
+        let bar_w = gui::HOTBAR.w as f32 * UI_SCALE;
+        let bar_h = gui::HOTBAR.h as f32 * UI_SCALE;
+        let bar_x = ((win_w - bar_w) * 0.5).floor();
+        let bar_y = (win_h - bar_h - 8.0).floor();
+        (0..9)
+            .map(|i| {
+                let sx = bar_x + (1.0 + i as f32 * gui::SLOT as f32) * UI_SCALE;
+                let sy = bar_y + UI_SCALE;
+                [sx, sy, slot, slot]
+            })
+            .collect()
+    }
+
+    /// Layout de la ventana de crafteo: 9 celdas 3x3, flecha y resultado.
+    /// Devuelve `(celdas, flecha, resultado)`, siempre encima del inventario.
+    fn crafting_layout(&self, win_w: f32, win_h: f32) -> (Vec<[f32; 4]>, [f32; 4], [f32; 4]) {
+        use crate::render::gui;
+        let slot = gui::SLOT as f32 * UI_SCALE;
+        let gap = 6.0;
+        let grid = 3.0 * slot + 2.0 * gap;
+        let arrow_w = gui::ARROW.w as f32 * UI_SCALE;
+        let arrow_h = gui::ARROW.h as f32 * UI_SCALE;
+        let row_w = grid + 12.0 + arrow_w + 12.0 + slot;
+        let x0 = (win_w - row_w) * 0.5;
+        let inv_top = self.inventory_cells(win_w, win_h)[0][1];
+        let gy = (inv_top - grid - 24.0).max(8.0);
+        let mut cells = Vec::with_capacity(9);
+        for i in 0..9 {
+            cells.push([
+                x0 + (i % 3) as f32 * (slot + gap),
+                gy + (i / 3) as f32 * (slot + gap),
+                slot,
+                slot,
+            ]);
+        }
+        let ax = x0 + grid + 12.0;
+        let arrow = [ax, gy + (grid - arrow_h) * 0.5, arrow_w, arrow_h];
+        let rx = ax + arrow_w + 12.0;
+        let result = [rx, gy + (grid - slot) * 0.5, slot, slot];
+        (cells, arrow, result)
+    }
+
+    /// Recalcula el resultado segun la rejilla.
+    fn refresh_craft_result(&mut self) {
+        self.craft_result = crate::world::match_recipe(&self.craft_grid);
+    }
+
+    /// Cierra la mesa (limpia rejilla y resultado).
+    fn close_crafting(&mut self) {
+        self.crafting_open = false;
+        self.craft_grid = [None; 9];
+        self.craft_result = None;
+    }
+
+    /// Un click con la mesa abierta: resultado, rejilla, inventario u hotbar.
+    ///
+    /// Sin "mano": el click en el inventario pone el bloque en la primera celda
+    /// libre, el click en una celda la limpia, y el click en el resultado lo
+    /// asigna a la ranura activa y consume la rejilla.
+    fn crafting_click(&mut self) {
+        let (win_w, win_h) = self.window_size_f();
+        let (mx, my) = self.cursor;
+        let inside =
+            |r: &[f32; 4]| mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3];
+
+        let (cells, _arrow, result) = self.crafting_layout(win_w, win_h);
+
+        // 1. Resultado: asigna a la ranura activa y consume la rejilla.
+        if inside(&result) {
+            if let Some(out) = self.craft_result {
+                self.hotbar[self.hotbar_sel] = out;
+                println!("[crafteo] {out:?} -> ranura {}", self.hotbar_sel + 1);
+                self.craft_grid = [None; 9];
+                self.craft_result = None;
+            }
+            return;
+        }
+        // 2. Rejilla: limpia la celda pulsada.
+        for (j, cell) in cells.iter().enumerate() {
+            if inside(cell) {
+                self.craft_grid[j] = None;
+                self.refresh_craft_result();
+                return;
+            }
+        }
+        // 3. Inventario: pone el bloque en la primera celda libre.
+        for (cell, item) in self.inventory_cells(win_w, win_h).iter().zip(ITEMS.iter()) {
+            if inside(cell) {
+                if let Some(j) = self.craft_grid.iter().position(|c| c.is_none()) {
+                    self.craft_grid[j] = Some(*item);
+                    self.refresh_craft_result();
+                    println!("[crafteo] {item:?} -> celda {}", j + 1);
+                }
+                return;
+            }
+        }
+        // 4. Hotbar: elige la ranura destino del resultado.
+        for (i, cell) in self.hotbar_cells(win_w, win_h).iter().enumerate() {
+            if inside(cell) {
+                self.hotbar_sel = i;
                 return;
             }
         }
@@ -528,6 +697,12 @@ impl ApplicationHandler for App {
                     demo::build_overview(camera);
                 } else if demo::collide_active() {
                     demo::build_collision(renderer, camera);
+                } else if demo::craft_active() {
+                    let (table, grid, result) = demo::build_crafting(renderer, camera);
+                    self.crafting_open = true;
+                    self.craft_grid = grid;
+                    self.craft_result = result;
+                    println!("[engine] demo: mesa en {table:?}, resultado={result:?}");
                 } else {
                     let torch = demo::build(renderer, camera);
                     println!("[engine] demo: escena lista (antorcha en {torch:?})");
@@ -562,10 +737,12 @@ impl ApplicationHandler for App {
                     self.input.on_key(code, event.state);
 
                     match code {
-                        // Escape: cierra el inventario; si no, libera el raton; si
-                        // ya esta libre, sale.
+                        // Escape: cierra mesa; si no, cierra el inventario; si no,
+                        // libera el raton; si ya esta libre, sale.
                         KeyCode::Escape if event.state == ElementState::Pressed => {
-                            if self.inventory_open {
+                            if self.crafting_open {
+                                self.close_crafting();
+                            } else if self.inventory_open {
                                 self.inventory_open = false;
                             } else if self.mouse_locked {
                                 self.unlock_mouse();
@@ -574,8 +751,14 @@ impl ApplicationHandler for App {
                                 event_loop.exit();
                             }
                         }
-                        // E: abre/cierra el inventario (libera el raton al abrir).
+                        // E: cierra la mesa si esta abierta; si no, abre/cierra el
+                        // inventario (libera el raton al abrir).
                         KeyCode::KeyE if event.state == ElementState::Pressed => {
+                            if self.crafting_open {
+                                self.close_crafting();
+                                println!("[crafteo] mesa cerrada");
+                                return;
+                            }
                             self.inventory_open = !self.inventory_open;
                             if self.inventory_open {
                                 self.unlock_mouse();
@@ -615,10 +798,12 @@ impl ApplicationHandler for App {
                 button,
                 ..
             } => match button {
-                // Click izquierdo: en el inventario elige bloque; capturado, rompe;
-                // si no, captura el cursor.
+                // Click izquierdo: con mesa abierta va a la mesa; en el
+                // inventario elige bloque; capturado, rompe; si no, captura.
                 MouseButton::Left => {
-                    if self.inventory_open {
+                    if self.crafting_open {
+                        self.crafting_click();
+                    } else if self.inventory_open {
                         self.inventory_click();
                     } else if self.mouse_locked {
                         self.break_block();
@@ -626,9 +811,25 @@ impl ApplicationHandler for App {
                         self.lock_mouse();
                     }
                 }
-                // Click derecho: coloca (solo con el cursor capturado).
-                MouseButton::Right if self.mouse_locked && !self.inventory_open => {
-                    self.place_block();
+                // Click derecho: sobre una mesa la abre; si no, coloca (solo
+                // con el cursor capturado y sin ventanas abiertas).
+                MouseButton::Right
+                    if self.mouse_locked && !self.inventory_open && !self.crafting_open =>
+                {
+                    // ¿Apuntamos a una mesa de crafteo? Se abre en vez de colocar.
+                    let aimed_table = self
+                        .selection
+                        .zip(self.renderer.as_ref())
+                        .map(|(hit, r)| r.block_at(hit.block) == crate::world::Block::CraftingTable)
+                        .unwrap_or(false);
+                    if aimed_table {
+                        self.crafting_open = true;
+                        self.inventory_open = false;
+                        self.unlock_mouse();
+                        println!("[crafteo] mesa abierta (E o Escape para cerrar)");
+                    } else {
+                        self.place_block();
+                    }
                 }
                 _ => {}
             },

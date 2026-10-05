@@ -16,6 +16,7 @@ pub mod chunk;
 pub mod greedy;
 pub mod mesher;
 pub mod raycast;
+pub mod recipe;
 pub mod save;
 pub mod store;
 pub mod terrain;
@@ -24,6 +25,7 @@ pub use block::{Block, Face};
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};
 pub use mesher::{SectionMesh, mesh_column, mesh_section};
 pub use raycast::{RayHit, raycast};
+pub use recipe::{RECIPES, Recipe, match_recipe};
 pub use save::{
     ChunkPos, ChunkRecord, FORMAT_VERSION, GENERATOR_VERSION, MigrationChain, SaveError,
     WorldHeader, WorldMigrator, WorldSave, load_and_migrate,

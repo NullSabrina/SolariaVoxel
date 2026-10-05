@@ -185,3 +185,52 @@ pub fn build(renderer: &mut Renderer, camera: &mut Camera) -> [i32; 3] {
 
     torch
 }
+
+/// ¿Mostrar la mesa de crafteo abierta? (`SOLARIA_CRAFT`).
+pub fn craft_active() -> bool {
+    std::env::var("SOLARIA_CRAFT").is_ok()
+}
+
+/// Escena de la mesa de crafteo (`SOLARIA_CRAFT=1`): parcela plana, una mesa
+/// delante y la interfaz abierta con 2x2 de tablones (resultado: mesa).
+/// Devuelve `(mesa, rejilla, resultado)` para que `App` abra la UI igual que
+/// con un click derecho real.
+pub fn build_crafting(
+    renderer: &mut Renderer,
+    camera: &mut Camera,
+) -> ([i32; 3], [Option<Block>; 9], Option<Block>) {
+    let cx = camera.position.x.floor() as i32;
+    let cz = camera.position.z.floor() as i32;
+    let feet = (camera.position.y - EYE_HEIGHT).floor() as i32;
+    let plateau = feet + 1;
+
+    let mut edits: Vec<([i32; 3], Block)> = Vec::new();
+    for x in (cx - 3)..=(cx + 3) {
+        for z in (cz - 6)..=(cz + 3) {
+            edits.push(([x, plateau, z], Block::Grass));
+            for y in (plateau + 1)..(plateau + 8) {
+                edits.push(([x, y, z], Block::Air));
+            }
+        }
+    }
+
+    // Mesa a 4 bloques al frente (-Z).
+    let table = [cx, plateau + 1, cz - 4];
+    edits.push((table, Block::CraftingTable));
+    renderer.set_blocks(&edits);
+
+    // Rejilla con la receta 2x2 de tablones ya puesta.
+    let mut grid = [None; 9];
+    for i in [0usize, 1, 3, 4] {
+        grid[i] = Some(Block::Planks);
+    }
+    let result = crate::world::match_recipe(&grid);
+
+    camera.position = Vec3::new(cx as f32 + 0.5, plateau as f32 + 2.3, cz as f32 - 0.5);
+    camera.yaw_deg = 0.0;
+    camera.pitch_deg = -13.7;
+    camera.update_view();
+    renderer.set_highlight(None);
+
+    (table, grid, result)
+}

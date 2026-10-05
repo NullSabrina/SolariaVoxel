@@ -1224,6 +1224,33 @@ la ventana no llega a asentarse (el foco lo tiene otro proceso y
 `SetForegroundWindow` falla); con espera larga la UI aparece siempre. No es bug
 del juego (quads y config verificados): es entorno de captura.
 
+### 2026-10-05 (v0.8.2) — Mesa de crafteo funcional estilo Minecraft
+
+**Decision.** Mesa de crafteo completa con nuestra hotbar D: nuevo
+`Block::CraftingTable` (id 11; tiles 12 lateral / 13 tapa; atlas 64x64), click
+derecho sobre la mesa la abre (el resto coloca), rejilla 3x3 + flecha
+pergamino + resultado, recetas en `world::recipe` con normalize como MC (1
+madera -> tablones, 2x2 tablones -> mesa). Sin conteos (creativo): tomar el
+resultado asigna a la ranura activa y limpia la rejilla.
+
+**Motivo.** Es el crafteo de la guia (v0.8.2) y lo que el usuario pidio recrear
+de su referencia: solo la parte de mesa, con nuestra hotbar en vez de la de
+madera de la foto, mas la textura del bloque de mesa. La mesa es la puerta de
+entrada: los tablones salen de ITEMS (se craftean) y entra la mesa.
+
+**Alternativas descartadas.** (a) "Mano" con item flotando en el cursor: mas
+estado y arte; el modelo sin-mano (inventario -> primera celda libre, celda ->
+limpiar, resultado -> tomar) es simple y testeable. (b) Panel bitmap propio
+para la ventana: las ranuras D ya se auto-enmarcan; se reutiliza SLOT_REGION y
+solo se añade la region ARROW en el hueco libre de `gui.png`. (c) Abrir la mesa
+tambien con `E`: `E` es del inventario; la mesa se abre/cierra con click
+derecho, `E` y Escape.
+
+**Consecuencia.** `world::recipe` (5 tests), `App`: `crafting_open`,
+`craft_grid`, `craft_result`, `crafting_layout/click`, `hotbar_cells` compartido
+entre dibujo y clic. Demo `SOLARIA_CRAFT=1`. El crafteo reusara esto para mas
+recetas; los conteos llegaran con los drops (pendientes de la guia).
+
 
 
 

@@ -8,18 +8,18 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.1` — Texturas cartoon y hotbar fiel a la referencia
+## Estado actual: `v0.8.2` — Mesa de crafteo funcional (Etapa 2)
 
-Reestilizado visual completo (sin cambiar gameplay):
+Como una mesa de Minecraft, con nuestra hotbar D:
 
-- Los 12 tiles del atlas se **repintaron en LibreSprite** con la paleta "Solaria
-  Cartoon": 3 tonos cercanos por material, manchas suaves de 4x4, sin negro puro
-  (estilo Luanti/Terasology, dibujo original).
-- La hotbar es la **referencia D del usuario** (colores medidos del PNG): marco
-  `#4E351E`, ranuras hundidas `#1C0B02/#2B190C/#352011/#311C0F`. Vive en
-  `assets/gui.png` (LibreSprite) con fallback procedural.
-- Hereda de **v0.8.0**: hotbar de 9 ranuras, inventario (`E`) y guardado de
-  posicion.
+- Nuevo bloque **`CraftingTable`** (tiles 12 lateral / 13 tapa, atlas 64x64).
+  **Click derecho** sobre ella abre la interfaz; el resto coloca normal.
+- Rejilla 3x3 + **flecha pergamino** + resultado; recetas con normalize como MC:
+  1 madera -> tablones, 2x2 tablones -> mesa. Sin conteos (creativo): tomar el
+  resultado lo asigna a la ranura activa y limpia la rejilla.
+- Los tablones salen de ITEMS (se craftean); entra la mesa. `E`/Escape cierra.
+- Hereda de **v0.8.1**: texturas cartoon + hotbar D. **v0.8.0**: hotbar,
+  inventario, guardado de posicion.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
 der = colocar. Siguiente (Etapa 2): **crafteo** (rejilla + recetas) y **mobs**.

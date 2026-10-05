@@ -192,7 +192,9 @@ capturas: el render, el pipeline y la integracion de eventos.
 - Logica de bloques/chunks/meshing/raycast -> `world`.
 - Estado del jugador (inventario, salud, colision) -> `player`.
 - Camara, entidades, iluminacion de escena -> `scene`.
-- Interfaz 2D (HUD, hotbar, menus) -> `render` (`render::ui` + `render::gui`).
+- Interfaz 2D (HUD, hotbar, inventario, mesa) -> `render` (`render::ui` +
+  `render::gui`); el estado (rejilla, resultado, que ventana esta abierta) vive
+  en `App`, y las recetas en `world::recipe` (logica pura, testeable).
 - Nuevos efectos visuales (particulas) -> `render` (o un `render::vfx`).
 - Un sistema de juego (crafteo, IA) -> un modulo nuevo al mismo nivel.
 - Cualquier cosa que necesite `wgpu` -> solo dentro de `render`.

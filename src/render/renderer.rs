@@ -507,6 +507,11 @@ impl Renderer {
         ])
     }
 
+    /// Bloque en estas coordenadas de voxel (aire si no hay columna).
+    pub fn block_at(&self, voxel: [i32; 3]) -> Block {
+        self.world.get_block(voxel)
+    }
+
     /// ¿Hay **agua** en este punto del mundo (coordenadas en bloques)?
     pub fn is_water_at(&self, point: Vec3) -> bool {
         self.world

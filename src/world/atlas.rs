@@ -15,7 +15,7 @@
 pub const TILE: u32 = 16;
 
 /// Numero de tiles en el atlas (0..TILES).
-pub const TILES: u32 = 12;
+pub const TILES: u32 = 14;
 
 /// Tiles por fila.
 pub const COLS: u32 = 4;
@@ -266,6 +266,27 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
                     _ => [176, 130, 78],
                 };
                 opaque(c)
+            }
+        }
+        // 12: lateral de mesa de crafteo (tablones con rieles oscuros).
+        12 => {
+            if !(2..=13).contains(&y) {
+                opaque([95, 63, 34])
+            } else {
+                let c = match noise {
+                    i if i < -4 => [138, 95, 46],
+                    i if i < 8 => [154, 107, 63],
+                    _ => [176, 130, 78],
+                };
+                opaque(c)
+            }
+        }
+        // 13: tapa de mesa de crafteo (cuadrantes de tablones con cruz).
+        13 => {
+            if x == 7 || x == 8 || y == 7 || y == 8 {
+                opaque([95, 63, 34])
+            } else {
+                opaque(tint([154, 107, 63], noise / 2))
             }
         }
         _ => [0, 0, 0, 0],

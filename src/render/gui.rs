@@ -53,6 +53,13 @@ pub const SELECTION: Region = Region {
     w: SLOT,
     h: SLOT,
 };
+/// Flecha de crafteo (rejilla -> resultado), estilo pergamino.
+pub const ARROW: Region = Region {
+    x: 204,
+    y: 64,
+    w: 32,
+    h: 16,
+};
 
 /// Ruta de la textura de interfaz en disco (pintada en LibreSprite).
 pub const GUI_PATH: &str = "assets/gui.png";
@@ -90,7 +97,32 @@ pub fn build_pixels() -> Vec<u8> {
 
     // Resalte de la ranura seleccionada.
     draw_selection(&mut px);
+
+    // Flecha de crafteo.
+    draw_arrow(&mut px);
     px
+}
+
+/// Flecha de crafteo mirando a la derecha, en tonos pergamino sobre fondo
+/// transparente (se dibuja con blending).
+fn draw_arrow(px: &mut [u8]) {
+    for y in 0..ARROW.h {
+        for x in 0..ARROW.w {
+            let (xi, yi) = (x as i32, y as i32);
+            let in_body = (6..10).contains(&yi) && xi < 22;
+            let in_head = xi >= 20 && (yi - 8).abs() <= (31 - xi) / 2 + 1;
+            if !(in_body || in_head) {
+                continue;
+            }
+            let edge = yi == 6 || yi == 9 || xi == 0;
+            let c = if edge {
+                [138, 115, 85, 255]
+            } else {
+                [216, 196, 154, 255]
+            };
+            put(px, ARROW.x + x, ARROW.y + y, c);
+        }
+    }
 }
 
 /// Resalte: tinte blanco translucido con un marco claro.

@@ -10,21 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.1 — Texturas cartoon y hotbar fiel a la referencia
+//! ## Estado actual: v0.8.2 — Mesa de crafteo funcional (Etapa 2)
 //!
-//! Reestilizado visual completo, sin cambiar gameplay:
-//! * Los 12 tiles del atlas se **repintaron en LibreSprite** con la paleta
-//!   "Solaria Cartoon": 3 tonos cercanos por material, manchas suaves de 4x4,
-//!   sin negro puro (estilo Luanti/Terasology, dibujo original).
-//! * La hotbar es la **referencia D del usuario** (medida del PNG): marco
-//!   `#4E351E`, ranuras hundidas `#1C0B02/#2B190C/#352011/#311C0F`. La textura
-//!   vive en `assets/gui.png` (pintada en LibreSprite) con fallback procedural.
-//! * El fallback procedural usa los mismos tonos base.
+//! Como una mesa de Minecraft, con nuestra hotbar D:
+//! * Nuevo bloque `CraftingTable` (tiles 12 lateral / 13 tapa, atlas 64x64).
+//!   Click derecho sobre ella abre la interfaz (click derecho normal coloca).
+//! * Rejilla 3x3 + flecha pergamino + resultado; recetas con normalize como MC:
+//!   1 madera -> tablones, 2x2 tablones -> mesa. Sin conteos (creativo): tomar
+//!   el resultado lo asigna a la ranura activa y limpia la rejilla.
+//! * Los tablones salen de ITEMS (se craftean); entra la mesa. `E`/Escape cierra.
 //!
-//! Hereda de v0.8.0 (Etapa 2): hotbar de 9 ranuras, inventario (`E`) y guardado
-//! de posicion.
+//! Hereda de v0.8.1 (texturas cartoon + hotbar D) y v0.8.0 (hotbar, inventario,
+//! guardado de posicion).
 //!
-//! Siguiente (Etapa 2): **crafteo** (rejilla + recetas) y **mobs**.
+//! Siguiente (Etapa 2): **drops** (quedo pendiente de la guia) y **mobs**.
 //!
 //! ## Organizacion del codigo
 //!
