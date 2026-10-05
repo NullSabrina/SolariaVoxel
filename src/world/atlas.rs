@@ -149,17 +149,18 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
     let opaque = |c: [u8; 3]| [c[0], c[1], c[2], 255];
     match tile {
         // 0: hierba (arriba)
-        0 => opaque(tint([95, 159, 53], noise)),
-        // 1: lateral de hierba (franja verde arriba, tierra debajo)
+        0 => opaque(tint([104, 170, 66], noise)),
+        // 1: lateral de hierba (franja verde irregular arriba, tierra debajo)
         1 => {
-            if y < 5 {
-                opaque(tint([95, 159, 53], noise))
+            let depth = 2 + (noise.rem_euclid(4)) as u32;
+            if y < depth {
+                opaque(grass_shade(noise))
             } else {
-                opaque(tint([134, 96, 67], noise))
+                opaque(dirt_shade(noise))
             }
         }
-        // 2: tierra
-        2 => opaque(tint([134, 96, 67], noise)),
+        // 2: tierra (grano fino de bajo contraste)
+        2 => opaque(dirt_shade(noise)),
         // 3: piedra
         3 => opaque(tint([128, 128, 128], noise)),
         // 4: arena
@@ -219,6 +220,27 @@ fn tint(base: [i32; 3], delta: i32) -> [u8; 3] {
         (base[1] + delta).clamp(0, 255) as u8,
         (base[2] + delta).clamp(0, 255) as u8,
     ]
+}
+
+/// Tonos de tierra (nuestra paleta, contraste comprimido) elegidos por el ruido.
+/// Repartidos píxel a píxel dan grano, no manchas grandes.
+fn dirt_shade(noise: i32) -> [u8; 3] {
+    match noise {
+        i if i < -12 => [98, 68, 50],
+        i if i < -4 => [116, 82, 57],
+        i if i < 6 => [134, 96, 67],
+        i if i < 12 => [152, 112, 79],
+        _ => [166, 124, 86],
+    }
+}
+
+/// Tonos de hierba (base, oscuro, claro).
+fn grass_shade(noise: i32) -> [u8; 3] {
+    match noise {
+        i if i < -4 => [74, 132, 48],
+        i if i < 8 => [104, 170, 66],
+        _ => [150, 206, 92],
+    }
 }
 
 /// Ruido determinista en `-14..=14` a partir de la posicion y el tile.

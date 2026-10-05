@@ -1047,6 +1047,35 @@ tests. `GENERATOR_VERSION` sigue en 4.
 reservaba para oceanos: **oceanos pasa a v0.7.7**. No se adelanta nada; solo el
 arreglo que pidio el usuario tiene su propia version.
 
+### 2026-10-05 (v0.7.7) — Texturas de tierra con grano fino (referencia Luanti)
+
+**Decision.** Redibujar el **dirt** (tile 2) y el **lateral de hierba** (tile 1)
+del atlas como **grano fino de bajo contraste**, manteniendo **nuestra paleta**
+(marron base `134,96,67`), en `assets/atlas.png` con LibreSprite. El **fallback
+procedural** (`atlas.rs`) se alinea con el mismo grano.
+
+**Motivo.** El dirt se veia "raro": usaba 4 tonos con **mucho contraste**
+(oscuro `78,52,38` vs claro `166,124,86`) agrupados en **manchas grandes**. Al
+mirar como lo resuelve **Luanti/Minetest** (texturas 16x16, `grass_side`
+superpuesta sobre `dirt`, upscaling nearest): su tierra es un marron casi uniforme
+con **grano por píxel** y muy pocos tonos extremos. Reproducimos esa estructura
+con nuestros colores: se **comprime el contraste** (los tonos extremos pasan a ser
+~5% de los píxeles) y se **reparte por píxel** con un hash determinista, en vez de
+en bloques. La franja de hierba del lateral pasa a tener un **borde irregular**.
+
+**Alternativas descartadas.** (a) Cambiar la paleta a la de Minetest: la peticion
+era mejorar **con nuestra paleta**. (b) Solo bajar la opacidad/contraste global:
+aplana el relieve y pierde textura; el grano por píxel mantiene el detalle.
+(c) Textura mas grande (32x32): el motor y el atlas son de 16x16.
+
+**Consecuencia.** `assets/atlas.png` redibujado (dirt + grass side; antorcha y
+demas tiles intactos, transparencia preservada). `atlas.rs` gana `dirt_shade` y
+`grass_shade` y los usa en los tiles 1 y 2; tile 0 (hierba arriba) se alinea en
+color. 115 tests. `GENERATOR_VERSION` no cambia.
+
+**Roadmap.** **Oceanos pasa a v0.7.8** (la optimizacion de v0.7.6 ya habia corrido
+el numero).
+
 
 
 

@@ -10,21 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.6 — Optimizacion del streaming (sin tirones de FPS)
+//! ## Estado actual: v0.7.7 — Texturas de tierra con grano fino (estilo Luanti)
 //!
-//! * El meshing de las columnas nuevas ya no se hace de golpe en un frame: se
-//!   **encola** y se procesa con un **presupuesto de 6 ms/frame** (empezando por
-//!   las cercanas). El pico de ~80 ms al descubrir chunks baja a ~6 ms.
-//! * **Greedy mas rapido**: la mascara 2D es plana y se reutiliza entre capas
-//!   (antes reservaba un `Vec<Vec>` por capa) y las consultas de bloque dentro de
-//!   la columna se leen directo, sin `HashMap`. Meshing ~55 -> ~37 ms.
-//! * **Luz de cielo base** con `fill` + borrar solo lo subterraneo (~10 ms).
-//! * Sobre v0.7.5: cuevas (Perlin 3D) + luz de cielo lateral. v0.7.4: culling +
-//!   niebla. v0.7.3: re-mesheo de vecinas. v0.7.2: colision por huella +
-//!   auto-escalon. v0.7.1: altura por bloque. v0.7.0: biomas (Worley).
+//! * El **dirt** (tile 2) y el **lateral de hierba** (tile 1) se redibujan como
+//!   **grano fino de bajo contraste** (nuestra paleta, tonos comprimidos y
+//!   repartidos píxel a píxel) en vez de manchas grandes de tono oscuro/claro.
+//!   Referencia de estilo: Luanti/Minetest (16x16, `grass_side` sobre `dirt`).
+//! * El **fallback procedural** (`atlas.rs`) se alinea con el mismo grano, para
+//!   clones sin `assets/atlas.png`.
+//! * Sobre v0.7.6: optimizacion del streaming (cola de meshing con presupuesto,
+//!   greedy y luz mas rapidos). v0.7.5: cuevas + luz de cielo lateral.
 //!
-//! Siguiente (v0.7.x del roadmap): **oceanos** (v0.7.7): nivel del mar, agua,
-//! playas y un pase de transparencia. Pendiente tambien el **palo 3D** del
+//! Siguiente (v0.7.x del roadmap): **oceanos** (v0.7.8): nivel del mar, agua,
+//! playas y un **pase de transparencia**. Pendiente tambien el **palo 3D** del
 //! `.bbmodel` y la **antorcha de pared**.
 //!
 //! ## Organizacion del codigo
