@@ -6,4 +6,6 @@
 
 mod controller;
 
-pub use controller::{EYE_HEIGHT, PLAYER_HEIGHT, PLAYER_RADIUS, PlayerController};
+pub use controller::{
+    EYE_HEIGHT, PLAYER_HEIGHT, PLAYER_RADIUS, PlayerController, block_overlaps_player,
+};

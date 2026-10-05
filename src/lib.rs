@@ -10,23 +10,27 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.6.2 — La antorcha se dibuja como cruz fina
+//! ## Estado actual: v0.6.3 — Consolidacion (tests, arquitectura, limpieza)
 //!
-//! * La antorcha ya **no es un cubo**: el mesher emite **dos quads cruzados**
-//!   (planos `X = centro` y `Z = centro`) con el tile 8, y el shader hace
-//!   *cutout* (descarta alfa < 0.5): se ve el palo fino y la llama, con el fondo
-//!   transparente, como el modelo de Blockbench.
-//! * El **raycast** golpea tambien bloques visibles no solidos (`is_solid ||
-//!   is_visible`), asi que la antorcha se puede apuntar, resaltar y romper.
-//! * Las caras de los bloques solidos vecinos a una antorcha se siguen
-//!   dibujando (una antorcha no ocluye).
-//! * Sobre v0.6.1: block light (antorchas, flood-fill BFS) y atlas cargado de
-//!   `assets/atlas.png` como array de texturas con cutout. v0.6.0: luz de cielo;
-//!   v0.5.x: LZ4, mundo en memoria + streaming.
+//! Version sin features nuevas: refuerza la calidad de lo ya construido.
 //!
-//! Pendiente (anotado en DECISIONS.md): el **palo 3D** del `.bbmodel` (cubo
-//! `7,0,7→9,10,9`) y la **antorcha de pared** inclinada 22.5°, para una version
-//! posterior dedicada al modelo de la antorcha.
+//! * **Tests** (83 en total): se anaden los de `block_overlaps_player`
+//!   (colocacion sin meterse en el jugador), `face_tile` en las 6 caras de
+//!   todos los bloques, transparencia del tile de la antorcha y **migracion de
+//!   mundos preservando las ediciones del jugador**.
+//! * **Bug corregido:** el atlas procedural (fallback sin `assets/atlas.png`)
+//!   dibujaba el fondo de la antorcha opaco; ahora es transparente, como el
+//!   atlas real, asi el cutout funciona tambien sin assets.
+//! * **`ARCHITECTURE.md`**: mapa de modulos, flujo de un frame, versionado del
+//!   mundo e invariantes del motor.
+//! * **Limpieza:** la escena demo se extrae a `engine::demo` (fuera de
+//!   `app.rs`).
+//! * Sobre v0.6.2: la antorcha como cruz fina (cutout) + atlas de texturas.
+//!   v0.6.1: block light. v0.6.0: luz de cielo. v0.5.x: LZ4 + streaming.
+//!
+//! Pendiente (anotado en DECISIONS.md): el **palo 3D** del `.bbmodel` y la
+//! **antorcha de pared** inclinada 22.5°, y el ciclo dia/noche (que la guia
+//! situa en v0.6.2 pero aun no hicimos).
 //!
 //! ## Organizacion del codigo
 //!

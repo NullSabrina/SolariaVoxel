@@ -677,6 +677,65 @@ aun **antorcha de pared** (inclinada 22.5 grados sobre una cara vertical).
 que separar la textura de la llama de la del palo; es mas limpio hacerlo en una
 version dedicada al modelo completo, junto con la orientacion en pared.
 
+### 2026-10-04 (v0.6.3) — Version de consolidacion, no de features
+
+**Decision.** Antes de seguir avanzando por el roadmap (biomas, cuevas,
+gameplay), dedicamos una version a reforzar calidad: tests, documentacion de
+arquitectura y limpieza. No se anade ninguna funcionalidad visible.
+
+**Motivo.** La documentacion y los tests deberian haber ido desde el principio,
+no al final. Con el motor ya en ~4.900 LOC y 72 tests, era el momento de tapar
+los huecos antes de que crezcan: la logica de interaccion no tenia tests y no
+existia un documento de arquitectura.
+
+**Alternativas descartadas.** (a) Seguir con features (ciclo dia/noche,
+biomas): habria acumulado mas codigo sin cobertura. (b) Adoptar `clippy::pedantic`
+entero: demasiado ruido (cientos de avisos de casts `usize`/`f32` que son
+intencionales en un motor de voxeles). Nos quedamos con el clippy por defecto en
+cero warnings.
+
+**Consecuencia.** 83 tests. `block_overlaps_player` pasa de `app.rs` a `player`
+(es geometria del jugador) y gana tests. La escena demo se extrae a
+`engine::demo`. Nuevo `ARCHITECTURE.md`.
+
+### 2026-10-04 (v0.6.3) — El atlas procedural tambien hace cutout
+
+**Decision.** El `build_pixels` (fallback cuando no existe `assets/atlas.png`)
+genera el tile de la antorcha con **fondo transparente** (alfa 0), igual que el
+atlas pintado a mano.
+
+**Motivo.** Antes el fallback pintaba el fondo opaco (`[40,40,45]`): quien
+clonara el repo sin assets veria la antorcha como un cuadrado oscuro (el mismo
+bug que resolvimos en v0.6.2 para el atlas real). Se detecto al escribir el test
+`el_tile_de_la_antorcha_tiene_transparencia`.
+
+**Consecuencia.** `tile_color` pasa a devolver RGBA en lugar de RGB. Nuevos
+tests: transparencia del tile 8 y que las capas del atlas no mezclan vecinos.
+
+### 2026-10-04 (v0.6.3) — Relacion con la guia: stack propio y desfase de versiones
+
+**Decision.** Registramos explicitamente la relacion entre este proyecto y la
+guia de referencia (guia iterativa de motor de voxeles) para que no se pierda:
+
+* **Stack:** la guia propone Bevy (ECS + motor completo). Solaria Voxel usa
+  **solo `winit` + `wgpu`** y escribe el resto desde cero (math, camara, meshing,
+  mundo, guardado, fisica). Es una decision deliberada: control total y
+  entendimiento a bajo nivel, a cambio de mas trabajo.
+* **Desfase de versiones:** la guia situa el **ciclo dia/noche** en `v0.6.2`.
+  Nosotros usamos `v0.6.2` para la antorcha como cruz fina (pulido, fuera de la
+  guia). El ciclo dia/noche sigue **pendiente**. La guia situa `v0.7.0` en
+  **biomas simples**, `v0.7.1` en cuevas y `v0.7.2` en oceanos.
+* **Lo que si adoptamos de la guia:** micro-versiones con tag por version,
+  `DECISIONS.md` desde el principio, SemVer del motor, y el **versionado del
+  formato de mundo con migradores** (`WorldHeader`/`ChunkRecord`/
+  `MigrationChain`, ver `ARCHITECTURE.md`).
+
+**Motivo.** El desfase es real y conviene documentarlo antes de retomar el
+roadmap, para decidir con criterio si se prioriza el ciclo dia/noche (hueco con
+la guia) o el pulido del modelo (palo 3D / antorcha de pared).
+
+
+
 
 ---
 

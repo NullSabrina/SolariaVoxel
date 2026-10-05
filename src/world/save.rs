@@ -461,4 +461,92 @@ mod tests {
         let migrated = chain.migrate(save).unwrap();
         assert_eq!(migrated.header.format_version, FORMAT_VERSION);
     }
+
+    #[test]
+    fn migrar_preserva_las_ediciones_del_jugador() {
+        // Lo critico de una migracion: los bloques que el jugador rompio/coloco
+        // NO se deben perder. Simulamos un mundo viejo con edits y migramos.
+        let mut save = WorldSave::new(7, 999);
+        save.header.format_version = 0;
+
+        let mut column = Column::empty();
+        column.set(1, 2, 3, Block::Torch); // algo que el jugador puso
+        column.set(10, 4, 5, Block::Stone);
+        // Emulamos un registro v1: bloques SIN comprimir.
+        let mut original = ChunkRecord::from_column(&column, 0);
+        original.blocks = original.decompressed_blocks();
+        original.compressed = false;
+        original.format_version = 1;
+        save.set_chunk(ChunkPos::new(3, -2), original);
+
+        // Migrador 0->1 de prueba: solo sube la version (los datos no cambian).
+        struct V0ToV1;
+        impl WorldMigrator for V0ToV1 {
+            fn from_version(&self) -> u32 {
+                0
+            }
+            fn to_version(&self) -> u32 {
+                1
+            }
+            fn migrate_chunk(&self, record: &ChunkRecord) -> ChunkRecord {
+                let mut r = record.clone();
+                r.format_version = self.to_version();
+                r
+            }
+        }
+        // El builtin V1ToV2 se encarga de comprimir. La cadena completa es
+        // 0 -> 1 -> 2 (FORMAT_VERSION).
+        let mut chain = MigrationChain::with_builtins();
+        chain.push(Box::new(V0ToV1));
+        let migrated = chain.migrate(save).unwrap();
+
+        let record = migrated.chunks.get(&ChunkPos::new(3, -2)).unwrap();
+        let blocks = record.decompressed_blocks();
+        // Los dos edits siguen ahi, en sus indices.
+        let idx_torch = (2 * CHUNK_SIZE + 3) * CHUNK_SIZE + 1;
+        let idx_stone = (4 * CHUNK_SIZE + 5) * CHUNK_SIZE + 10;
+        assert_eq!(blocks[idx_torch], Block::Torch.id());
+        assert_eq!(blocks[idx_stone], Block::Stone.id());
+        // Y el chunk quedo marcado con la version nueva.
+        assert_eq!(record.format_version, FORMAT_VERSION);
+    }
+
+    #[test]
+    fn un_mundo_viejo_se_puede_guardar_y_recargar_tras_migrar() {
+        // Punto a punto: guardar v0 en disco, migrar al cargar, y verificar que
+        // el resultado se puede volver a guardar/cargar sin corromperse.
+        let mut save = WorldSave::new(5, 1);
+        save.header.format_version = 0;
+        let mut column = Column::empty();
+        column.set(8, 8, 8, Block::Wood);
+        save.set_chunk(ChunkPos::new(0, 0), ChunkRecord::from_column(&column, 0));
+
+        let path = temp_path("migrate_roundtrip");
+        save.save_to(&path).unwrap();
+        // load_from no migra; load_and_migrate si (pero usa la cadena estandar,
+        // que no tiene 0->1). Cargamos y migramos a mano con el migrador.
+        let loaded = WorldSave::load_from(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        struct V0ToV1;
+        impl WorldMigrator for V0ToV1 {
+            fn from_version(&self) -> u32 {
+                0
+            }
+            fn to_version(&self) -> u32 {
+                1
+            }
+        }
+        let mut chain = MigrationChain::with_builtins();
+        chain.push(Box::new(V0ToV1));
+        let migrated = chain.migrate(loaded).unwrap();
+
+        // Re-guardamos el mundo migrado y lo releemos: no debe fallar.
+        let path2 = temp_path("migrate_roundtrip2");
+        migrated.save_to(&path2).unwrap();
+        let reopened = WorldSave::load_from(&path2).unwrap();
+        let _ = std::fs::remove_file(&path2);
+        assert_eq!(reopened.header.format_version, FORMAT_VERSION);
+        assert!(reopened.chunks.contains_key(&ChunkPos::new(0, 0)));
+    }
 }

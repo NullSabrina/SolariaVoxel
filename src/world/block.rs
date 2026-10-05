@@ -165,4 +165,34 @@ mod tests {
         // Los solidos no son "visibles no solidos".
         assert!(!Block::Stone.is_visible());
     }
+
+    #[test]
+    fn face_tile_es_coherente_en_todas_las_caras() {
+        // Cada bloque solido debe devolver un tile valido en sus 6 caras; la
+        // hierba y la madera distinguen arriba/abajo del resto.
+        for b in [
+            Block::Grass,
+            Block::Dirt,
+            Block::Stone,
+            Block::Sand,
+            Block::Wood,
+            Block::Leaves,
+        ] {
+            for face in Face::ALL {
+                assert!(b.face_tile(face) < 9, "{b:?} {face:?}");
+            }
+        }
+        // Hierba: verde arriba, tierra abajo, lateral distinto.
+        assert_eq!(Block::Grass.face_tile(Face::PosY), 0);
+        assert_eq!(Block::Grass.face_tile(Face::NegY), 2);
+        assert_eq!(Block::Grass.face_tile(Face::PosX), 1);
+        // Madera: anillos arriba/abajo, corteza en los lados.
+        assert_eq!(Block::Wood.face_tile(Face::PosY), 6);
+        assert_eq!(Block::Wood.face_tile(Face::NegY), 6);
+        assert_eq!(Block::Wood.face_tile(Face::PosZ), 5);
+        // La antorcha usa siempre el tile 8.
+        for face in Face::ALL {
+            assert_eq!(Block::Torch.face_tile(face), 8);
+        }
+    }
 }

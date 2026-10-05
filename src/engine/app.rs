@@ -23,6 +23,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
+use crate::engine::demo;
 use crate::engine::input::Input;
 use crate::engine::window;
 use crate::math::Vec3;
@@ -250,7 +251,7 @@ impl App {
 
         // Evitamos colocar un bloque dentro del propio jugador.
         if let Some(camera) = self.camera.as_ref() {
-            if block_overlaps_player(target, camera.position) {
+            if crate::player::block_overlaps_player(target, camera.position) {
                 return;
             }
         }
@@ -260,20 +261,6 @@ impl App {
         }
         self.update_selection();
     }
-}
-
-/// ¿El bloque `voxel` ocupa el espacio del jugador (pies..cabeza)?
-fn block_overlaps_player(voxel: [i32; 3], eye: Vec3) -> bool {
-    use crate::player::{EYE_HEIGHT, PLAYER_HEIGHT, PLAYER_RADIUS};
-    let (bx, by, bz) = (voxel[0] as f32, voxel[1] as f32, voxel[2] as f32);
-    let feet = eye.y - EYE_HEIGHT;
-    // El jugador se aproxima por una columna de radio PLAYER_RADIUS.
-    let overlaps_xz = (bx + 1.0 > eye.x - PLAYER_RADIUS)
-        && (bx < eye.x + PLAYER_RADIUS)
-        && (bz + 1.0 > eye.z - PLAYER_RADIUS)
-        && (bz < eye.z + PLAYER_RADIUS);
-    let overlaps_y = (by + 1.0 > feet) && (by < feet + PLAYER_HEIGHT);
-    overlaps_xz && overlaps_y
 }
 
 impl ApplicationHandler for App {
@@ -351,47 +338,15 @@ impl ApplicationHandler for App {
         println!("[engine] jugador posado en y={:.2}", camera.position.y);
         self.camera = Some(camera);
 
-        // Modo demo (SOLARIA_DEMO=1): escena minima para la captura. Alisa una
-        // parcela de hierba plana, planta UNA antorcha y apunta la camara a ella
-        // desde cerca para ver la cruz de dos planos (cutout). Sin gravedad ni
-        // resaltado (ver `demo`), asi la vista no se mueve antes de la foto.
-        self.demo = std::env::var("SOLARIA_DEMO").is_ok();
+        // Modo demo (SOLARIA_DEMO=1): escena fija para las capturas. La camara
+        // queda congelada (ver `Self::demo`), asi la vista no se mueve antes de
+        // la foto. El montaje vive en `engine::demo`.
+        self.demo = demo::is_active();
         if self.demo {
-            let cam = self.camera.as_ref().unwrap();
-            let cx = cam.position.x.floor() as i32;
-            let cz = cam.position.z.floor() as i32;
-            let feet = (cam.position.y - crate::player::EYE_HEIGHT).floor() as i32;
-            // Plataforma: solidos hasta `plateau`, aire por encima.
-            let plateau = feet + 1;
-
-            if let Some(renderer) = self.renderer.as_mut() {
-                // 1. Alisamos una parcela pequena (7x7) alrededor del jugador.
-                for x in (cx - 3)..=(cx + 3) {
-                    for z in (cz - 6)..=(cz + 3) {
-                        renderer.set_block([x, plateau, z], crate::world::Block::Grass);
-                        for y in (plateau + 1)..(plateau + 8) {
-                            renderer.set_block([x, y, z], crate::world::Block::Air);
-                        }
-                    }
-                }
-
-                // 2. UNA antorcha a 5 bloques al frente (-Z).
-                let torch = [cx, plateau + 1, cz - 5];
-                renderer.set_block(torch, crate::world::Block::Torch);
-
-                // 3. Camara: a 2.3 del suelo y 5.0 al frente, mirando a la
-                //    antorcha (v = (0,-1.1,-4.5), d^=(0,-0.238,-0.971)).
-                if let Some(camera) = self.camera.as_mut() {
-                    camera.position =
-                        Vec3::new(cx as f32 + 0.5, plateau as f32 + 2.3, cz as f32 - 0.5);
-                    camera.yaw_deg = 0.0;
-                    camera.pitch_deg = -13.7;
-                    camera.update_view();
-                }
-                // Sin resaltado: queremos ver el modelo limpio.
-                renderer.set_highlight(None);
+            if let (Some(renderer), Some(camera)) = (self.renderer.as_mut(), self.camera.as_mut()) {
+                let torch = demo::build(renderer, camera);
+                println!("[engine] demo: escena lista (antorcha en {torch:?})");
             }
-            println!("[engine] demo: antorcha simple lista");
         }
 
         self.last_frame = Some(Instant::now());

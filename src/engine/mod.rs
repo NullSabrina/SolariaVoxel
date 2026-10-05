@@ -6,6 +6,7 @@
 //! [`crate::math`]).
 
 mod app;
+mod demo;
 mod input;
 mod window;
 

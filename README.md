@@ -8,22 +8,23 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.6.2` — La antorcha como cruz fina (cutout)
+## Estado actual: `v0.6.3` — Consolidacion (tests, arquitectura, limpieza)
 
-- La **antorcha ya no es un cubo**: se dibuja como **dos quads cruzados** (planos
-  X y Z por el centro del voxel) con su tile, y el shader hace **cutout** (alfa <
-  0.5 se descarta). Se ve el palo fino y la llama, con el fondo transparente.
-- El **raycast** golpea tambien bloques visibles no solidos: la antorcha se puede
-  apuntar, resaltar y **romper**. Sus bloques vecinos no quedan ocluidos.
-- **Atlas como array de texturas**: una capa 16x16 por tile, cargado de
-  `assets/atlas.png` (con fallback procedural si no existe).
-- Sobre v0.6.1: block light (antorcha emite 14, flood-fill BFS). v0.6.0: luz de
-  cielo. v0.5.x: LZ4, mundo en memoria + streaming.
-- Sobre v0.4.x: romper/colocar, greedy meshing, colisiones.
-- Suite de tests (72 tests).
+- Version de **calidad, sin features nuevas**: mas tests (83), el documento
+  [`ARCHITECTURE.md`](./ARCHITECTURE.md), y limpieza del codigo de la app.
+- Tests nuevos clave: **migracion de mundos preservando las ediciones del
+  jugador**, colocacion sin meterse en el jugador, `face_tile` de todos los
+  bloques y la transparencia del tile de la antorcha.
+- **Bug corregido:** el atlas procedural (fallback sin assets) dibujaba el fondo
+  de la antorcha opaco; ahora es transparente, como el atlas real.
+- Hereda de v0.6.2: la **antorcha como cruz fina** (dos quads cruzados + cutout),
+  raycast que golpea bloques visibles no solidos, y el **atlas como array de
+  texturas** cargado de `assets/atlas.png`.
+- Sobre v0.6.1: block light (antorcha emite 14). v0.6.0: luz de cielo. v0.5.x:
+  LZ4, mundo en memoria + streaming. v0.4.x: romper/colocar, greedy, colisiones.
 
-Pendiente (anotado en `DECISIONS.md`): el palo 3D del `.bbmodel` y la antorcha de
-pared inclinada 22.5°, para una version posterior dedicada al modelo.
+Pendiente (anotado en `DECISIONS.md`): el palo 3D del `.bbmodel`, la antorcha de
+pared inclinada 22.5°, y el ciclo dia/noche.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -72,7 +73,8 @@ src/
 │   ├── pipeline.rs  Pipeline de escena (shader, vertices, uniforms, atlas).
 │   ├── highlight.rs Pipeline del resaltado (wireframe del bloque apuntado).
 │   ├── mesh.rs      Vertices + indices y su subida a la GPU.
-│   ├── scene.wgsl   Shader de la escena (vertex + fragment).
+│   ├── color.rs     Conversion sRGB -> lineal para los colores de clear.
+│   ├── scene.wgsl   Shader de la escena (vertex + fragment, cutout).
 │   └── highlight.wgsl Shader del resaltado (color plano).
 ├── player/
 │   └── controller.rs Fisica del jugador: gravedad, suelo, salto, vuelo.
@@ -81,7 +83,7 @@ src/
 ├── world/
 │   ├── block.rs     Tipos de bloque y su tile del atlas.
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
-│   ├── atlas.rs     Atlas de texturas procedural (pixels por codigo).
+│   ├── atlas.rs     Atlas de texturas (carga assets/atlas.png; fallback).
 │   ├── terrain.rs   Generacion de altura con ruido Perlin.
 │   ├── mesher.rs    Meshing naive con face culling (referencia).
 │   ├── greedy.rs    Greedy meshing (fusiona caras; el que se usa).
@@ -92,6 +94,9 @@ src/
     ├── vec3.rs      Vector de 3 componentes.
     └── mat4.rs      Matriz 4x4 column-major (perspectiva, look-at).
 ```
+
+Para el detalle de como encajan (flujo de un frame, versionado del mundo,
+invariantes), ver [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 Principio de diseno: **el resto del motor no sabe que wgpu existe**. Solo el
 modulo `render` habla con la GPU.

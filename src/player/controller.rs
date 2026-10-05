@@ -156,6 +156,22 @@ impl PlayerController {
     }
 }
 
+/// ¿El bloque `voxel` (coordenadas de mundo) ocupa el espacio del jugador?
+///
+/// El jugador se aproxima por un **cilindro vertical**: un radio `PLAYER_RADIUS`
+/// en el plano X-Z y desde los pies (`ojo - EYE_HEIGHT`) hasta `PLAYER_HEIGHT`.
+/// Se usa para no colocar un bloque dentro del propio jugador.
+pub fn block_overlaps_player(voxel: [i32; 3], eye: Vec3) -> bool {
+    let (bx, by, bz) = (voxel[0] as f32, voxel[1] as f32, voxel[2] as f32);
+    let feet = eye.y - EYE_HEIGHT;
+    let overlaps_xz = (bx + 1.0 > eye.x - PLAYER_RADIUS)
+        && (bx < eye.x + PLAYER_RADIUS)
+        && (bz + 1.0 > eye.z - PLAYER_RADIUS)
+        && (bz < eye.z + PLAYER_RADIUS);
+    let overlaps_y = (by + 1.0 > feet) && (by < feet + PLAYER_HEIGHT);
+    overlaps_xz && overlaps_y
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +272,52 @@ mod tests {
         let mut player = PlayerController::new();
         player.settle(&mut camera, |_| false);
         assert!(!player.on_ground);
+    }
+
+    // --- block_overlaps_player -----------------------------------------------
+    // El ojo se pone a `EYE_HEIGHT` sobre los pies; usamos pies en y=0 -> ojo 1.62.
+    fn eye_at(x: f32, z: f32) -> Vec3 {
+        Vec3::new(x, EYE_HEIGHT, z)
+    }
+
+    #[test]
+    fn el_bloque_bajo_los_pies_solapa() {
+        // El jugador esta en (0.5, *, 0.5); su cuerpo ocupa x/z 0.2..0.8 y los
+        // pies justo en y=0. El bloque [0,0,0] contiene ese espacio.
+        assert!(block_overlaps_player([0, 0, 0], eye_at(0.5, 0.5)));
+    }
+
+    #[test]
+    fn un_bloque_lejano_no_solapa() {
+        // A 2 bloques en X no toca al jugador (radio 0.3).
+        assert!(!block_overlaps_player([2, 0, 0], eye_at(0.5, 0.5)));
+    }
+
+    #[test]
+    fn un_bloque_bajo_el_suelo_no_solapa() {
+        // y=-1 esta por debajo de los pies (0) -> fuera.
+        assert!(!block_overlaps_player([0, -1, 0], eye_at(0.5, 0.5)));
+    }
+
+    #[test]
+    fn un_bloque_encima_de_la_cabeza_no_solapa() {
+        // La cabeza queda en 1.8; un bloque a y=2 empieza en 2.0 -> fuera.
+        assert!(!block_overlaps_player([0, 2, 0], eye_at(0.5, 0.5)));
+    }
+
+    #[test]
+    fn el_bloque_de_la_cabeza_solapa() {
+        // y=1 ocupa 1..2, solapa con el cuerpo (0..1.8). El jugador de 1.8 de
+        // alto ocupa parte del bloque de arriba.
+        assert!(block_overlaps_player([0, 1, 0], eye_at(0.5, 0.5)));
+    }
+
+    #[test]
+    fn el_borde_del_radio_cuenta_o_no_segun_el_caso() {
+        // Radio 0.3: el jugador en x=0.5 cubre 0.2..0.8 en X.
+        // Un bloque en x=1 empieza en 1.0 > 0.8 -> NO solapa.
+        assert!(!block_overlaps_player([1, 0, 0], eye_at(0.5, 0.5)));
+        // Pero uno en x=0 cubre 0..1 y si solapa.
+        assert!(block_overlaps_player([0, 0, 0], eye_at(0.5, 0.5)));
     }
 }
