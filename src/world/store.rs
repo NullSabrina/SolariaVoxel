@@ -138,9 +138,7 @@ impl World {
         // Toda columna editada se guarda; registramos su chunk.
         self.modified
             .insert(pos, ChunkRecord::from_column(column, TERRAIN_SECTION));
-        // La luz de cielo de la columna (columnar) se recalcula aqui; la de
-        // bloque la recalcula el mundo entero (cruza chunks) aparte.
-        self.recompute_skylight(pos);
+        // La luz la recalcula el mundo entero justo despues (cruza chunks).
         true
     }
 
@@ -205,10 +203,128 @@ impl World {
         self.columns.insert(pos, column);
     }
 
-    /// Recalcula la luz de cielo de una columna cargada (tras editarla).
-    fn recompute_skylight(&mut self, pos: ChunkPos) {
-        if let Some(column) = self.columns.get_mut(&pos) {
-            column.compute_skylight();
+    /// Recalcula la **luz de cielo** con propagacion **lateral** (BFS a nivel de
+    /// mundo, cruza chunks), pero solo en la **region** afectada.
+    ///
+    /// `dirty` son las columnas cuyos bloques cambiaron (o que entran/salen). Se
+    /// reinicia su base columnar (15 hasta el primer solido) y se propaga la luz
+    /// lateral desde las celdas de aire en sombra de la region (dirty + su anillo
+    /// 3x3): con **cuevas y voladizos** hay aire *bajo un techo* que no ve el cielo
+    /// y se ilumina de lado. Como la luz viaja **15 bloques** (< 1 chunk), la
+    /// region cubre todo lo que puede cambiar; recalcularla entera costaba ~60 ms
+    /// y se notaba al editar o al cruzar de chunk.
+    pub fn recompute_skylight(&mut self, dirty: &[ChunkPos]) {
+        use std::collections::VecDeque;
+
+        const NEIGHBORS: [(i32, i32, i32); 6] = [
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 1, 0),
+            (0, -1, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+        ];
+
+        // 1. Base columnar de las columnas sucias (borra su luz lateral antigua).
+        for pos in dirty {
+            if let Some(column) = self.columns.get_mut(pos) {
+                column.compute_skylight();
+            }
+        }
+
+        // 2. Region a escanear: dirty + anillo 3x3 (las celdas en sombra que
+        //    limitan con la luz suelen estar en las columnas vecinas).
+        let mut region: Vec<ChunkPos> = Vec::new();
+        for pos in dirty {
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+                    if self.is_loaded(n) && !region.contains(&n) {
+                        region.push(n);
+                    }
+                }
+            }
+        }
+
+        // 3. Sembrar desde las celdas de aire en sombra que ya tocan luz.
+        let mut seeds: Vec<(i32, i32, i32, u8)> = Vec::new();
+        for pos in &region {
+            let Some(column) = self.columns.get(pos) else {
+                continue;
+            };
+            let bx = pos.x * CHUNK_SIZE as i32;
+            let bz = pos.z * CHUNK_SIZE as i32;
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let surface = column.surface_y(x, z);
+                    for y in 0..surface {
+                        if column.get(x, y, z).is_solid() {
+                            continue;
+                        }
+                        let (wx, wy, wz) = (bx + x as i32, y as i32, bz + z as i32);
+                        let mut best = 0u8;
+                        for (dx, dy, dz) in NEIGHBORS {
+                            let ly = wy + dy;
+                            if ly < 0 || ly >= WORLD_HEIGHT as i32 {
+                                continue;
+                            }
+                            let lx = x as i32 + dx;
+                            let lz = z as i32 + dz;
+                            // Fuera de la columna se cruza al chunk vecino (lento);
+                            // dentro se lee directo (rapido).
+                            let l = if (0..CHUNK_SIZE as i32).contains(&lx)
+                                && (0..CHUNK_SIZE as i32).contains(&lz)
+                            {
+                                column.light_at(lx as usize, ly as usize, lz as usize)
+                            } else {
+                                self.sky_light_at([bx + lx, ly, bz + lz])
+                            };
+                            let cand = if dy == -1 { l } else { l.saturating_sub(1) };
+                            if l > 0 && cand > best {
+                                best = cand;
+                            }
+                        }
+                        if best > 0 {
+                            seeds.push((wx, wy, wz, best));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Sembrar y propagar.
+        let mut queue: VecDeque<(i32, i32, i32, u8)> = VecDeque::new();
+        for (x, y, z, level) in seeds {
+            let (pos, local) = Self::world_to_local([x, y, z]);
+            if let Some(column) = self.columns.get_mut(&pos)
+                && column.light_at(local[0], local[1], local[2]) < level
+            {
+                column.set_light(local[0], local[1], local[2], level);
+                queue.push_back((x, y, z, level));
+            }
+        }
+        while let Some((x, y, z, level)) = queue.pop_front() {
+            if level <= 1 {
+                continue;
+            }
+            for (dx, dy, dz) in NEIGHBORS {
+                let (nx, ny, nz) = (x + dx, y + dy, z + dz);
+                if ny < 0 || ny >= WORLD_HEIGHT as i32 {
+                    continue;
+                }
+                let cand = if dy == -1 { level } else { level - 1 };
+                let (pos, local) = Self::world_to_local([nx, ny, nz]);
+                let Some(column) = self.columns.get_mut(&pos) else {
+                    continue;
+                };
+                if column.get(local[0], local[1], local[2]).is_solid() {
+                    continue;
+                }
+                if column.light_at(local[0], local[1], local[2]) < cand {
+                    column.set_light(local[0], local[1], local[2], cand);
+                    queue.push_back((nx, ny, nz, cand));
+                }
+            }
         }
     }
 
@@ -448,5 +564,61 @@ mod tests {
         assert!(world.set_block([15, 100, 0], Block::Air));
         world.recompute_block_light();
         assert_eq!(world.block_light_at([16, 100, 0]), 0);
+    }
+
+    #[test]
+    fn la_luz_de_cielo_se_propaga_bajo_un_techo() {
+        use super::super::block::Block;
+        let mut world = World::new(1, 0, vec![]);
+        world.update_streaming([8.0, 200.0, 8.0]); // una columna (16x16)
+
+        // A y=200 todo es aire (por encima del terreno). Ponemos:
+        // - un techo solido en y=202 sobre x = 0..11,
+        // - dejando x = 11..15 a cielo abierto.
+        for z in 0..CHUNK_SIZE {
+            for x in 0..11i32 {
+                world.set_block([x, 202, z as i32], Block::Stone);
+            }
+        }
+        let all: Vec<ChunkPos> = world.loaded_positions().collect();
+        world.recompute_skylight(&all);
+
+        // Bajo el techo, la luz solo puede entrar de lado desde las columnas
+        // abiertas: mas cerca del borde x=11 hay mas luz.
+        let cerca = world.sky_light_at([10, 200, 8]);
+        let lejos = world.sky_light_at([0, 200, 8]);
+        assert!(cerca > 0, "no llega luz de cielo bajo el techo");
+        assert!(
+            cerca > lejos,
+            "la luz no se atenua con la distancia: cerca={cerca}, lejos={lejos}"
+        );
+        // Justo al lado de la columna abierta, casi luz plena.
+        assert!(world.sky_light_at([11, 200, 8]) == 15);
+        // Bajo el techo a cielo abierto (columna sin techo) la luz es 15.
+        assert_eq!(world.sky_light_at([3, 203, 8]), 15);
+    }
+
+    #[test]
+    fn bench_light_recompute() {
+        let mut world = World::new(13_371, 4, vec![]);
+        let t = std::time::Instant::now();
+        world.update_streaming([8.0, 74.0, 20.0]);
+        println!("carga 81 columnas: {:?}", t.elapsed());
+        let all: Vec<ChunkPos> = world.loaded_positions().collect();
+        let t = std::time::Instant::now();
+        world.recompute_skylight(&all);
+        println!("recompute_skylight (81 col): {:?}", t.elapsed());
+        let mut dirty = Vec::new();
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                dirty.push(ChunkPos::new(dx, dz));
+            }
+        }
+        let t = std::time::Instant::now();
+        world.recompute_skylight(&dirty);
+        println!("recompute_skylight (3x3): {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        world.recompute_block_light();
+        println!("recompute_block_light: {:?}", t.elapsed());
     }
 }

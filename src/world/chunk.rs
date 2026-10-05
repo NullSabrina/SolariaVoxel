@@ -77,6 +77,10 @@ pub struct Column {
     light: Vec<u8>,
     /// Luz de bloque (antorchas, 0..15), propagada con un flood-fill.
     block_light: Vec<u8>,
+    /// Altura del primer bloque solido de cada columna vertical `(x, z)`, para
+    /// localizar rapido el aire en sombra (cuevas/voladizos) al propagar la luz
+    /// de cielo lateralmente. Indice `z * CHUNK_SIZE + x`.
+    surface: [u16; CHUNK_SIZE * CHUNK_SIZE],
 }
 
 impl Column {
@@ -86,6 +90,7 @@ impl Column {
             sections: array::from_fn(|_| Chunk::empty()),
             light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
             block_light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
+            surface: [0; CHUNK_SIZE * CHUNK_SIZE],
         }
     }
 
@@ -123,18 +128,31 @@ impl Column {
             for x in 0..CHUNK_SIZE {
                 // `open` sigue siendo true mientras no encontremos solido.
                 let mut open = true;
+                let mut surface = 0u16;
                 let mut y = WORLD_HEIGHT;
                 while y > 0 {
                     y -= 1;
                     let block = self.get(x, y, z);
                     if block.is_solid() {
+                        if open {
+                            // Primer solido de arriba: es la superficie.
+                            surface = y as u16;
+                        }
                         open = false;
                     }
                     let level = if open { MAX_LIGHT } else { 0 };
                     self.set_light(x, y, z, level);
                 }
+                self.surface[z * CHUNK_SIZE + x] = surface;
             }
         }
+    }
+
+    /// Altura del primer bloque solido de la columna vertical `(x, z)` (0 si la
+    /// columna esta vacia). Es el borde de la sombra de cielo.
+    #[inline]
+    pub fn surface_y(&self, x: usize, z: usize) -> usize {
+        self.surface[z * CHUNK_SIZE + x] as usize
     }
 
     /// Luz de bloque (antorchas) en una posicion (0..15).

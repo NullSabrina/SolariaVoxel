@@ -1,17 +1,16 @@
-//! Generacion de terreno procedural con ruido Perlin y **biomas**.
+//! Generacion de terreno procedural con ruido Perlin, **biomas** y **cuevas**.
 //!
 //! Este modulo convierte una semilla + la posicion `(x, z)` de una columna en
 //! **altura**, **bioma** y **tipo de bloque de superficie**.
 //!
 //! Usamos:
 //! * dos capas de ruido Perlin (crate `noise`) para el relieve (colinas y
-//!   valles), y
+//!   valles),
 //! * un ruido **Worley** (cellular) para repartir el mundo en **biomas**
-//!   (desierto, bosque, nieve): cada celda de Worley tiene un valor y ese valor
-//!   decide el bioma.
-//!
-//! Mas adelante (v0.7.5) se anadiran cuevas; por eso el generador ya vive en su
-//! propio tipo [`TerrainGenerator`].
+//!   (desierto, bosque, nieve), y
+//! * un ruido **Perlin 3D** para las **cuevas**: donde su valor cruza un umbral
+//!   (una iso-superficie) el bloque solido se deja en aire, formando tuneles y
+//!   salas. Desde v0.7.5.
 
 use noise::{NoiseFn, Perlin, Worley};
 
@@ -20,6 +19,13 @@ use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 
 /// Altura media del terreno, en bloques.
 pub const SEA_LEVEL: i32 = 64;
+
+/// Grosor de la **corteza** que las cuevas no perforan (bloques bajo la
+/// superficie). Evita que el terreno quede acribillado de agujeros.
+const CAVE_CRUST: i32 = 2;
+
+/// Altura minima (bloques) a la que puede haber cuevas: deja un suelo solido.
+const CAVE_MIN_Y: i32 = 2;
 
 /// Los biomas del mundo. El bioma decide el bloque de superficie.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +46,8 @@ pub struct TerrainGenerator {
     detail: Perlin,
     /// Ruido cellular para repartir los biomas.
     biome: Worley,
+    /// Ruido Perlin 3D para las cuevas.
+    cave: Perlin,
     /// Semilla original (la guardamos en el header del mundo).
     seed: u32,
 }
@@ -53,6 +61,8 @@ impl TerrainGenerator {
             detail: Perlin::new(seed.wrapping_mul(0x9E37_79B9).wrapping_add(1)),
             // Worley de baja frecuencia: celdas de ~50 bloques.
             biome: Worley::new(seed.wrapping_add(0xB1_0B1)).set_frequency(0.02),
+            // Perlin 3D para las cuevas (semilla propia, decorrelacionada).
+            cave: Perlin::new(seed.wrapping_mul(0x85EB_CA6B).wrapping_add(3)),
             seed,
         }
     }
@@ -89,12 +99,29 @@ impl TerrainGenerator {
         }
     }
 
+    /// ¿Hay **cueva** en `(x, y, z)` del mundo?
+    ///
+    /// Usamos un Perlin **3D** a baja frecuencia: los bloques en los que el ruido
+    /// esta cerca de cero forman una **iso-superficie**, que es un tunel continuo
+    /// (mejor que un simple "ruido > umbral", que da burbujas). No perfora ni la
+    /// corteza (bajo la superficie) ni el suelo del mundo.
+    fn is_cave(&self, x: i32, y: i32, z: i32, height: usize) -> bool {
+        if y < CAVE_MIN_Y || y >= height as i32 - CAVE_CRUST {
+            return false;
+        }
+        let n = self
+            .cave
+            .get([x as f64 * 0.06, y as f64 * 0.11, z as f64 * 0.06]);
+        n.abs() < 0.07
+    }
+
     /// Rellena una columna del mundo con terreno segun su posicion `(world_x,
     /// world_z)`.
     ///
     /// La altura se calcula **por bloque** (`world_x + x`, `world_z + z`), no una
     /// sola vez por chunk: asi el terreno forma colinas suaves y no mesetas
-    /// planas de 16x16 con escalones.
+    /// planas de 16x16 con escalones. Las cuevas se tallan por bloque con ruido
+    /// 3D.
     pub fn generate_column(&self, world_x: i32, world_z: i32) -> Column {
         let mut column = Column::empty();
 
@@ -105,6 +132,9 @@ impl TerrainGenerator {
                 let height = self.height(wx, wz);
                 let biome = self.biome_at(wx, wz);
                 for y in 0..height {
+                    if self.is_cave(wx, y as i32, wz, height) {
+                        continue; // cueva: dejamos aire
+                    }
                     column.set(x, y, z, surface_block(y, height, biome));
                 }
             }
@@ -221,6 +251,75 @@ mod tests {
                 assert_eq!(surface_block(y, h, Biome::Desert), Block::Sand);
             } else {
                 assert_eq!(surface_block(y, h, Biome::Desert), Block::Stone);
+            }
+        }
+    }
+
+    /// Cuenta la fraccion de aire **bajo la superficie** (cuevas) en una columna.
+    fn fraccion_cuevas(generator: &TerrainGenerator, wx: i32, wz: i32) -> f32 {
+        let column = generator.generate_column(wx, wz);
+        let mut aire = 0u32;
+        let mut subterraneo = 0u32;
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                // Superficie: primer solido de arriba hacia abajo.
+                let surface = (0..WORLD_HEIGHT)
+                    .rev()
+                    .find(|&y| column.get(x, y, z).is_solid());
+                let Some(surface) = surface else { continue };
+                for y in 0..surface {
+                    subterraneo += 1;
+                    if !column.get(x, y, z).is_solid() {
+                        aire += 1;
+                    }
+                }
+            }
+        }
+        if subterraneo == 0 {
+            0.0
+        } else {
+            aire as f32 / subterraneo as f32
+        }
+    }
+
+    #[test]
+    fn las_cuevas_existen_pero_no_se_comen_el_terreno() {
+        let generator = TerrainGenerator::new(13_371);
+        // Promediamos varias columnas de una zona grande.
+        let mut suma = 0.0;
+        let mut n = 0.0;
+        for cz in -2..2 {
+            for cx in -2..2 {
+                suma += fraccion_cuevas(&generator, cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
+                n += 1.0;
+            }
+        }
+        let frac = suma / n;
+        println!("fraccion de aire subterraneo (cuevas): {frac:.3}");
+        assert!(frac > 0.02, "apenas hay cuevas: {frac}");
+        assert!(frac < 0.35, "demasiadas cuevas: {frac}");
+    }
+
+    #[test]
+    fn la_corteza_no_se_perfora() {
+        // Ninguna cueva puede tocar las CAVE_CRUST capas de arriba: la superficie
+        // no queda acribillada.
+        let generator = TerrainGenerator::new(99);
+        let column = generator.generate_column(0, 0);
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let surface = (0..WORLD_HEIGHT)
+                    .rev()
+                    .find(|&y| column.get(x, y, z).is_solid());
+                if let Some(surface) = surface {
+                    for dy in 0..CAVE_CRUST as usize {
+                        let y = surface - dy;
+                        assert!(
+                            column.get(x, y, z).is_solid(),
+                            "cueva en la corteza: ({x},{y},{z})"
+                        );
+                    }
+                }
             }
         }
     }

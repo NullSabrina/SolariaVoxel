@@ -957,6 +957,47 @@ donde si habra techos; se hara alli, junto con la propagacion entre chunks.
 **Desplazamiento de roadmap.** Cuevas pasa a **v0.7.5** y oceanos a **v0.7.6**.
 `GENERATOR_VERSION` sigue en 3.
 
+### 2026-10-05 (v0.7.5) — Cuevas + luz de cielo lateral
+
+**Decision.** El hito `v0.7.5` de la guia: **cuevas** con **ruido Perlin 3D** y
+umbral. Y la deuda que v0.7.4 dejo anotada: **luz de cielo con propagacion
+lateral** (necesaria en cuanto hay techos).
+
+**Motivo.** Las cuevas se tallan donde un Perlin 3D cruza una **iso-superficie**
+(`abs(noise) < umbral`), que da **tuneles continuos** en vez de burbujas (un
+simple `noise > umbral`). Frecuencia baja (0.06 en X/Z, 0.11 en Y) y umbral 0.07:
+~15% del volumen subterraneo queda aire (medido por test). No perfora la
+**corteza** (2 bloques bajo la superficie) ni el suelo, para no acribillar el
+terreno.
+
+Con cuevas aparecen techos, y la luz de cielo **columnar** deja a oscuras (0) todo
+lo que no ve el cielo por su propia columna, con un corte brusco. Se anade un BFS
+lateral a nivel de mundo: el aire en sombra se ilumina de lado con -1 por paso
+horizontal (sin perdida hacia abajo, como Minecraft). Base columnar + propagacion.
+
+**Rendimiento (medido).** Recalcular la luz de todo el mundo (81 columnas) costaba
+~60 ms, inaceptable en cada edicion/cruce. Se hace por **region**: solo las
+columnas **sucias** (las que cambian: edicion o streaming) + su anillo 3x3, ya que
+la luz viaja <= 15 bloques (< 1 chunk). Optimizando ademas la lectura de vecinos
+(misma columna directa en vez de HashMap): **~6 ms por edicion**, ~28 ms la carga
+inicial. Encaja con "medir rendimiento" del hito.
+
+**Alternativas descartadas.** (a) BFS global en cada cambio: 60 ms de tiron.
+(b) Solo luz de cielo columnar y cuevas oscuras: el corte en las bocas de cueva se
+nota. (c) Borrado de luz por BFS (removal) incremental estilo Minecraft: mas
+complejo; con region + reinicio de la base columnar de las columnas sucias el
+borrado es implicito.
+
+**Consecuencia.** `TerrainGenerator::is_cave` + `CAVE_CRUST`/`CAVE_MIN_Y`;
+`GENERATOR_VERSION` 4. `Column.surface` (altura del primer solido) y
+`surface_y`. `World::recompute_skylight(dirty)`; el renderer le pasa las columnas
+sucias en `sync_streaming`/`set_block`/`set_blocks`. Tests: fraccion de cuevas en
+banda, corteza intacta, skylight bajo un techo (atenuacion lateral), y el
+benchmark. 114 tests.
+
+**Sin desplazamiento de roadmap.** A diferencia de las ultimas versiones, este SI
+era el hito `v0.7.5`: **oceanos** sigue en **v0.7.6**.
+
 
 
 

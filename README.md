@@ -8,25 +8,22 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.7.4` — Rendimiento, niebla y luz que cruza chunks
+## Estado actual: `v0.7.5` — Cuevas + luz de cielo lateral
 
-- **Back-face culling** (con el winding de las caras horizontales corregido) y
-  **frustum culling** por seccion: menos trabajo de GPU.
-- **Niebla a distancia** que se funde con el color del cielo (y cambia con el
-  dia/noche): da profundidad y disimula el borde del area cargada.
-- **Luz de bloque que cruza chunks** (BFS a nivel de mundo): una antorcha cerca
-  de un borde ilumina la columna vecina. Se acaba el corte de luz en la frontera.
-- **FPS** visibles en el titulo de la ventana.
-- Sobre **v0.7.3**: re-mesheo de vecinas al hacer streaming (muros/grietas).
-  **v0.7.2**: colision por huella + auto-escalon. **v0.7.1**: altura por bloque.
-  **v0.7.0**: biomas (desierto/bosque/nieve) con ruido **Worley** y el bloque
-  `Snow`. v0.6.x: luz, antorcha, ciclo dia/noche, colision horizontal. v0.5.x:
-  LZ4 + streaming. v0.4.x: romper/colocar, greedy, colisiones.
+- **Cuevas**: ruido **Perlin 3D** por bloque; donde cruza un umbral
+  (iso-superficie) se talla el terreno (tuneles y salas). No perfora la corteza
+  (2 bloques bajo la superficie) ni el suelo. `GENERATOR_VERSION` 4.
+- **Luz de cielo con propagacion lateral** (BFS a nivel de mundo): el aire bajo un
+  techo (cuevas, voladizos) se ilumina de lado con atenuacion. Se recalcula por
+  **region** (columnas sucias + anillo 3x3), ~6 ms por edicion.
+- Sobre **v0.7.4**: culling (back-face + frustum), niebla, luz de bloque
+  cross-chunk y FPS en el titulo. **v0.7.3**: re-mesheo de vecinas. **v0.7.2**:
+  colision por huella + auto-escalon. **v0.7.1**: altura por bloque. **v0.7.0**:
+  biomas (Worley) y `Snow`. v0.6.x: luz, antorcha, ciclo dia/noche, colision
+  horizontal. v0.5.x: LZ4 + streaming. v0.4.x: romper/colocar, greedy, colisiones.
 
-Siguiente (v0.7.x del roadmap): **cuevas** (v0.7.5) y **oceanos** (v0.7.6). Al
-llegar las cuevas habra que dar **propagacion lateral a la luz de cielo** (hoy es
-por columna vertical). Pendiente tambien el palo 3D del `.bbmodel` y la antorcha
-de pared.
+Siguiente (v0.7.x del roadmap): **oceanos** (v0.7.6). Pendiente tambien el palo
+3D del `.bbmodel` y la antorcha de pared.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

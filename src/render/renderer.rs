@@ -99,6 +99,17 @@ fn columns_to_remesh(change: &StreamChange, is_loaded: impl Fn(ChunkPos) -> bool
     out
 }
 
+/// Las 9 columnas del anillo 3x3 centrado en `center` (incluida el misma).
+fn area3x3(center: ChunkPos) -> Vec<ChunkPos> {
+    let mut out = Vec::with_capacity(9);
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            out.push(ChunkPos::new(center.x + dx, center.z + dz));
+        }
+    }
+    out
+}
+
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
@@ -258,8 +269,20 @@ impl Renderer {
         if change.is_empty() {
             return;
         }
-        // La luz de bloque puede haber cambiado (torches que entran/salen): la
-        // recomputamos a nivel de mundo (cruza chunks) antes de meshear.
+        // Columnas "sucias" para la luz: las que entran/salen y su anillo.
+        let dirty = {
+            let loaded = &self.world;
+            let mut dirty: Vec<ChunkPos> = change.loaded.clone();
+            for n in columns_to_remesh(&change, |p| loaded.is_loaded(p)) {
+                if !dirty.contains(&n) {
+                    dirty.push(n);
+                }
+            }
+            dirty
+        };
+        // La luz puede haber cambiado (torches/cuevas que entran/salen): la
+        // recomputamos (region afectada) antes de meshear.
+        self.world.recompute_skylight(&dirty);
         self.world.recompute_block_light();
         // Liberar mallas de columnas descargadas.
         for pos in &change.unloaded {
@@ -368,10 +391,11 @@ impl Renderer {
         if !self.world.set_block(voxel, block) {
             return false;
         }
-        // La luz de bloque cambio (puede ser una antorcha): recomputamos la del
-        // mundo y re-mesheamos el area afectada.
-        self.world.recompute_block_light();
+        // La luz cambio (cielo y bloque): recomputamos la region afectada y
+        // re-mesheamos el area.
         let (pos, _) = World::world_to_local(voxel);
+        self.world.recompute_skylight(&area3x3(pos));
+        self.world.recompute_block_light();
         self.refresh_area(pos);
         true
     }
@@ -389,20 +413,18 @@ impl Renderer {
                 touched.push(pos);
             }
         }
-        // Recomputamos la luz de bloque del mundo UNA vez y reconstruimos el
-        // area 3x3 de cada columna tocada, sin repetir.
-        self.world.recompute_block_light();
+        // Reconstruimos el area 3x3 de cada columna tocada, sin repetir; ese
+        // mismo conjunto son las columnas "sucias" para la luz.
         let mut to_remesh: Vec<ChunkPos> = Vec::new();
         for pos in touched {
-            for dz in -1..=1 {
-                for dx in -1..=1 {
-                    let n = ChunkPos::new(pos.x + dx, pos.z + dz);
-                    if !to_remesh.contains(&n) {
-                        to_remesh.push(n);
-                    }
+            for n in area3x3(pos) {
+                if !to_remesh.contains(&n) {
+                    to_remesh.push(n);
                 }
             }
         }
+        self.world.recompute_skylight(&to_remesh);
+        self.world.recompute_block_light();
         for n in to_remesh {
             if self.world.is_loaded(n) {
                 let m = self.build_column_meshes(n);

@@ -10,24 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.4 — Rendimiento, niebla y luz que cruza chunks
+//! ## Estado actual: v0.7.5 — Cuevas + luz de cielo lateral
 //!
-//! * **Back-face culling** (winding corregido en las caras horizontales) y
-//!   **frustum culling** por seccion: menos trabajo de GPU.
-//! * **Niebla a distancia** (se funde con el cielo, que cambia con el dia/noche)
-//!   que disimula el borde del area cargada.
-//! * **Luz de bloque que cruza chunks**: una antorcha cerca de un borde ilumina
-//!   la columna vecina (BFS a nivel de mundo); se acaba el corte de luz.
-//! * FPS visibles en el titulo de la ventana.
-//! * Sobre v0.7.3: re-mesheo de vecinas al hacer streaming. v0.7.2: colision por
-//!   huella + auto-escalon. v0.7.1: altura por bloque. v0.7.0: biomas (Worley).
-//!   v0.6.x: luz, antorcha, ciclo dia/noche, colision horizontal.
+//! * **Cuevas**: ruido **Perlin 3D** por bloque; donde su valor cruza un umbral
+//!   (iso-superficie) se talla el terreno, formando tuneles y salas. No perfora
+//!   la corteza (2 bloques bajo la superficie) ni el suelo. `GENERATOR_VERSION` 4.
+//! * **Luz de cielo con propagacion lateral** (BFS a nivel de mundo): el aire bajo
+//!   un techo (cuevas, voladizos) se ilumina de lado con atenuacion, en vez de
+//!   quedar a oscuras de golpe. Recalculada por **region** (dirty + anillo 3x3).
+//! * Sobre v0.7.4: culling (back-face + frustum), niebla, luz de bloque
+//!   cross-chunk, FPS en el titulo. v0.7.3: re-mesheo de vecinas. v0.7.2: colision
+//!   por huella + auto-escalon. v0.7.1: altura por bloque. v0.7.0: biomas (Worley).
 //!
-//! Siguiente (v0.7.x del roadmap): cuevas (v0.7.5) y oceanos (v0.7.6). Al llegar
-//! las cuevas habra que dar a la **luz de cielo propagacion lateral** (hoy es por
-//! columna vertical, correcta para un terreno de altura pero no para voladizos ni
-//! cuevas). Pendiente tambien el **palo 3D** del `.bbmodel` y la **antorcha de
-//! pared**.
+//! Siguiente (v0.7.x del roadmap): **oceanos** (v0.7.6). Pendiente tambien el
+//! **palo 3D** del `.bbmodel` y la **antorcha de pared**.
 //!
 //! ## Organizacion del codigo
 //!

@@ -84,10 +84,12 @@ Puntos clave:
 - **Una malla por (columna, seccion)**: una columna tiene 24 secciones; la
   mayoria estan vacias y se **saltan sin meshear** (`World::section_is_empty`);
   solo se guardan las que tienen geometria (`ColumnMeshes = [Option<Mesh>; 24]`).
-- **Dos luces**: `compute_skylight` (cielo, **por columna vertical**: correcta
-  para un terreno de altura, sin propagacion lateral todavia) y
-  `World::recompute_block_light` (antorchas, **flood-fill BFS a nivel de mundo**,
-  que **cruza chunks**). El vertice lleva ambas por separado; el shader dibuja
+- **Dos luces**: la **de cielo** se calcula en `World::recompute_skylight`: base
+  **columnar** (15 hasta el primer solido) + propagacion **lateral** (BFS a nivel
+  de mundo) para el aire bajo un techo (cuevas/voladizos); se recalcula por
+  **region** (columnas sucias + anillo 3x3). La **de bloque**
+  (`World::recompute_block_light`) es un BFS de antorchas que **cruza chunks**. El
+  vertice lleva ambas por separado; el shader dibuja
   `max(cielo * day_factor, bloque)`, de modo que la noche apaga el sol pero no las
   antorchas.
 - **Culling**: el pipeline usa **back-face culling** (la geometria mira hacia
@@ -102,6 +104,7 @@ Puntos clave:
 ```
 TerrainGenerator (semilla)
       │  genera_column(x,z)  -> altura (Perlin, POR BLOQUE) + bioma (Worley) + superficie
+      │                          + cuevas (Perlin 3D, iso-superficie)
       v
    Column (24 x Chunk de 16^3, + arrays de luz cielo/bloque)
       │  greedy::greedy_section_query(query, light, section, origin)
