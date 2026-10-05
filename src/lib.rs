@@ -10,14 +10,17 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.6 - Lava, obsidiana y texturas de tierras nuevas
+//! ## Estado actual: v0.8.7 - Optimizacion de worldgen y fluidos
 //!
-//! * Bloques **`Lava`** (liquido estatico que emite 15) y **`Obsidian`**.
-//!   Atlas 64x64 -> **64x80** con los tiles 14-18 pintados.
-//! * **Pozas de lava** en cuevas profundas con suelo de obsidiana
-//!   (`GENERATOR_VERSION` 8); el agua no fluye dentro de la lava.
+//! * Terreno: el **ruido 2D se cachea por columna** (16x16 evaluaciones, no una
+//!   por bloque `y`), **decoracion inteligente** (arboles en pendiente/flotando
+//!   prohibidos) y **mezcla en bordes de bioma**.
+//! * Cuevas: campo de **densidad 3D** (`tuneles*0.7 + camaras*0.3`) con
+//!   atenuacion por profundidad.
+//! * Agua: **equilibrio** (el oceano generado no cuesta CPU) y **fuentes 2x2**
+//!   (`water::check_2x2_source`).
 //!
-//! Hereda de v0.8.5 (clima, cuevas 3D, acuiferos).
+//! Hereda de v0.8.6 (lava, obsidiana) y v0.8.5 (clima, cuevas 3D, acuiferos).
 //!
 //! Siguiente (Etapa 2): **mobs** (usando `physics`).
 //!

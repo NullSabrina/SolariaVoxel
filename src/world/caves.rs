@@ -1,14 +1,19 @@
-//! Cuevas 3D de nueva generacion: **spaghetti** (tuneles), **cheese** (camaras)
-//! y **pillar** (columnas), con densidad que crece con la profundidad.
+//! Cuevas por **campo de densidad 3D** (estilo Minecraft 1.18+).
 //!
-//! Sustituye al antiguo `abs(perlin) < 0.07`, que daba tuneles finos y poco
-//! variados. La filosofia (Minecraft 1.18+): combinar varias "tajadas" de ruido
-//! 3D cuyos ceros/niveles dibujan formas complementarias, y modular su umbral
-//! por la profundidad para que no se coma la corteza ni la bedrock.
+//! En lugar de un solo `|perlin| < umbral`, combinamos dos "tajadas" de ruido:
 //!
-//! El agua de los acuiferos se decide **aqui** (no en el motor de fluidos): una
-//! cueva bajo el nivel del acuifero ya nace llena de `Block::Water`, de modo que
-//! la simulacion a 10 Hz no tiene que inundar cavernas enteras.
+//! ```text
+//! densidad = ruido_tuneles * 0.7 + ruido_camaras * 0.3
+//! ```
+//!
+//! * **tuneles** — `Fbm` de frecuencia media-alta: sus valores cercanos a cero
+//!   dibujan tubos largos y delgados.
+//! * **camaras** — `Fbm` de frecuencia muy baja: al sumarlo, los picos abren
+//!   cavernas grandes ademas de tuneles.
+//!
+//! La densidad se **atenua** por profundidad: ~0 junto a la corteza, maxima a
+//! `FULL_DEPTH_Y` y de nuevo 0 en la bedrock. Si `densidad * atenuacion` supera
+//! el umbral, la celda se cava (`Air`, o `Water` bajo el acuifero).
 
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 
@@ -18,41 +23,39 @@ pub const BEDROCK_CLEAR: i32 = 5;
 /// Corteza que las cuevas **no** perforan bajo la superficie.
 pub const CAVE_CRUST: i32 = 2;
 
-/// Resultado de evaluar una celda: que se talla (o nada).
+/// Profundidad a la que la densidad de cueva es maxima.
+const FULL_DEPTH_Y: i32 = 10;
+
+/// Umbral de densidad para cavar. Mas alto = menos cuevas.
+const DENSITY_THRESHOLD: f64 = 0.06;
+
+/// Resultado de evaluar una celda.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Carve {
-    /// Se deja el bloque de terreno tal cual.
     None,
-    /// Se cava aire (tunel/camara seca).
     Air,
-    /// Se cava y se rellena de agua (acuifero).
     Water,
 }
 
 /// El sistema de cuevas, determinista por semilla.
 pub struct CaveSystem {
-    /// Tuneles finos: el cero de este Fbm dibuja una iso-superficie tubular.
-    spaghetti: Fbm<Perlin>,
-    /// Camaras: este Fbm supera un umbral en las zonas huecas grandes.
-    cheese: Fbm<Perlin>,
-    /// Pilares: deja columnas solidas dentro de las cavidades.
+    tunnels: Fbm<Perlin>,
+    chambers: Fbm<Perlin>,
+    /// Columnas solidas que subdividen las camaras.
     pillar: Fbm<Perlin>,
 }
 
 impl CaveSystem {
     pub fn new(seed: u32) -> Self {
         Self {
-            // Frecuencia alta = detalle fino; 3 octavas bastan para un tunel.
-            spaghetti: Fbm::<Perlin>::new(seed.wrapping_mul(0x9E37_79B9).wrapping_add(11))
+            tunnels: Fbm::<Perlin>::new(seed.wrapping_mul(0x9E37_79B9).wrapping_add(11))
                 .set_octaves(3)
-                .set_frequency(0.055)
+                .set_frequency(0.06)
                 .set_persistence(0.5),
-            // Frecuencia muy baja = formas grandes; 4 octavas anaden lobulos.
-            cheese: Fbm::<Perlin>::new(seed.wrapping_mul(0x85EB_CA6B).wrapping_add(23))
-                .set_octaves(4)
-                .set_frequency(0.011)
-                .set_persistence(0.55),
-            // Frecuencia media: pilares verticales reconocibles.
+            chambers: Fbm::<Perlin>::new(seed.wrapping_mul(0x85EB_CA6B).wrapping_add(23))
+                .set_octaves(3)
+                .set_frequency(0.010)
+                .set_persistence(0.5),
             pillar: Fbm::<Perlin>::new(seed.wrapping_mul(0xC2B2_AE35).wrapping_add(37))
                 .set_octaves(2)
                 .set_frequency(0.09)
@@ -60,48 +63,55 @@ impl CaveSystem {
         }
     }
 
-    /// Evalua una celda del terreno. `surface` es la altura del terreno en esa
-    /// columna; `aquifer` el nivel del acuifero (por debajo, las cuevas se
-    /// generan ya llenas de agua).
+    /// Campo de densidad combinado, aproximadamente en `[-1, 1]`. Positivo =
+    /// tendencia a hueco.
+    fn density(&self, x: i32, y: i32, z: i32) -> f64 {
+        let (fx, fy, fz) = (x as f64, y as f64, z as f64);
+        let tuneles = self.tunnels.get([fx, fy, fz]);
+        let camaras = self.chambers.get([fx, fy, fz]);
+        tuneles * 0.7 + camaras * 0.3
+    }
+
+    /// Atenuacion por profundidad en `0..=1`: 0 en la corteza, 1 en
+    /// `FULL_DEPTH_Y` y de nuevo 0 en la bedrock. El producto de dos rampas
+    /// (superior e inferior) deja intactos ambos extremos.
+    fn attenuation(y: i32, surface: i32) -> f64 {
+        let crust = surface - CAVE_CRUST;
+        if y < BEDROCK_CLEAR || y >= crust {
+            return 0.0;
+        }
+        let upper = ((crust - y) as f64 / (crust - FULL_DEPTH_Y).max(1) as f64).clamp(0.0, 1.0);
+        let lower = ((y - BEDROCK_CLEAR) as f64 / (FULL_DEPTH_Y - BEDROCK_CLEAR).max(1) as f64)
+            .clamp(0.0, 1.0);
+        (upper * lower).clamp(0.0, 1.0)
+    }
+
+    /// Evalua una celda del terreno. `surface` es la altura del terreno;
+    /// `aquifer` el nivel del acuifero (por debajo, la cueva nace con agua).
     pub fn carve(&self, x: i32, y: i32, z: i32, surface: i32, aquifer: i32) -> Carve {
-        // Ni bedrock ni corteza: la superficie no queda acribillada.
         if y < BEDROCK_CLEAR || y >= surface - CAVE_CRUST {
             return Carve::None;
         }
-
-        // Densidad por profundidad: 0 junto a la corteza, 1 hacia la bedrock.
-        // Multiplica los umbrales, de modo que arriba apenas hay cuevas y abajo
-        // abundan (y son mas grandes).
-        let span = (surface - CAVE_CRUST - BEDROCK_CLEAR).max(1) as f64;
-        let depth = ((surface - CAVE_CRUST - y) as f64 / span).clamp(0.0, 1.0);
-
-        let (fx, fy, fz) = (x as f64, y as f64, z as f64);
-
-        // Pillar: donde el ruido es alto queda una columna solida, que corta las
-        // camaras en salas con soportes en vez de un vacio continuo.
-        let pillar_solid = self.pillar.get([fx, fy, fz]) > 0.45;
-
-        // Spaghetti: |fbm| pequeno = superficie tubular, tunel largo y delgado.
-        let sp = self.spaghetti.get([fx, fy, fz]);
-        let sp_thresh = 0.045 + 0.05 * depth;
-        let spaghetti = sp.abs() < sp_thresh;
-
-        // Cheese: el ruido supera un umbral que baja con la profundidad -> mas y
-        // mayores camaras abajo.
-        let cheese = self.cheese.get([fx, fy, fz]) > 0.62 - 0.14 * depth;
-
-        if (spaghetti || cheese) && !pillar_solid {
-            if y < aquifer {
-                Carve::Water
-            } else {
-                Carve::Air
-            }
+        let at = Self::attenuation(y, surface);
+        if at <= 0.0 {
+            return Carve::None;
+        }
+        // La densidad debe superar el umbral tras la atenuacion.
+        if self.density(x, y, z) * at <= DENSITY_THRESHOLD {
+            return Carve::None;
+        }
+        // Pilares: columnas solidas dentro de las camaras.
+        if self.pillar.get([x as f64, y as f64, z as f64]) > 0.55 {
+            return Carve::None;
+        }
+        if y < aquifer {
+            Carve::Water
         } else {
-            Carve::None
+            Carve::Air
         }
     }
 
-    /// ¿Hay cueva (seca o inundada) en la celda? Util para tests y diagnostico.
+    /// ¿Hay cueva (seca o inundada) en la celda?
     pub fn is_cave(&self, x: i32, y: i32, z: i32, surface: i32) -> bool {
         !matches!(self.carve(x, y, z, surface, i32::MIN), Carve::None)
     }
@@ -121,6 +131,18 @@ mod tests {
     }
 
     #[test]
+    fn la_atenuacion_es_cero_en_los_extremos_y_maxima_abajo() {
+        let surface = 70;
+        assert_eq!(CaveSystem::attenuation(4, surface), 0.0, "bedrock");
+        assert_eq!(CaveSystem::attenuation(69, surface), 0.0, "corteza");
+        assert!((CaveSystem::attenuation(FULL_DEPTH_Y, surface) - 1.0).abs() < 1e-6);
+        let a = CaveSystem::attenuation(60, surface);
+        let b = CaveSystem::attenuation(30, surface);
+        let c = CaveSystem::attenuation(15, surface);
+        assert!(a < b && b < c && c <= 1.0);
+    }
+
+    #[test]
     fn hay_cuevas_pero_no_en_toda_la_columna() {
         let c = CaveSystem::new(13_371);
         let mut carved = 0;
@@ -135,7 +157,6 @@ mod tests {
             }
         }
         let frac = carved as f64 / total as f64;
-        // Suficientes cuevas para notarse, pero lejos de vaciar el mundo.
         assert!(frac > 0.005, "apenas hay cuevas: {frac}");
         assert!(frac < 0.30, "demasiadas cuevas: {frac}");
     }
@@ -178,21 +199,5 @@ mod tests {
         }
         assert!(agua > 0, "no se genero agua de acuifero");
         assert!(aire > 0, "no se genero aire de cueva");
-    }
-
-    #[test]
-    fn hay_cuevas_de_los_tres_tipos() {
-        // El sistema combina spaghetti/cheese; comprobamos que producen formas
-        // tanto alargadas (spaghetti) como grandes (cheese) contando corridas.
-        let c = CaveSystem::new(2026);
-        let mut huecos = 0u32;
-        for x in 0..96 {
-            for z in 0..96 {
-                if c.is_cave(x, 30, z, 90) {
-                    huecos += 1;
-                }
-            }
-        }
-        assert!(huecos > 0, "la capa y=30 deberia tener cuevas");
     }
 }

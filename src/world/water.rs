@@ -93,32 +93,64 @@ pub trait FluidGrid {
 /// Los 4 vecinos horizontales.
 const H_DIRS: [[i32; 3]; 4] = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
 
-/// Procesa **una** celda con agua. Devuelve `true` si cambio algo.
-pub fn step_cell<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
-    let f = grid.fluid(p);
-    if !f.is_water() {
+/// ¿El agua que fluye en `p` toca **dos o mas fuentes** ortogonales? Si es asi,
+/// pasa a `Fluid::Source`: es la regla clasica del cuadrado 2x2 (apoyar agua
+/// junto a un manantial la fija como manantial permanente).
+pub fn check_2x2_source<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
+    if !matches!(grid.fluid(p), Fluid::Flow(_)) {
         return false;
     }
+    let fuentes = H_DIRS
+        .iter()
+        .filter(|d| {
+            let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+            grid.in_bounds(n) && grid.fluid(n).is_source()
+        })
+        .count();
+    if fuentes >= 2 {
+        grid.set_fluid(p, Fluid::Source);
+        true
+    } else {
+        false
+    }
+}
+
+/// ¿El agua en `p` esta **en equilibrio** (estatica)? Ocurre cuando el fondo
+/// esta bloqueado o lleno y los 4 vecinos horizontales tienen su mismo nivel.
+/// Entonces el tick no debe tocarla: los oceanos generados salen gratis.
+fn at_equilibrium<G: FluidGrid + ?Sized>(grid: &G, p: [i32; 3]) -> bool {
+    let level = grid.fluid(p).level();
+    let below = [p[0], p[1] - 1, p[2]];
+    let below_ok =
+        !grid.in_bounds(below) || grid.is_solid(below) || grid.fluid(below).level() >= MAX_LEVEL;
+    if !below_ok {
+        return false;
+    }
+    H_DIRS.iter().all(|d| {
+        let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+        !grid.in_bounds(n) || grid.is_solid(n) || grid.fluid(n).level() == level
+    })
+}
+
+/// Procesa **una** celda con agua. Devuelve `true` si cambio algo.
+pub fn step_cell<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
+    if !grid.fluid(p).is_water() {
+        return false;
+    }
+    // 0. Fuentes 2x2: el flujo con 2+ fuentes contiguas se fija.
+    if check_2x2_source(grid, p) {
+        return true;
+    }
+    // 0b. Equilibrio: agua estatica (mismo nivel que los vecinos, fondo firme).
+    //     Salimos ANTES de calcular nada: es el caso de los oceanos.
+    if at_equilibrium(grid, p) {
+        return false;
+    }
+
+    let f = grid.fluid(p);
     let is_source = f.is_source();
     let mut level = f.level();
     let mut changed = false;
-
-    // Fuentes 2x2 (regla clasica): el agua que fluye con **dos o mas fuentes
-    // ortogonales** contiguas se convierte en fuente. Asi, apoyar dos cubos de
-    // agua junto a otros dos los fija como manantial permanente.
-    if matches!(f, Fluid::Flow(_)) {
-        let fuentes = H_DIRS
-            .iter()
-            .filter(|d| {
-                let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
-                grid.in_bounds(n) && grid.fluid(n).is_source()
-            })
-            .count();
-        if fuentes >= 2 {
-            grid.set_fluid(p, Fluid::Source);
-            return true;
-        }
-    }
 
     // 1. Caida: el agua prefiere bajar.
     let below = [p[0], p[1] - 1, p[2]];
@@ -450,5 +482,42 @@ mod tests {
             Fluid::Source,
             "el flujo con dos fuentes contiguas deberia volverse fuente"
         );
+    }
+
+    #[test]
+    fn el_agua_en_equilibrio_no_cambia() {
+        // Mar tranquilo: 3x3 a nivel de fuente con el fondo solido.
+        let mut g = TestGrid::new(0);
+        for dx in -1..=1i32 {
+            for dz in -1..=1i32 {
+                g.set([dx, 1, dz], Fluid::Source);
+            }
+        }
+        let antes = g.cells.clone();
+        assert!(
+            !step_cell(&mut g, [0, 1, 0]),
+            "una celda en equilibrio no deberia cambiar"
+        );
+        assert_eq!(g.cells, antes, "el estado no debe modificarse");
+    }
+
+    #[test]
+    fn el_agua_en_equilibrio_no_se_reencola() {
+        // Reproduce la logica del tick: solo se re-encola si `step_cell` cambio.
+        let mut g = TestGrid::new(0);
+        for dx in -1..=1i32 {
+            for dz in -1..=1i32 {
+                g.set([dx, 1, dz], Fluid::Source);
+            }
+        }
+        let mut q = DirtyQueue::new();
+        q.push([0, 1, 0]);
+        let p = q.pop().unwrap();
+        if step_cell(&mut g, p) {
+            for n in neighborhood(p) {
+                q.push(n);
+            }
+        }
+        assert!(q.is_empty(), "el agua en equilibrio no debe reencolarse");
     }
 }

@@ -8,28 +8,17 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.6` — Lava, obsidiana y texturas de tierras nuevas
+## Estado actual: `v0.8.7` — Optimización de worldgen y fluidos
 
-- Nuevos bloques **`Lava`** (id 15, tile 17, liquido estatico que emite luz 15)
-  y **`Obsidian`** (id 16, tile 18, roca dura). Atlas 64x64 -> **64x80** con los
-  tiles 14-18 pintados (tierra gruesa, grava, podzol, lava, obsidiana).
-- **Pozas de lava** en cuevas profundas (y 6..11) con **suelo de obsidiana**;
-  `GENERATOR_VERSION` 7 -> 8. El agua no fluye dentro de la lava.
-- Hereda de **v0.8.5**: clima/biomas avanzados, cuevas 3D y acuiferos.
-
-Worldgen de nueva generación (`GENERATOR_VERSION = 7`):
-
-- **Clima 2D** (temperatura + humedad, ruido `Fbm`) → **7 biomas**: desierto,
-  sabana, llanura, bosque, pantano, taiga y tundra.
-- **Relieve por bioma**: cada bioma tiene su amplitud/frecuencia; la taiga usa
-  `RidgedMulti` para picos escarpados.
-- **Superficie variada** con ruido de alta frecuencia: `CoarseDirt`, `Gravel` y
-  `Podzol` junto a hierba/arena/nieve.
-- **Cuevas 3D** (spaghetti + cheese + pillar) con densidad por profundidad, y
-  **acuíferos** que nacen llenos de agua (no inundan el motor de fluidos).
-- Agua: **fuentes 2x2** y océanos en equilibrio a coste cero.
-- Hereda de **v0.8.4**: física AABB + agua. **v0.8.3**: texturas + dim.
-  **v0.8.2**: mesa de crafteo.
+- **Terreno**: el ruido 2D se **cachea por columna** (16×16 evaluaciones, no una
+  por bloque `y`); **decoración inteligente** (nada de árboles en pendiente ni
+  flotando) y **mezcla en bordes de bioma**.
+- **Cuevas**: campo de **densidad 3D** (`túneles·0.7 + cámaras·0.3`) con
+  atenuación por profundidad.
+- **Agua**: **equilibrio** (el océano generado no cuesta CPU) y **fuentes 2×2**.
+- Hereda de **v0.8.6**: lava, obsidiana y atlas 64×80. **v0.8.5**: clima, 7
+  biomas, cuevas 3D y acuíferos. **v0.8.4**: física AABB + agua. **v0.8.2**:
+  mesa de crafteo.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
 der = colocar (sobre una mesa, la abre). Siguiente (Etapa 2): **mobs** (usando

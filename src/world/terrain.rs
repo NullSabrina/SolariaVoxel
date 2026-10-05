@@ -13,6 +13,8 @@
 //!
 //! Reemplaza la generacion v6 (Worley + Perlin simple). Sube `GENERATOR_VERSION`.
 
+use std::cell::Cell;
+
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin, RidgedMulti};
 
 use super::block::Block;
@@ -75,6 +77,39 @@ impl Biome {
     }
 }
 
+/// Bioma a partir del par clima (Whittaker simplificado). Funcion **pura**: no
+/// toca ruido, de modo que `generate_column` reutiliza el clima ya calculado.
+fn biome_of(t: f64, h: f64) -> Biome {
+    if t < 0.32 {
+        if h > 0.55 {
+            Biome::Taiga
+        } else {
+            Biome::Tundra
+        }
+    } else if t > 0.68 {
+        if h < 0.38 {
+            Biome::Desert
+        } else {
+            Biome::Savanna
+        }
+    } else if h > 0.72 {
+        Biome::Swamp
+    } else if h < 0.35 {
+        Biome::Plains
+    } else {
+        Biome::Forest
+    }
+}
+
+/// ¿El clima esta cerca de un borde de bioma? Sirve para **mezclar** materiales
+/// en la transicion (parches del bioma vecino) sin evaluar biomas vecinos.
+fn near_climate_edge(t: f64, h: f64) -> bool {
+    const EDGES: [f64; 6] = [0.32, 0.68, 0.35, 0.38, 0.55, 0.72];
+    EDGES
+        .iter()
+        .any(|&e| (t - e).abs() < 0.035 || (h - e).abs() < 0.035)
+}
+
 /// Generador deterministico: la misma semilla produce siempre el mismo mundo.
 pub struct TerrainGenerator {
     /// Clima (2D): temperatura.
@@ -98,6 +133,8 @@ pub struct TerrainGenerator {
     /// Cuevas 3D.
     caves: CaveSystem,
     seed: u32,
+    /// Contador de evaluaciones de ruido **2D** (solo para el test de cache).
+    noise_calls: Cell<u32>,
 }
 
 impl TerrainGenerator {
@@ -128,6 +165,7 @@ impl TerrainGenerator {
             cave_mask: Perlin::new(mix(8)),
             caves: CaveSystem::new(seed),
             seed,
+            noise_calls: Cell::new(0),
         }
     }
 
@@ -136,13 +174,31 @@ impl TerrainGenerator {
         self.seed
     }
 
+    /// Cuenta una evaluacion de ruido 2D (micro-coste; solo para el test).
+    #[inline]
+    fn bump(&self) {
+        self.noise_calls.set(self.noise_calls.get() + 1);
+    }
+
+    /// Evaluaciones de ruido 2D desde el ultimo reset.
+    pub fn noise_calls(&self) -> u32 {
+        self.noise_calls.get()
+    }
+
+    /// Reinicia el contador de ruido 2D.
+    pub fn reset_noise_calls(&self) {
+        self.noise_calls.set(0);
+    }
+
     /// Clima de `(x, z)` -> `(temperatura, humedad)` en 0..1.
     pub fn climate(&self, world_x: i32, world_z: i32) -> (f64, f64) {
         // Frecuencia espacial baja (0.004): las franjas climaticas ocupan cientos
         // de bloques, no unos pocos.
+        self.bump();
         let t = self
             .temperature
             .get([world_x as f64 * 0.004, world_z as f64 * 0.004]);
+        self.bump();
         let h = self
             .humidity
             .get([world_x as f64 * 0.004, world_z as f64 * 0.004]);
@@ -155,32 +211,13 @@ impl TerrainGenerator {
     /// Bioma en `(x, z)` a partir del clima (diagrama de Whittaker simplificado).
     pub fn biome_at(&self, world_x: i32, world_z: i32) -> Biome {
         let (t, h) = self.climate(world_x, world_z);
-        if t < 0.32 {
-            // Frio: taiga (humedo) o tundra (seco).
-            if h > 0.55 {
-                Biome::Taiga
-            } else {
-                Biome::Tundra
-            }
-        } else if t > 0.68 {
-            // Calido: desierto (seco) o sabana (algo humedo).
-            if h < 0.38 {
-                Biome::Desert
-            } else {
-                Biome::Savanna
-            }
-        } else if h > 0.72 {
-            Biome::Swamp
-        } else if h < 0.35 {
-            Biome::Plains
-        } else {
-            Biome::Forest
-        }
+        biome_of(t, h)
     }
 
     /// Nivel del acuifero en `(x, z)`, en 30..56. Por debajo se llenan de agua
     /// las cuevas; por encima, quedan secas.
     pub fn aquifer_level(&self, world_x: i32, world_z: i32) -> i32 {
+        self.bump();
         let n = self
             .aquifer
             .get([world_x as f64 * 0.01, world_z as f64 * 0.01]);
@@ -219,22 +256,22 @@ impl TerrainGenerator {
             && caves.carve(x, y as i32 - 1, z, surface, aquifer) == Carve::None
     }
 
-    /// Altura del terreno (numero de bloques solidos) en `(x, z)`.
-    pub fn height(&self, world_x: i32, world_z: i32) -> usize {
-        let biome = self.biome_at(world_x, world_z);
+    /// Altura con un bioma **ya conocido** (evita recalcular el clima).
+    fn height_for(&self, world_x: i32, world_z: i32, biome: Biome) -> usize {
         let (amp, freq, ridged_w) = biome.relief();
         let (fx, fz) = (world_x as f64, world_z as f64);
 
         // La frecuencia por bioma se aplica escalando las coordenadas de entrada
         // (el ruido base trabaja a 0.010). Es mas barato que reconfigurar el
         // ruido, que no admite frecuencia variable por muestra.
+        self.bump();
         let base = self.continent.get([fx * 0.010 * freq, fz * 0.010 * freq]);
+        self.bump();
         let detail = self.detail.get([fx * 0.045 * freq, fz * 0.045 * freq]);
         let mut h = SEA_LEVEL as f64 + base * 20.0 * amp + detail * 4.0;
 
         if ridged_w > 0.0 {
-            // `RidgedMulti` devuelve crestas en 0..1: al restarle 0.5 y escalarlo
-            // obtenemos picos que suben y bajan alrededor del nivel base.
+            self.bump();
             let r = self.ridged.get([fx * 0.010 * freq, fz * 0.010 * freq]);
             h += (r - 0.5) * 26.0 * amp * ridged_w;
         }
@@ -242,30 +279,59 @@ impl TerrainGenerator {
         (h.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize
     }
 
+    /// Altura del terreno (numero de bloques solidos) en `(x, z)`.
+    pub fn height(&self, world_x: i32, world_z: i32) -> usize {
+        let biome = self.biome_at(world_x, world_z);
+        self.height_for(world_x, world_z, biome)
+    }
+
     /// Ruido de detalle de superficie (alta frecuencia, por columna): elige la
     /// variante de bloque de la capa superior.
     fn surface_variant(&self, world_x: i32, world_z: i32) -> f64 {
+        self.bump();
         self.surface_detail
             .get([world_x as f64 * 0.11, world_z as f64 * 0.11])
+    }
+
+    /// Solo las columnas con mascara alta pagan el ruido 3D de cuevas.
+    fn has_caves(&self, world_x: i32, world_z: i32) -> bool {
+        self.bump();
+        self.cave_mask
+            .get([world_x as f64 * 0.017, world_z as f64 * 0.017])
+            > -0.30
+    }
+
+    /// ¿Pendiente admisible para un arbol? Compara la altura con las 4 vecinas:
+    /// mas de 1 bloque de diferencia = ladera, no se planta.
+    fn slope_ok(&self, world_x: i32, world_z: i32, height: usize) -> bool {
+        let h = height as i32;
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            if (self.height(world_x + dx, world_z + dz) as i32 - h).abs() > 1 {
+                return false;
+            }
+        }
+        true
     }
 
     /// Rellena una columna del mundo con terreno segun su posicion `(x, z)`.
     pub fn generate_column(&self, world_x: i32, world_z: i32) -> Column {
         let mut column = Column::empty();
+        // Candidatos a arboles (pasada 1); se plantan en la pasada 2, cuando la
+        // columna ya esta completa.
+        let mut tree_candidates: Vec<(usize, usize, usize)> = Vec::new();
 
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let wx = world_x + x as i32;
                 let wz = world_z + z as i32;
-                let height = self.height(wx, wz);
-                let biome = self.biome_at(wx, wz);
+                // --- Ruido 2D: UNA sola vez por (x, z) ---
+                let (t, h) = self.climate(wx, wz);
+                let biome = biome_of(t, h);
+                let height = self.height_for(wx, wz, biome);
                 let aquifer = self.aquifer_level(wx, wz);
                 let variant = self.surface_variant(wx, wz);
-                // Mascara 2D: solo las columnas con `cave_region > umbral` pagan
-                // el ruido 3D de cuevas. La transicion es suave (frecuencia baja),
-                // asi no aparecen "muros" verticales de cuevas.
-                let cave_region = self.cave_mask.get([wx as f64 * 0.017, wz as f64 * 0.017]);
-                let has_caves = cave_region > -0.30;
+                let border = near_climate_edge(t, h);
+                let has_caves = self.has_caves(wx, wz);
                 // Cerca del mar la superficie es arena (playa/fondo marino).
                 let coastal = height <= (SEA_LEVEL as usize) + 1;
 
@@ -314,7 +380,7 @@ impl TerrainGenerator {
                     let block = if coastal {
                         coastal_block(y, height, variant)
                     } else {
-                        surface_block(y, height, biome, variant)
+                        surface_block(y, height, biome, variant, border)
                     };
                     column.set(x, y, z, block);
                 }
@@ -329,17 +395,24 @@ impl TerrainGenerator {
                     }
                 }
 
-                // Vegetacion: arboles en tierra firme, restringidos al interior
-                // de la columna para que la copa no se corte en el borde.
+                // Decoracion: candidato a arbol (interior, densidad, pendiente).
                 let density = biome.tree_density();
                 if !coastal
                     && density > 0.0
                     && (2..=13).contains(&x)
                     && (2..=13).contains(&z)
                     && hash01(wx, wz) < density
+                    && self.slope_ok(wx, wz, height)
                 {
-                    place_tree(&mut column, x, height, z);
+                    tree_candidates.push((x, z, height));
                 }
+            }
+        }
+
+        // Pasada 2: plantar arboles con hueco libre (nada flotando ni embebido).
+        for (x, z, ground) in tree_candidates {
+            if headroom_clear(&column, x, ground, z) {
+                place_tree(&mut column, x, ground, z);
             }
         }
 
@@ -352,8 +425,18 @@ impl TerrainGenerator {
 /// `variant` (ruido de alta frecuencia por columna) ensucia la superficie con
 /// variantes: tierra gruesa, podzol y grava. Asi dos columnas del mismo bioma
 /// no salen identicas.
-fn surface_block(y: usize, height: usize, biome: Biome, variant: f64) -> Block {
+fn surface_block(y: usize, height: usize, biome: Biome, variant: f64, border: bool) -> Block {
     if y + 1 == height {
+        // Borde de bioma: parches del material vecino para mezclar la transicion
+        // sin evaluar el bioma de las columnas contiguas.
+        if border && variant.abs() < 0.35 {
+            return match biome {
+                Biome::Desert | Biome::Savanna => Block::CoarseDirt,
+                Biome::Taiga | Biome::Tundra => Block::Dirt,
+                Biome::Swamp => Block::CoarseDirt,
+                _ => Block::Sand,
+            };
+        }
         // Capa superior.
         match biome {
             Biome::Desert => Block::Sand,
@@ -469,6 +552,31 @@ fn hash_u32(x: i32, z: i32) -> u32 {
     h ^ (h >> 16)
 }
 
+/// ¿La columna tiene hueco libre alrededor del tronco? Comprueba un 3x3 en
+/// `ground..ground+6`: evita que un arbol se plante flotando sobre una cueva o
+/// dentro de otra copa.
+fn headroom_clear(column: &Column, x: usize, ground: usize, z: usize) -> bool {
+    for dy in 0..=6 {
+        let y = ground + dy;
+        if y >= WORLD_HEIGHT {
+            break;
+        }
+        for dz in -1..=1i32 {
+            for dx in -1..=1i32 {
+                let lx = x as i32 + dx;
+                let lz = z as i32 + dz;
+                if lx < 0 || lz < 0 || lx >= CHUNK_SIZE as i32 || lz >= CHUNK_SIZE as i32 {
+                    continue;
+                }
+                if column.get(lx as usize, y, lz as usize) != Block::Air {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 /// Planta un arbol: tronco de `Wood` y copa de `Leaves`, sin pisar el terreno ni
 /// el tronco y cabiendo dentro de la columna.
 fn place_tree(column: &mut Column, x: usize, ground: usize, z: usize) {
@@ -515,6 +623,48 @@ pub fn max_height() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn el_ruido_2d_no_se_llama_por_bloque_y() {
+        // La clave de la optimizacion: 16x16 = 256 celdas de columna; si el
+        // ruido 2D se llamara dentro del bucle `for y` serian ~18000. Debe
+        // quedar muy por debajo (O(256), no O(256 * altura)).
+        let g = TerrainGenerator::new(7);
+        g.reset_noise_calls();
+        let _ = g.generate_column(0, 0);
+        let calls = g.noise_calls();
+        println!("ruido 2D en una columna: {calls} evaluaciones");
+        assert!(
+            calls < CHUNK_SIZE as u32 * CHUNK_SIZE as u32 * 12,
+            "demasiadas evaluaciones 2D: {calls}"
+        );
+    }
+
+    #[test]
+    fn los_arboles_no_se_plantan_en_pendientes_ni_flotando() {
+        // Invariante de la decoracion: la base de un tronco se apoya en solido y
+        // ninguna vecina difiere mas de 1 bloque de altura.
+        let g = TerrainGenerator::new(13_371);
+        for cz in -2..2 {
+            for cx in -2..2 {
+                let (wx0, wz0) = (cx * 16, cz * 16);
+                let column = g.generate_column(wx0, wz0);
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        for y in 1..WORLD_HEIGHT - 1 {
+                            let here = column.get(x, y, z);
+                            let below = column.get(x, y - 1, z);
+                            if here == Block::Wood && below != Block::Wood {
+                                assert!(below.is_solid(), "tronco flotando ({x},{y},{z})");
+                                let (wx, wz) = (wx0 + x as i32, wz0 + z as i32);
+                                assert!(g.slope_ok(wx, wz, y), "tronco en pendiente ({wx},{z})");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn la_misma_semilla_da_el_mismo_mundo() {

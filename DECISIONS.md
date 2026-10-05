@@ -1393,6 +1393,46 @@ al buffer translucido, nada en agua y flota igual. Demo `SOLARIA_CAVE=1` (busca
 una poza real; si no hay, talla muestra). 155 tests (pozas con suelo, agua que
 no entra en lava).
 
+### 2026-10-05 (v0.8.7) — Optimizacion de worldgen (cache 2D, cuevas por densidad) y fluidos
+
+**Decision.** Optimizar y refinar la generacion sin perder lo de v0.8.6 (lava):
+
+1. **Cache de ruido 2D por columna**: `generate_column` evalua clima, bioma,
+   altura, acuifero, variante y mascara de cuevas **una vez por `(x, z)`** y los
+   reutiliza para todas las `y`. Antes `height()` y `biome_at()` recalculaban el
+   clima por separado. Test con contador: ~2100 evaluaciones por columna, no
+   ~18000 (que es lo que saldria si se llamara dentro del bucle `y`).
+2. **Decoracion inteligente**: los arboles se recolectan en una pasada y se
+   plantan en una segunda solo si la **pendiente** con las 4 columnas vecinas no
+   supera 1 bloque y hay **hueco libre** 3x3 en `ground..ground+6`. Nada de
+   arboles flotando sobre cuevas ni colgando de laderas.
+3. **Transicion de biomas**: si el clima esta cerca de un borde (umbral en 0.035),
+   la capa superior mezcla parches del material vecino, usando solo el clima ya
+   calculado (sin evaluar columnas contiguas).
+4. **Cuevas por campo de densidad** (`caves.rs`): `densidad = tuneles*0.7 +
+   camaras*0.3`, con **atenuacion por profundidad** (0 en la corteza, 1 en
+   `y=10`, 0 en la bedrock). Sustituye los umbrales separados por un unico campo.
+5. **Agua**: la deteccion de **equilibrio** vive en `step_cell` (fondo firme y
+   los 4 vecinos al mismo nivel -> `false` inmediato, sin re-encolar), y las
+   **fuentes 2x2** se extraen a `check_2x2_source`. El oceano generado esta en
+   equilibrio y no se procesa.
+
+**Motivo.** El prompt del usuario pedia worldgen "rapido" y fluidos "casi
+gratis"; y el cache 2D ataca el coste real (la generacion dominaba el test de
+fisica del jugador). El campo de densidad da cuevas mas variadas que los dos
+umbrales separados.
+
+**Alternativas descartadas.** (a) Contador de ruido siempre activo: se deja como
+`Cell<u32>` (micro-coste) para poder testear el cache. (b) Cuevas por `Worley`
+3D para las camaras: `Fbm` de muy baja frecuencia ya da camaras grandes y es mas
+barato. (c) Tocar `store.rs`: `World::water_in_equilibrium` (v0.8.6) sigue
+sirviendo de filtro rapido de fuentes; la logica general queda en `step_cell`.
+
+**Consecuencia.** `terrain.rs` (cache + decoracion + transicion + contador),
+`caves.rs` (densidad + atenuacion), `water.rs` (`at_equilibrium`,
+`check_2x2_source`, tests). 159 tests; clippy limpio. Conserva la lava/obsidiana
+de v0.8.6 y sus tests.
+
 ---
 
 ## Plantilla para futuras entradas
