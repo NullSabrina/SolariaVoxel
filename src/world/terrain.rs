@@ -145,6 +145,23 @@ impl TerrainGenerator {
                     };
                     column.set(x, y, z, block);
                 }
+                // Vegetacion: **arboles** en tierra firme (no en playa/agua). El
+                // tronco y la copa caben en la columna, para no cortarlos en el
+                // borde del chunk.
+                if !coastal && height >= (SEA_LEVEL as usize) + 2 {
+                    let density = match biome {
+                        Biome::Forest => 0.05,
+                        Biome::Snow => 0.02,
+                        Biome::Desert => 0.0,
+                    };
+                    if density > 0.0
+                        && (2..=13).contains(&x)
+                        && (2..=13).contains(&z)
+                        && hash01(wx, wz) < density
+                    {
+                        place_tree(&mut column, x, height, z);
+                    }
+                }
                 // Oceano/lago: rellenamos de **agua** el aire entre la superficie
                 // y el nivel del mar (estilo `ocean.level`/`water_level`).
                 if height < SEA_LEVEL as usize {
@@ -189,6 +206,62 @@ fn coastal_block(y: usize, height: usize) -> Block {
         Block::Sand
     } else {
         Block::Stone
+    }
+}
+
+/// Hash determinista de `(x, z)` en `[0, 1)`. Reparte los arboles sin depender
+/// del bioma (que ya se consulta aparte).
+fn hash01(x: i32, z: i32) -> f32 {
+    (hash_u32(x, z) % 100_000) as f32 / 100_000.0
+}
+
+/// Hash entero determinista de `(x, z)`.
+fn hash_u32(x: i32, z: i32) -> u32 {
+    let mut h = (x as u32)
+        .wrapping_mul(374_761_393)
+        .wrapping_add((z as u32).wrapping_mul(668_265_263));
+    h = (h ^ (h >> 13)).wrapping_mul(1_274_126_177);
+    h ^ (h >> 16)
+}
+
+/// Planta un arbol en la columna: tronco de `Wood` y copa de `Leaves`. La copa
+/// escribe solo en aire (no pisa el tronco ni el terreno) y cabe dentro de la
+/// columna (posicion del tronco restringida a `2..=13`).
+fn place_tree(column: &mut Column, x: usize, ground: usize, z: usize) {
+    // Altura del tronco 4..6 (variada por posicion).
+    let trunk = 4 + (hash_u32(x as i32 * 31 + 7, z as i32 * 17 + 3) % 3) as usize;
+    for y in ground..(ground + trunk).min(WORLD_HEIGHT) {
+        column.set(x, y, z, Block::Wood);
+    }
+
+    // Copa: 4 capas alrededor de la parte alta del tronco (radio 2, esquinas
+    // recortadas; la de arriba, radio 1).
+    let leaf_base = ground + trunk - 2;
+    for dy in 0..4i32 {
+        let r: i32 = if dy == 0 || dy == 3 { 1 } else { 2 };
+        for dx in -r..=r {
+            for dz in -r..=r {
+                if r == 2 && dx.abs() == 2 && dz.abs() == 2 {
+                    continue;
+                }
+                let lx = x as i32 + dx;
+                let lz = z as i32 + dz;
+                let ly = leaf_base as i32 + dy;
+                if lx < 0
+                    || lz < 0
+                    || lx >= CHUNK_SIZE as i32
+                    || lz >= CHUNK_SIZE as i32
+                    || ly < 0
+                    || ly >= WORLD_HEIGHT as i32
+                {
+                    continue;
+                }
+                let (lx, ly, lz) = (lx as usize, ly as usize, lz as usize);
+                if column.get(lx, ly, lz) == Block::Air {
+                    column.set(lx, ly, lz, Block::Leaves);
+                }
+            }
+        }
     }
 }
 
@@ -279,6 +352,33 @@ mod tests {
             assert_eq!(above, Block::Air);
         }
         assert_eq!(column.get(0, 0, 0), Block::Stone);
+    }
+
+    #[test]
+    fn hay_arboles_con_tronco_y_hojas() {
+        let generator = TerrainGenerator::new(13_371);
+        let (mut wood, mut leaves) = (0u32, 0u32);
+        for cz in -3..3 {
+            for cx in -3..3 {
+                let column = generator.generate_column(cx * 16, cz * 16);
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        for y in 0..WORLD_HEIGHT {
+                            match column.get(x, y, z) {
+                                Block::Wood => wood += 1,
+                                Block::Leaves => leaves += 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(wood > 0, "no se genero ningun tronco");
+        assert!(
+            leaves > wood,
+            "deberia haber mas hojas que troncos ({leaves} vs {wood})"
+        );
     }
 
     #[test]

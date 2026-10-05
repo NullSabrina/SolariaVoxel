@@ -2,30 +2,26 @@
 
 Motor de voxeles escrito en Rust **desde cero**, sin motor de juego. Sobre una
 capa de plataforma minima (`winit` + `wgpu`) construimos nosotros el bucle de
-juego, la matematica, la camara y (en el futuro) el meshing, la iluminacion y el
-guardado versionado del mundo.
+juego, la matematica, la camara, el meshing, la iluminacion, el guardado
+versionado del mundo y mas.
 
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.7.8` — Oceanos (agua translucida, playas, nado)
+## Estado actual: `v0.7.9` — Arboles y texturas de madera/hojas
 
-- Nuevo bloque **`Water`** (id 9, tile 10): no solido y **translucido**.
-- **Generacion**: el aire entre la superficie y el **nivel del mar** se rellena de
-  agua (estilo `ocean.level` de Terasology / `water_level` de Luanti); las
-  columnas a ras de agua tienen **playa/fondo de arena**.
-- **Pase de transparencia**: el agua se separa del material opaco en el mesher y
-  se dibuja con **blending alfa** (sin escritura de z).
-- **Nado**: en el agua hay flotabilidad (gravedad reducida) y Espacio sube.
-- Sobre **v0.7.7**: texturas de tierra con grano fino (estilo Luanti). **v0.7.6**:
-  optimizacion del streaming. **v0.7.5**: cuevas + luz de cielo lateral.
-  **v0.7.4**: culling + niebla. **v0.7.3**: re-mesheo de vecinas. **v0.7.2**:
-  colision por huella + auto-escalon. **v0.7.1**: altura por bloque. **v0.7.0**:
-  biomas (Worley) y `Snow`.
+- **Arboles** por bioma (bosque 5%, nieve 2%, desierto no): tronco `Wood` y copa
+  `Leaves`, deterministicos y sin cortarse en el borde del chunk.
+- **Hojas transparentes** (no solidas, con huecos alfa 0 y cutout), como en
+  Minecraft/Luanti: se ven y se atraviesan.
+- Texturas de **tronco** (veta vertical), **extremo** (anillos) y **tablones** con
+  nuestra paleta (referencia Luanti). Nuevo bloque `Planks` (para crafteo).
+- Sobre **v0.7.8**: oceanos (agua translucida, playas, nado). **v0.7.7**: texturas
+  de tierra con grano fino. **v0.7.6**: optimizacion del streaming. **v0.7.5**:
+  cuevas + luz de cielo lateral. **v0.7.4**: culling + niebla.
 
-Siguiente: pulido (palo 3D del `.bbmodel`, antorcha de pared) o el inicio de la
-etapa 2 (gameplay: inventario, crafteo) segun el roadmap. Pendiente tambien
-**nadar** mas pulido y el resto de la etapa.
+**Etapa 1 del roadmap cerrada.** Siguiente: **Etapa 2 (gameplay)** — hotbar/
+inventario, crafteo, mobs y **guardado completo** (posicion del jugador).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -86,15 +82,16 @@ src/
 │   ├── block.rs     Tipos de bloque y su tile del atlas.
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas (carga assets/atlas.png; fallback).
-│   ├── terrain.rs   Generacion de altura con ruido Perlin.
+│   ├── terrain.rs   Generacion: altura/bioma por bloque, cuevas y oceanos.
 │   ├── mesher.rs    Meshing naive con face culling (referencia).
-│   ├── greedy.rs    Greedy meshing (fusiona caras; el que se usa).
+│   ├── greedy.rs    Greedy meshing (fusiona caras; separa el agua).
 │   ├── raycast.rs   Raycast de voxeles (que bloque se apunta).
 │   ├── save.rs      Versionado + guardado/carga del mundo (bincode).
 │   └── store.rs     World: columnas en memoria + streaming por radio.
 └── math/
     ├── vec3.rs      Vector de 3 componentes.
-    └── mat4.rs      Matriz 4x4 column-major (perspectiva, look-at).
+    ├── mat4.rs      Matriz 4x4 column-major (perspectiva, look-at).
+    └── frustum.rs   Frustum de la camara (frustum culling).
 ```
 
 Para el detalle de como encajan (flujo de un frame, versionado del mundo,
@@ -111,13 +108,20 @@ modulo `render` habla con la GPU.
 
 ## Roadmap (resumen)
 
-| Etapa | Versiones | Hito |
-| ----- | --------- | ---- |
-| 0. Fundamentos | `v0.1.x`–`v0.3.x` | Ventana, camara, primer cubo, primer chunk, terreno |
-| 1. Mundo jugable | `v0.4.x`–`v0.7.x` | Romper/colocar, versionado de mundo, luz, biomas |
-| 2. Gameplay | `v0.8.x`–`v0.10.x` | Inventario, crafteo, mobs, guardado completo |
-| 3. Optimizacion | `v0.11.x`–`v0.13.x` | Bit-packing, LOD, culling, < 500 MB |
-| 4. Multijugador | `v0.14.x`–`v0.16.x` | Cliente-servidor, QUIC, replicacion |
-| 5. Pulido | `v0.17.x`–`v1.0.0` | Menus, audio, particulas, data packs, release |
+| Etapa | Versiones | Hito | Estado |
+| ----- | --------- | ---- | ------ |
+| 0. Fundamentos | `v0.1.x`–`v0.3.x` | Ventana, camara, primer cubo, primer chunk, terreno | ✅ |
+| 1. Mundo jugable | `v0.4.x`–`v0.7.x` | Romper/colocar, versionado de mundo, luz, biomas | ✅ (+ cuevas, oceanos, culling, streaming) |
+| 2. Gameplay | `v0.8.x`–`v0.10.x` | Inventario, crafteo, mobs, guardado completo | ⏳ siguiente |
+| 3. Optimizacion | `v0.11.x`–`v0.13.x` | Bit-packing, LOD, culling, < 500 MB | parcial (culling hecho en v0.7.4) |
+| 4. Multijugador | `v0.14.x`–`v0.16.x` | Cliente-servidor, QUIC, replicacion | pendiente |
+| 5. Pulido | `v0.17.x`–`v1.0.0` | Menus, audio, particulas, data packs, release | pendiente |
+
+Notas:
+- La **Etapa 1** quedo cerrada en `v0.7.9` (cuevas `v0.7.5`, oceanos `v0.7.8`,
+  vegetacion/arboles `v0.7.9`); el **culling** de la Etapa 3 se adelanto a
+  `v0.7.4`.
+- La **Etapa 2** empieza en `v0.8.x`: hotbar/inventario, crafteo, mobs y
+  **guardado completo** (hoy no se guarda la posicion del jugador).
 
 Las decisiones tecnicas se registran en [`DECISIONS.md`](./DECISIONS.md).

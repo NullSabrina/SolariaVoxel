@@ -59,6 +59,8 @@ pub enum Block {
     Snow,
     /// Agua: no es solida (se nada/se atraviesa) y **translucida**.
     Water,
+    /// Tablones de madera (para crafteo en la etapa 2).
+    Planks,
 }
 
 impl Default for Block {
@@ -82,6 +84,7 @@ impl Block {
             7 => Block::Torch,
             8 => Block::Snow,
             9 => Block::Water,
+            10 => Block::Planks,
             _ => Block::Air,
         }
     }
@@ -92,16 +95,20 @@ impl Block {
         self as u8
     }
 
-    /// ¿Ocupa espacio? (el aire, la antorcha y el agua no bloquean).
+    /// ¿Ocupa espacio? (no bloquean: aire, antorcha, agua y **hojas**, que son
+    /// transparentes y se atraviesan).
     #[inline]
     pub fn is_solid(self) -> bool {
-        !matches!(self, Block::Air | Block::Torch | Block::Water)
+        !matches!(
+            self,
+            Block::Air | Block::Torch | Block::Water | Block::Leaves
+        )
     }
 
-    /// ¿Es un bloque que se dibuja pero no bloquea? (la antorcha y el agua).
+    /// ¿Es un bloque que se dibuja pero no bloquea? (antorcha, agua y hojas).
     #[inline]
     pub fn is_visible(self) -> bool {
-        matches!(self, Block::Torch | Block::Water)
+        matches!(self, Block::Torch | Block::Water | Block::Leaves)
     }
 
     /// ¿Es un liquido? (para la fisica de nado y el render translucido).
@@ -146,6 +153,8 @@ impl Block {
             Block::Snow => 9,
             // Agua (translucida; tile con alfa).
             Block::Water => 10,
+            // Tablones.
+            Block::Planks => 11,
         }
     }
 }
@@ -156,7 +165,14 @@ mod tests {
 
     #[test]
     fn id_ida_y_vuelta() {
-        for b in [Block::Air, Block::Grass, Block::Stone, Block::Wood] {
+        for b in [
+            Block::Air,
+            Block::Grass,
+            Block::Stone,
+            Block::Wood,
+            Block::Water,
+            Block::Planks,
+        ] {
             assert_eq!(Block::from_u8(b.id()), b);
         }
     }
@@ -167,10 +183,12 @@ mod tests {
     }
 
     #[test]
-    fn solo_el_aire_la_antorcha_y_el_agua_no_son_solidos() {
+    fn no_bloquean_aire_antorcha_agua_y_hojas() {
         assert!(!Block::Air.is_solid());
         assert!(!Block::Torch.is_solid());
         assert!(!Block::Water.is_solid());
+        assert!(!Block::Leaves.is_solid());
+        assert!(Block::Leaves.is_visible());
         assert!(Block::Grass.is_solid());
     }
 
@@ -205,9 +223,10 @@ mod tests {
             Block::Leaves,
             Block::Snow,
             Block::Water,
+            Block::Planks,
         ] {
             for face in Face::ALL {
-                assert!(b.face_tile(face) < 11, "{b:?} {face:?}");
+                assert!(b.face_tile(face) < 12, "{b:?} {face:?}");
             }
         }
         // Hierba: verde arriba, tierra abajo, lateral distinto.

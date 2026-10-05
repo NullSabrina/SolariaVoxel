@@ -277,6 +277,12 @@ fn mask_value(
         if neighbor == Block::Water || neighbor.is_solid() {
             return None;
         }
+    } else if block == Block::Leaves {
+        // Las hojas son visibles no solidas (cutout): se dibujan contra aire,
+        // pero no entre ellas (rendimiento) ni contra un solido.
+        if neighbor == Block::Leaves || neighbor.is_solid() {
+            return None;
+        }
     } else if !block.is_solid() || neighbor.is_solid() {
         // La antorcha (visible no solida) y el aire no entran en el greedy de
         // cubos; solo se oculta una cara si el vecino es SOLIDO.

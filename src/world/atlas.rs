@@ -15,7 +15,7 @@
 pub const TILE: u32 = 16;
 
 /// Numero de tiles en el atlas (0..TILES).
-pub const TILES: u32 = 11;
+pub const TILES: u32 = 12;
 
 /// Tiles por fila.
 pub const COLS: u32 = 4;
@@ -165,20 +165,43 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
         3 => opaque(tint([128, 128, 128], noise)),
         // 4: arena
         4 => opaque(tint([219, 207, 163], noise)),
-        // 5: corteza (lineas verticales)
+        // 5: corteza del tronco (veta vertical, bajo contraste)
         5 => {
-            let streak = if x.is_multiple_of(4) { -22 } else { 0 };
-            opaque(tint([102, 76, 46], noise + streak))
+            let streak = if x.is_multiple_of(4) { -20 } else { 0 };
+            let c = match noise + streak {
+                i if i < -12 => [58, 40, 26],
+                i if i < -2 => [80, 58, 36],
+                i if i < 10 => [102, 76, 46],
+                _ => [122, 92, 56],
+            };
+            opaque(c)
         }
-        // 6: anillos de la madera
+        // 6: extremo del tronco (anillos concentricos)
         6 => {
-            let ring = (((x as i32 - 8).pow(2) + (y as i32 - 8).pow(2)) % 6 == 0) as i32 * -25;
-            opaque(tint([166, 130, 80], noise + ring))
+            let dx = x as f32 - 7.5;
+            let dy = y as f32 - 7.5;
+            let d = (dx * dx + dy * dy).sqrt();
+            let c = if d > 7.0 {
+                [134, 102, 60]
+            } else if ((d as i32) / 2) % 2 == 0 {
+                [166, 130, 80]
+            } else {
+                [196, 160, 104]
+            };
+            opaque(c)
         }
-        // 7: hojas (con huecos oscuros)
+        // 7: hojas: verdes con **huecos transparentes** (alfa 0) para el cutout.
         7 => {
-            let gap = if (x + y).is_multiple_of(5) { -35 } else { 0 };
-            opaque(tint([60, 120, 40], noise + gap))
+            if noise < -7 {
+                [0, 0, 0, 0]
+            } else {
+                let c = match noise {
+                    i if i < -2 => [40, 88, 34],
+                    i if i < 8 => [60, 120, 42],
+                    _ => [96, 158, 62],
+                };
+                opaque(c)
+            }
         }
         // 8: antorcha: palo fino en la franja central, llama en la punta y
         // fondo TRANSPARENTE (para el cutout). Debe parecerse al atlas real.
@@ -221,6 +244,19 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
                 [40, 96, 178]
             };
             [c[0], c[1], c[2], a]
+        }
+        // 11: tablones (tablas horizontales con juntas).
+        11 => {
+            if y.is_multiple_of(4) {
+                opaque([110, 82, 48])
+            } else {
+                let c = match noise {
+                    i if i < -4 => [138, 106, 62],
+                    i if i < 8 => [166, 130, 80],
+                    _ => [188, 152, 102],
+                };
+                opaque(c)
+            }
         }
         _ => [0, 0, 0, 0],
     }
@@ -288,6 +324,9 @@ mod tests {
                     let alpha = pixels[i + 3];
                     if tile == 8 {
                         // El fondo es transparente y la antorcha opaca.
+                        assert!(alpha == 0 || alpha == 255);
+                    } else if tile == 7 {
+                        // Las hojas tienen huecos transparentes (cutout).
                         assert!(alpha == 0 || alpha == 255);
                     } else if tile == 10 {
                         // El agua es translucida.

@@ -10,20 +10,18 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.8 — Oceanos (agua translucida, playas, nado)
+//! ## Estado actual: v0.7.9 — Arboles y texturas de madera/hojas
 //!
-//! * Nuevo bloque **`Water`** (id 9, tile 10): no solido y **translucido**.
-//! * **Generacion**: el aire entre la superficie y el **nivel del mar** se rellena
-//!   de agua (estilo `ocean.level` de Terasology / `water_level` de Luanti); las
-//!   columnas a ras de agua tienen **playa/fondo de arena**.
-//! * **Pase de transparencia**: el agua se separa de la geometria opaca en el
-//!   mesher y se dibuja en un pipeline con **blending alfa** y sin escritura de z.
-//! * **Nado**: en el agua la gravedad es menor (flotabilidad) y Espacio sube.
-//! * Sobre v0.7.7: texturas de tierra con grano fino. v0.7.6: optimizacion del
-//!   streaming. v0.7.5: cuevas + luz de cielo lateral.
+//! * **Arboles** por bioma (bosque 5%, nieve 2%, desierto no): tronco de `Wood`
+//!   y copa de `Leaves`, deterministicos y sin cortar en el borde del chunk.
+//! * **Hojas transparentes** (no solidas, con huecos de alfa 0 y cutout) como en
+//!   Minecraft/Luanti: se ven y se atraviesan.
+//! * Texturas de **tronco** (veta vertical), **extremo** (anillos) y **tablones**
+//!   redibujadas con nuestra paleta (referencia Luanti). Nuevo bloque `Planks`.
+//! * Sobre v0.7.8: oceanos. v0.7.7: texturas de tierra. v0.7.5: cuevas.
 //!
-//! Siguiente: pulido (palo 3D del `.bbmodel`, antorcha de pared) o inventario
-//! segun el roadmap (etapa 2, gameplay).
+//! **Etapa 1 del roadmap cerrada.** Siguiente: **Etapa 2 (gameplay)** — hotbar/
+//! inventario, crafteo, mobs y **guardado completo** (posicion del jugador).
 //!
 //! ## Organizacion del codigo
 //!

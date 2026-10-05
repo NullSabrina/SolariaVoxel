@@ -797,9 +797,13 @@ nieve) con un ruido **Worley** (cellular) de baja frecuencia (`0.02`, celdas de
 ~50 bloques). El bioma decide el bloque de superficie: arena / hierba / nieve.
 Nuevo bloque `Snow` (id 8, tile 9) pintado en `assets/atlas.png` con LibreSprite.
 
-**Motivo.** Es el hito `v0.7.0` de la guia ("Biomas Simples") y cierra la etapa 1
-del roadmap ("mundo jugable"). Worley da regiones compactas (mejor que umbrales
-de Perlin, que dan franjas).
+**Motivo.** Es el hito `v0.7.0` de la guia ("Biomas Simples"). Worley da regiones
+compactas (mejor que umbrales de Perlin, que dan franjas).
+
+**Nota (correccion).** Aqui se dijo que "cierra la etapa 1", pero eso era
+prematuro: la etapa 1 no quedo cerrada hasta `v0.7.8`, con las **cuevas**
+(`v0.7.5`) y los **oceanos** (`v0.7.8`). Queda pendiente ademas la **vegetacion**
+(arboles).
 
 **Alternativas descartadas.** Dos campos Perlin (temperatura/humedad) con
 umbrales: la guia pide Worley y las regiones de Worley son mas "bioma".
@@ -1117,6 +1121,41 @@ renderer (opaco + agua); `ScenePipeline::water_pipeline`; `Renderer::is_water_at
 `terrain.rs`: `coastal_block` + relleno de agua; `GENERATOR_VERSION` 5. Fisica:
 parametro `in_water` en `PlayerController::update`. Demo `SOLARIA_OCEAN=1`. 117
 tests.
+
+### 2026-10-05 (v0.7.9) — Arboles, hojas transparentes y texturas de madera
+
+**Decision.** Cerrar la **Etapa 1** con lo que faltaba: **vegetacion**
+(arboles). Ademas, mejorar las texturas de **tronco/extremo/tablones** y hacer las
+**hojas transparentes**, siguiendo el estilo de **Luanti** y la peticion del
+usuario (con nuestra paleta).
+
+**Motivo.**
+* Los bloques `Wood`/`Leaves` existian desde v0.2 pero **no se generaban**: los
+  biomas estaban pelados. Se anaden arboles deterministicos por bioma (bosque 5%,
+  nieve 2%, desierto 0%), restringiendo el tronco a `x,z in 2..=13` para que la
+  copa **quepa en la columna** y no se corte en el borde del chunk.
+* **Hojas transparentes**: en el atlas tenian alfa 255 (opacas, con huecos
+  oscuros). Se redibujan con **huecos de alfa 0** (~34%) y, al ser **no solidas**,
+  el mesher las emite con **cutout** (el shader descarta alfa < 0.5) y el jugador
+  las **atraviesa**, como en Minecraft/Luanti (variante "fancy").
+* **Texturas de madera** (referencia Luanti): tronco con **veta vertical** de bajo
+  contraste, extremo con **anillos** concentricos, y **tablones** (nuevo bloque
+  `Planks`, tile 11) con tablas horizontales y juntas. Todo con nuestra paleta.
+
+**Alternativas descartadas.** (a) Hojas **solidas**: el test de fisica detecto que
+la copa genera techos y el jugador quedaba embebido (mismo fallo que los escalones
+de v0.7.2); ademas MC "fast" usa hojas opacas. (b) Arboles que cruzan chunks: exige
+una pasada de decoracion a nivel de mundo; se aplaza. (c) Hojas por blending (como
+el agua): no; el cutout es lo correcto para follaje.
+
+**Consecuencia.** `terrain.rs`: `hash01`/`hash_u32`/`place_tree`; `GENERATOR_VERSION`
+6. `Block::Planks` (id 10, tile 11); `Leaves` pasa a **no solido + visible**; greedy
+emite hojas por cutout. `atlas.png`/fallback redibujan tiles 5/6/7 y anaden el 11;
+tile 7 con alfa 0. 118 tests. Demo de arboles verificada en captura.
+
+**Nota de roadmap.** Con esto queda **cerrada la Etapa 1** ("mundo jugable") de
+verdad. Siguiente: **Etapa 2 (gameplay, v0.8.x)**: hotbar/inventario, crafteo,
+mobs y **guardado completo** (posicion del jugador).
 
 
 

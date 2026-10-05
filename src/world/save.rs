@@ -39,7 +39,8 @@ pub const FORMAT_VERSION: u32 = 2;
 ///   planas de 16x16).
 /// * v4: **cuevas** con ruido Perlin 3D (iso-superficie).
 /// * v5: **oceanos/lagos**: agua hasta el nivel del mar y playas de arena.
-pub const GENERATOR_VERSION: u32 = 5;
+/// * v6: **vegetacion**: arboles (tronco de madera + copa de hojas) por bioma.
+pub const GENERATOR_VERSION: u32 = 6;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD"; // VoxelForge World / Solaria
