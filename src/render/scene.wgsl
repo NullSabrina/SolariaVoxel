@@ -5,9 +5,15 @@
 // * El fragment shader muestrea el atlas de texturas en esas UV para pintar el
 //   bloque. El atlas y el sampler llegan por el bind group.
 
-// Uniform: la matriz que la CPU actualiza cada frame.
+// Uniform: la matriz que la CPU actualiza cada frame, mas el factor dia/noche.
+// El relleno (`pad0..2`) mantiene el tamano en multiplo de 16 bytes y evita que
+// WGSL alinee un `vec3` a 16 (lo que descuadraria el layout respecto a Rust).
 struct Uniforms {
     mvp: mat4x4<f32>,
+    day_factor: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
 };
 
 @group(0) @binding(0)
@@ -25,16 +31,18 @@ var atlas_sampler: sampler;
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
-    @location(2) light: f32,
-    @location(3) tile: u32,
+    @location(2) sky: f32,
+    @location(3) block: f32,
+    @location(4) tile: u32,
 };
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
-    @location(1) light: f32,
+    @location(1) sky: f32,
+    @location(2) block: f32,
     // Los enteros entre etapas exigen interpolacion plana (sin interpolar).
-    @location(2) @interpolate(flat) tile: u32,
+    @location(3) @interpolate(flat) tile: u32,
 };
 
 @vertex
@@ -42,7 +50,8 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     output.clip_position = uniforms.mvp * vec4<f32>(input.position, 1.0);
     output.uv = input.uv;
-    output.light = input.light;
+    output.sky = input.sky;
+    output.block = input.block;
     output.tile = input.tile;
     return output;
 }
@@ -55,9 +64,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if (tex.a < 0.5) {
         discard;
     }
-    // Iluminacion: la luz de cielo (0..1) modula el color. Un minimo (0.15)
-    // evita que las zonas a oscuras queden totalmente negras e ilegibles.
+    // Iluminacion: la luz de cielo se apaga con la noche (`day_factor`), pero la
+    // de bloque (antorchas) no. Nos quedamos con la mayor de las dos. Un minimo
+    // (0.15) evita que las zonas a oscuras queden totalmente negras.
+    let light = max(input.sky * uniforms.day_factor, input.block);
     let ambient = 0.15;
-    let shade = ambient + (1.0 - ambient) * input.light;
+    let shade = ambient + (1.0 - ambient) * light;
     return vec4<f32>(tex.rgb * shade, tex.a);
 }

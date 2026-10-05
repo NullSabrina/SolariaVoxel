@@ -43,7 +43,7 @@ main.rs ──> lib.rs ──> engine::run()
 | ------ | --------------- | ---------- |
 | `engine` | Ciclo de vida de la app, eventos de winit, input, ventana. | `render`, `scene`, `player`, `world`, `math` |
 | `render` | Todo lo que toca `wgpu`: superficie, pipelines, mallas, shaders. | `world` (para meshear), `scene`, `math` |
-| `scene` | Que hay en la escena (hoy solo la camara FPS). | `math` |
+| `scene` | Que hay en la escena: la camara FPS y el ciclo dia/noche. | `math` |
 | `player` | Fisica vertical del jugador y test de solape bloque/jugador. | `scene`, `world` (tipos), `math` |
 | `world` | Datos del mundo: bloques, columnas, meshing, raycast, guardado. | `render::mesh` (el tipo `Vertex`), `math` |
 | `math` | Matematica 3D propia (`Vec3`, `Mat4`). | ninguna |
@@ -58,15 +58,17 @@ Todo arranca en `engine::app::App`, que implementa `ApplicationHandler` de winit
 resumed()                 window_event(RedrawRequested)
   crear ventana             │
   crear Renderer            ├─ App::update(dt)      fisica del jugador + camara
-  cargar/migrar mundo       ├─ App::update_selection() raycast -> resaltado
-  posar jugador (settle)    └─ camera.view_projection()
-  [modo demo] escena fija        renderer.sync_streaming(camara)
-                                 renderer.render(&view_projection)
-                                       │
-                                       ├─ world.update_streaming() carga/descarga columnas
-                                       ├─ reconstruir mallas de columnas nuevas
-                                       ├─ escribir uniform (MVP)
-                                       └─ render pass: limpiar + mallas + resaltado + present
+  cargar/migrar mundo       │   + DayCycle::advance  (hora del mundo)
+  posar jugador (settle)    ├─ App::update_selection() raycast -> resaltado
+  [modo demo] escena fija   └─ camera.view_projection()
+                                renderer.set_environment(day_factor, sky_color)
+                                renderer.sync_streaming(camara)
+                                renderer.render(&view_projection)
+                                      │
+                                      ├─ world.update_streaming() carga/descarga columnas
+                                      ├─ reconstruir mallas de columnas nuevas
+                                      ├─ escribir uniform (MVP + day_factor)
+                                      └─ render pass: limpiar + mallas + resaltado + present
 about_to_wait() -> window.request_redraw()   (bucle continuo)
 ```
 
@@ -78,8 +80,9 @@ Puntos clave:
 - **Una malla por (columna, seccion)**: una columna tiene 24 secciones; la
   mayoria estan vacias y no generan malla (`ColumnMeshes = [Option<Mesh>; 24]`).
 - **Dos luces**: `compute_skylight` (cielo, por columna vertical) y
-  `compute_block_light` (antorchas, flood-fill BFS). Se dibuja `max(cielo,
-  bloque)`.
+  `compute_block_light` (antorchas, flood-fill BFS). El vertice lleva ambas por
+  separado; el shader dibuja `max(cielo * day_factor, bloque)`, de modo que la
+  noche apaga el sol pero no las antorchas.
 
 ## El pipeline de datos del mundo
 
@@ -133,7 +136,9 @@ una migracion**; hay tests que lo verifican.
   `is_visible` = se dibuja pero no bloquea (la antorcha). El mesher dibuja
   `is_solid || is_visible` y solo oculta una cara si el vecino es solido.
 - **El raycast** golpea `is_solid || is_visible` (se puede apuntar la antorcha).
-- **Luz**: `u8` por celda (0..15). Se dibuja normalizada a 0..1 en el vertice.
+- **Luz**: `u8` por celda (0..15) para cielo y para bloque, por separado. En el
+  vertice van normalizadas a 0..1 (`sky`, `block`); el `day_factor` (0..1) las
+  combina en el shader.
 - **Colision del jugador**: cilindro vertical de radio `PLAYER_RADIUS` y alto
   `PLAYER_HEIGHT`; `player::block_overlaps_player` decide si un bloque lo ocupa.
 - **Cero comentarios de relleno**: se documenta el *porque*, no el *que*.

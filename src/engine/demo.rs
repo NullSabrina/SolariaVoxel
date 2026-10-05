@@ -20,6 +20,16 @@ pub fn is_active() -> bool {
     std::env::var("SOLARIA_DEMO").is_ok()
 }
 
+/// Hora del dia a la que arranca el demo (`SOLARIA_TIME`, 0..1). Por defecto
+/// media manana (0.35). Permite capturar de dia (0.5) o de noche (0.0).
+pub fn time_of_day() -> f32 {
+    std::env::var("SOLARIA_TIME")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.35)
+        .rem_euclid(1.0)
+}
+
 /// Monta la escena de captura: una parcela plana de hierba con una antorcha
 /// delante, y coloca la camara mirandola desde cerca.
 ///
@@ -31,19 +41,25 @@ pub fn build(renderer: &mut Renderer, camera: &mut Camera) -> [i32; 3] {
     // Plataforma: solidos hasta `plateau`, aire por encima.
     let plateau = feet + 1;
 
+    // Reunimos todas las ediciones y las aplicamos en UN lote: cada `set_block`
+    // reconstruye mallas, asi que hacerlo de uno en uno tardaria mucho.
+    let mut edits: Vec<([i32; 3], Block)> = Vec::new();
+
     // 1. Alisamos una parcela pequena (7x10) alrededor del jugador.
     for x in (cx - 3)..=(cx + 3) {
         for z in (cz - 6)..=(cz + 3) {
-            renderer.set_block([x, plateau, z], Block::Grass);
+            edits.push(([x, plateau, z], Block::Grass));
             for y in (plateau + 1)..(plateau + 8) {
-                renderer.set_block([x, y, z], Block::Air);
+                edits.push(([x, y, z], Block::Air));
             }
         }
     }
 
     // 2. UNA antorcha a 5 bloques al frente (-Z).
     let torch = [cx, plateau + 1, cz - 5];
-    renderer.set_block(torch, Block::Torch);
+    edits.push((torch, Block::Torch));
+
+    renderer.set_blocks(&edits);
 
     // 3. Camara: a 2.3 del suelo y 5.0 al frente, mirando a la antorcha.
     camera.position = Vec3::new(cx as f32 + 0.5, plateau as f32 + 2.3, cz as f32 - 0.5);

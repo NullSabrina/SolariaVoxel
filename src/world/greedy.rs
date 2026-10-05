@@ -32,8 +32,9 @@ struct FaceKey {
     block: u8,
     face: Face,
     /// Luz de cielo de la celda de aire que hay delante de la cara (0..15).
-    /// Incluirla en la clave evita fusionar caras con distinta iluminacion.
-    light: u8,
+    sky: u8,
+    /// Luz de bloque (antorchas) de esa misma celda (0..15).
+    block_light: u8,
 }
 
 /// Genera la malla de una columna entera con greedy meshing.
@@ -42,7 +43,12 @@ struct FaceKey {
 /// `origin`). `origin` desplaza la columna (0..16) a su sitio del mundo.
 pub fn greedy_column(column: &Column, origin: [f32; 3]) -> (Vec<Vertex>, Vec<u32>) {
     let query = |x: i32, y: i32, z: i32| column.get_or_air(x, y, z);
-    let light = |x: i32, y: i32, z: i32| column.combined_or_zero(x, y, z);
+    let light = |x: i32, y: i32, z: i32| {
+        (
+            column.light_or_zero(x, y, z),
+            column.block_light_or_zero(x, y, z),
+        )
+    };
     greedy_range(&query, &light, 0, WORLD_HEIGHT, origin)
 }
 
@@ -53,7 +59,12 @@ pub fn greedy_section(
     origin: [f32; 3],
 ) -> (Vec<Vertex>, Vec<u32>) {
     let query = |x: i32, y: i32, z: i32| column.get_or_air(x, y, z);
-    let light = |x: i32, y: i32, z: i32| column.combined_or_zero(x, y, z);
+    let light = |x: i32, y: i32, z: i32| {
+        (
+            column.light_or_zero(x, y, z),
+            column.block_light_or_zero(x, y, z),
+        )
+    };
     greedy_section_query(&query, &light, section, origin)
 }
 
@@ -61,10 +72,10 @@ pub fn greedy_section(
 ///
 /// `query(x, y, z)` devuelve el bloque en coordenadas **locales** de la columna
 /// (puede mirar fuera, 0..16, para el vecino: eso es lo que evita los muros
-/// internos). `light(x, y, z)` devuelve la luz de cielo 0..15 de esa celda.
+/// internos). `light(x, y, z)` devuelve `(cielo, bloque)` 0..15 de esa celda.
 pub fn greedy_section_query(
     query: &dyn Fn(i32, i32, i32) -> Block,
-    light: &dyn Fn(i32, i32, i32) -> u8,
+    light: &dyn Fn(i32, i32, i32) -> (u8, u8),
     section: usize,
     origin: [f32; 3],
 ) -> (Vec<Vertex>, Vec<u32>) {
@@ -85,7 +96,7 @@ pub fn greedy_section_query(
 /// horizontales, y el "alto" del rectangulo nunca cruza el limite de seccion.
 fn greedy_range(
     query: &dyn Fn(i32, i32, i32) -> Block,
-    light: &dyn Fn(i32, i32, i32) -> u8,
+    light: &dyn Fn(i32, i32, i32) -> (u8, u8),
     y_start: usize,
     y_end: usize,
     origin: [f32; 3],
@@ -186,8 +197,9 @@ fn greedy_range(
                 if query(x as i32, y as i32, z as i32) != Block::Torch {
                     continue;
                 }
-                let level = light(x as i32, y as i32, z as i32);
-                let light_f = level as f32 / super::chunk::MAX_LIGHT as f32;
+                let (sky, block_light) = light(x as i32, y as i32, z as i32);
+                let sky_f = sky as f32 / super::chunk::MAX_LIGHT as f32;
+                let block_f = block_light as f32 / super::chunk::MAX_LIGHT as f32;
                 super::mesher::emit_torch_cross(
                     &mut vertices,
                     &mut indices,
@@ -196,7 +208,8 @@ fn greedy_range(
                     y,
                     z,
                     Block::Torch,
-                    light_f,
+                    sky_f,
+                    block_f,
                 );
             }
         }
@@ -212,7 +225,7 @@ fn greedy_range(
 /// * Para caras +Y/-Y: `u` recorre el eje X, `v` el eje Z, `c` el eje Y.
 fn mask_value(
     query: &dyn Fn(i32, i32, i32) -> Block,
-    light: &dyn Fn(i32, i32, i32) -> u8,
+    light: &dyn Fn(i32, i32, i32) -> (u8, u8),
     face: Face,
     u: usize,
     v: usize,
@@ -241,11 +254,12 @@ fn mask_value(
         return None; // cara oculta (o vecino en otro chunk)
     }
     // La luz que recibe esta cara es la de la celda de aire de delante.
-    let level = light(nx, ny, nz);
+    let (sky, block_light) = light(nx, ny, nz);
     Some(FaceKey {
         block: block.id(),
         face,
-        light: level,
+        sky,
+        block_light,
     })
 }
 
@@ -331,12 +345,14 @@ fn emit_quad(
 
     let base = vertices.len() as u32;
     for (corner, uv) in corners.iter().zip(uvs.iter()) {
-        // Luz normalizada 0..1 (la cara recibe la luz de la celda de delante).
-        let light = key.light as f32 / super::chunk::MAX_LIGHT as f32;
+        // Luces normalizadas 0..1 (la cara recibe las de la celda de delante).
+        let sky = key.sky as f32 / super::chunk::MAX_LIGHT as f32;
+        let block = key.block_light as f32 / super::chunk::MAX_LIGHT as f32;
         vertices.push(Vertex::with_light(
             [corner[0] + ox, corner[1] + oy, corner[2] + oz],
             *uv,
-            light,
+            sky,
+            block,
             tile as u32,
         ));
     }
@@ -427,5 +443,37 @@ mod tests {
         column.set(9, 8, 8, Block::Torch);
         let (vertices, _) = greedy_column(&column, [0.0; 3]);
         assert_eq!(vertices.len(), 6 * 4 + 8, "6 caras de piedra + cruz");
+    }
+
+    #[test]
+    fn la_antorcha_emite_luz_de_bloque_en_sus_vertices() {
+        let mut column = Column::empty();
+        column.set(8, 8, 8, Block::Torch);
+        column.compute_block_light();
+        let (vertices, _) = greedy_column(&column, [0.0; 3]);
+        // La cruz de la antorcha lleva luz de bloque (la de la propia celda).
+        assert!(
+            vertices.iter().any(|v| v.block > 0.0),
+            "la antorcha deberia emitir luz de bloque en sus vertices"
+        );
+    }
+
+    #[test]
+    fn la_luz_de_cielo_y_la_de_bloque_van_separadas() {
+        // Suelo de piedra a cielo abierto: la cara superior recibe cielo (sky ~1)
+        // y nada de bloque (block 0). Asi el dia/noche puede apagar solo el cielo.
+        let mut column = Column::empty();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                column.set(x, 0, z, Block::Stone);
+            }
+        }
+        column.compute_skylight();
+        column.compute_block_light();
+        let (vertices, _) = greedy_column(&column, [0.0; 3]);
+        assert!(
+            vertices.iter().any(|v| v.sky > 0.9 && v.block == 0.0),
+            "deberia haber caras con cielo alto y bloque nulo"
+        );
     }
 }

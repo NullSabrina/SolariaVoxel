@@ -734,6 +734,41 @@ guia de referencia (guia iterativa de motor de voxeles) para que no se pierda:
 roadmap, para decidir con criterio si se prioriza el ciclo dia/noche (hueco con
 la guia) o el pulido del modelo (palo 3D / antorcha de pared).
 
+### 2026-10-04 (v0.6.4) — Ciclo dia/noche con luz de cielo y de bloque separadas
+
+**Decision.** Anadimos `scene::DayCycle` (hora del mundo) y separamos la luz del
+vertice en **`sky`** (cielo) y **`block`** (antorchas). El shader dibuja
+`max(sky * day_factor, block)`. El color del cielo (sRGB) se interpola en CPU
+entre noche/amanecer/dia y se sube como color de clear.
+
+**Motivo.** Para que al anochecer se oscurezca el terreno pero **las antorchas
+sigan iluminando** hace falta saber que parte de la luz es del sol y que parte de
+bloque. Con la luz combinada (`max(cielo, bloque)`) no se puede apagar solo el
+sol. Ademas, es el hueco de la guia (que situa el ciclo dia/noche en v0.6.2).
+
+**Alternativas descartadas.** (a) Oscurecer todo por igual de noche: apagaria
+tambien las antorchas y dejaria las cuevas negras. (b) Calcular el color del
+cielo en el shader: mas simple en CPU y testeable (interpolacion pura).
+
+**Consecuencia.** `Vertex` pasa de un `light` a `sky` + `block`; `FaceKey`,
+greedy, mesher y `World` exponen las dos luces. La banda naranja del cielo es
+estrecha a proposito (evita un rosa desaturado a media manana). `Renderer`
+gana `set_environment` y `set_blocks` (aplicar muchos bloques en un lote).
+`SOLARIA_TIME` fija la hora de las capturas.
+
+### 2026-10-04 (v0.6.4) — `Renderer::set_blocks` para editar en lote
+
+**Decision.** Nuevo metodo para aplicar **muchos** cambios de bloque y regenerar
+las mallas afectadas **una sola vez**, en lugar de una vez por bloque.
+
+**Motivo.** La escena demo alisaba una parcela con ~560 `set_block`; cada uno
+reconstruia las mallas de 5 columnas (24 secciones cada una) y tardaba ~14 s.
+Con el lote baja a menos de un segundo.
+
+**Consecuencia.** `demo::build` reune las ediciones en un `Vec` y llama a
+`set_blocks` una vez.
+
+
 
 
 

@@ -10,27 +10,22 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.6.3 — Consolidacion (tests, arquitectura, limpieza)
+//! ## Estado actual: v0.6.4 — Ciclo dia/noche
 //!
-//! Version sin features nuevas: refuerza la calidad de lo ya construido.
-//!
-//! * **Tests** (83 en total): se anaden los de `block_overlaps_player`
-//!   (colocacion sin meterse en el jugador), `face_tile` en las 6 caras de
-//!   todos los bloques, transparencia del tile de la antorcha y **migracion de
-//!   mundos preservando las ediciones del jugador**.
-//! * **Bug corregido:** el atlas procedural (fallback sin `assets/atlas.png`)
-//!   dibujaba el fondo de la antorcha opaco; ahora es transparente, como el
-//!   atlas real, asi el cutout funciona tambien sin assets.
-//! * **`ARCHITECTURE.md`**: mapa de modulos, flujo de un frame, versionado del
-//!   mundo e invariantes del motor.
-//! * **Limpieza:** la escena demo se extrae a `engine::demo` (fuera de
-//!   `app.rs`).
-//! * Sobre v0.6.2: la antorcha como cruz fina (cutout) + atlas de texturas.
-//!   v0.6.1: block light. v0.6.0: luz de cielo. v0.5.x: LZ4 + streaming.
+//! * [`scene::DayCycle`] guarda la **hora del mundo** (0 = medianoche, 0.5 =
+//!   mediodia) y calcula el **factor de luz del sol** (0..1) y el **color del
+//!   cielo** (azul de dia, naranja al amanecer/atardecer, oscuro de noche).
+//! * El vertice ahora lleva **dos luces separadas**: `sky` (cielo) y `block`
+//!   (antorchas). El shader dibuja `max(sky * day_factor, block)`, de modo que
+//!   al anochecer se apaga el sol pero **las antorchas siguen brillando**.
+//! * El color de cielo se interpola en CPU y se sube como color de clear.
+//! * `SOLARIA_TIME` (con `SOLARIA_DEMO`) fija la hora de la captura.
+//! * Sobre v0.6.3: consolidacion (tests + `ARCHITECTURE.md`). v0.6.2: antorcha
+//!   como cruz fina + atlas de texturas. v0.6.1: block light. v0.6.0: luz de
+//!   cielo. v0.5.x: LZ4 + streaming.
 //!
 //! Pendiente (anotado en DECISIONS.md): el **palo 3D** del `.bbmodel` y la
-//! **antorcha de pared** inclinada 22.5°, y el ciclo dia/noche (que la guia
-//! situa en v0.6.2 pero aun no hicimos).
+//! **antorcha de pared** inclinada 22.5°, y los **biomas** (v0.7.x del roadmap).
 //!
 //! ## Organizacion del codigo
 //!

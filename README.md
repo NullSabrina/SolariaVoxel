@@ -8,23 +8,21 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.6.3` — Consolidacion (tests, arquitectura, limpieza)
+## Estado actual: `v0.6.4` — Ciclo dia/noche
 
-- Version de **calidad, sin features nuevas**: mas tests (83), el documento
-  [`ARCHITECTURE.md`](./ARCHITECTURE.md), y limpieza del codigo de la app.
-- Tests nuevos clave: **migracion de mundos preservando las ediciones del
-  jugador**, colocacion sin meterse en el jugador, `face_tile` de todos los
-  bloques y la transparencia del tile de la antorcha.
-- **Bug corregido:** el atlas procedural (fallback sin assets) dibujaba el fondo
-  de la antorcha opaco; ahora es transparente, como el atlas real.
-- Hereda de v0.6.2: la **antorcha como cruz fina** (dos quads cruzados + cutout),
-  raycast que golpea bloques visibles no solidos, y el **atlas como array de
-  texturas** cargado de `assets/atlas.png`.
+- **Hora del mundo** (`scene::DayCycle`): avanza sola. El **color del cielo** va
+  del azul del dia al naranja del amanecer/atardecer y al oscuro de la noche.
+- **Luz del sol** que se apaga al anochecer, mientras las **antorchas siguen
+  brillando**: el vertice lleva la luz de cielo y la de bloque por separado y el
+  shader usa `max(cielo * dia, bloque)`.
+- Hereda de v0.6.3: consolidacion (tests + `ARCHITECTURE.md`). v0.6.2: la
+  **antorcha como cruz fina** (dos quads + cutout), raycast que golpea bloques
+  visibles no solidos, y el **atlas como array de texturas**.
 - Sobre v0.6.1: block light (antorcha emite 14). v0.6.0: luz de cielo. v0.5.x:
   LZ4, mundo en memoria + streaming. v0.4.x: romper/colocar, greedy, colisiones.
 
 Pendiente (anotado en `DECISIONS.md`): el palo 3D del `.bbmodel`, la antorcha de
-pared inclinada 22.5°, y el ciclo dia/noche.
+pared inclinada 22.5°, y los biomas (v0.7.x del roadmap).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -79,7 +77,8 @@ src/
 ├── player/
 │   └── controller.rs Fisica del jugador: gravedad, suelo, salto, vuelo.
 ├── scene/
-│   └── camera.rs    Camara FPS (posicion, yaw/pitch, matrices).
+│   ├── camera.rs    Camara FPS (posicion, yaw/pitch, matrices).
+│   └── daynight.rs  Hora del mundo, luz del sol y color del cielo.
 ├── world/
 │   ├── block.rs     Tipos de bloque y su tile del atlas.
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.

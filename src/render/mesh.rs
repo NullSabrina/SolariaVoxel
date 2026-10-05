@@ -19,9 +19,11 @@ pub struct Vertex {
     /// Coordenadas de textura **dentro del tile**, en unidades de tile (una cara
     /// fusionada de W x H bloques usa 0..W, 0..H; el sampler repite).
     pub uv: [f32; 2],
-    /// Nivel de luz de cielo (0..1) que llega a este vertice. El shader lo usa
-    /// para modular el color.
-    pub light: f32,
+    /// Luz de **cielo** (0..1) que llega a este vertice. El shader la multiplica
+    /// por el factor dia/noche.
+    pub sky: f32,
+    /// Luz de **bloque** (antorchas, 0..1). No la apaga la noche.
+    pub block: f32,
     /// Indice del tile dentro del array de texturas (0..TILES).
     pub tile: u32,
 }
@@ -32,26 +34,35 @@ impl Vertex {
         Self {
             position,
             uv,
-            light: 1.0,
+            sky: 1.0,
+            block: 0.0,
             tile,
         }
     }
 
-    /// Constructor con luz explicita (0..1).
-    pub const fn with_light(position: [f32; 3], uv: [f32; 2], light: f32, tile: u32) -> Self {
+    /// Constructor con las dos luces explicitas (0..1 cada una).
+    pub const fn with_light(
+        position: [f32; 3],
+        uv: [f32; 2],
+        sky: f32,
+        block: f32,
+        tile: u32,
+    ) -> Self {
         Self {
             position,
             uv,
-            light,
+            sky,
+            block,
             tile,
         }
     }
 
     /// Atributos: location 0 -> vec3 posicion, location 1 -> vec2 uv,
-    /// location 2 -> float luz, location 3 -> uint tile.
-    /// Es una constante porque `layout` devuelve una referencia `'static`.
-    const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32, 3 => Uint32];
+    /// location 2 -> float cielo, location 3 -> float bloque, location 4 -> uint
+    /// tile. Es una constante porque `layout` devuelve una referencia `'static`.
+    const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+        0 => Float32x3, 1 => Float32x2, 2 => Float32, 3 => Float32, 4 => Uint32
+    ];
 
     /// Describe como leer este vertice desde un buffer. Debe coincidir con los
     /// `@location` del shader (`scene.wgsl`).

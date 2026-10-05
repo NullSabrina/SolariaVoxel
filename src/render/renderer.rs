@@ -53,11 +53,15 @@ impl std::error::Error for RendererError {}
 
 /// Color de cielo por defecto, expresado en sRGB y convertido a lineal.
 fn sky_color() -> wgpu::Color {
-    let (r, g, b) = (0.47, 0.71, 0.97);
+    sky_color_from_srgb([0.47, 0.71, 0.97])
+}
+
+/// Convierte un color de cielo sRGB (0..1) al `wgpu::Color` lineal del clear.
+fn sky_color_from_srgb(c: [f32; 3]) -> wgpu::Color {
     wgpu::Color {
-        r: srgb_to_linear(r) as f64,
-        g: srgb_to_linear(g) as f64,
-        b: srgb_to_linear(b) as f64,
+        r: srgb_to_linear(c[0]) as f64,
+        g: srgb_to_linear(c[1]) as f64,
+        b: srgb_to_linear(c[2]) as f64,
         a: 1.0,
     }
 }
@@ -85,6 +89,8 @@ pub struct Renderer {
     meshes: HashMap<ChunkPos, Box<ColumnMeshes>>,
 
     clear_color: wgpu::Color,
+    /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
+    day_factor: f32,
 }
 
 impl Renderer {
@@ -163,6 +169,7 @@ impl Renderer {
             world,
             meshes: HashMap::new(),
             clear_color: sky_color(),
+            day_factor: 1.0,
         };
         // Carga inicial del mundo alrededor del origen.
         renderer.sync_streaming(Vec3::new(0.0, 64.0, 0.0));
@@ -245,8 +252,10 @@ impl Renderer {
         // mirando la columna vecina si hace falta.
         let query =
             |x: i32, y: i32, z: i32| -> Block { self.world.get_block([base_x + x, y, base_z + z]) };
-        let light =
-            |x: i32, y: i32, z: i32| -> u8 { self.world.light_at([base_x + x, y, base_z + z]) };
+        let light = |x: i32, y: i32, z: i32| -> (u8, u8) {
+            let w = [base_x + x, y, base_z + z];
+            (self.world.sky_light_at(w), self.world.block_light_at(w))
+        };
 
         let mut out: ColumnMeshes = std::array::from_fn(|_| None);
         for (section, slot) in out.iter_mut().enumerate() {
@@ -310,6 +319,39 @@ impl Renderer {
         true
     }
 
+    /// Aplica **muchos** cambios de bloque y regenera las mallas afectadas una
+    /// sola vez (en lugar de una vez por bloque, como `set_block`). Es lo que
+    /// usa la escena demo para construir rapido. Devuelve cuantos se aplicaron.
+    pub fn set_blocks(&mut self, edits: &[([i32; 3], Block)]) -> usize {
+        let mut touched: Vec<ChunkPos> = Vec::new();
+        let mut applied = 0;
+        for &(voxel, block) in edits {
+            if self.world.set_block(voxel, block) {
+                applied += 1;
+                let (pos, _) = World::world_to_local(voxel);
+                touched.push(pos);
+            }
+        }
+        // Reconstruimos cada columna tocada y sus vecinas, sin repetir.
+        touched.sort_by_key(|p| (p.x, p.z));
+        touched.dedup();
+        for pos in touched {
+            for n in [
+                pos,
+                ChunkPos::new(pos.x + 1, pos.z),
+                ChunkPos::new(pos.x - 1, pos.z),
+                ChunkPos::new(pos.x, pos.z + 1),
+                ChunkPos::new(pos.x, pos.z - 1),
+            ] {
+                if self.world.is_loaded(n) {
+                    let m = self.build_column_meshes(n);
+                    self.meshes.insert(n, Box::new(m));
+                }
+            }
+        }
+        applied
+    }
+
     /// Actualiza el wireframe del bloque apuntado.
     pub fn set_highlight(&mut self, hit: Option<RayHit>) {
         self.highlight_mesh = hit.map(|h| {
@@ -337,9 +379,17 @@ impl Renderer {
         self.world.seed()
     }
 
+    /// Actualiza el entorno visual del frame: factor dia/noche y color de cielo
+    /// (sRGB, canales 0..1). El color se convierte a lineal para el clear.
+    pub fn set_environment(&mut self, day_factor: f32, sky_color: [f32; 3]) {
+        self.day_factor = day_factor.clamp(0.0, 1.0);
+        self.clear_color = sky_color_from_srgb(sky_color);
+    }
+
     /// Dibuja y presenta un frame.
     pub fn render(&mut self, view_projection: &Mat4) {
-        self.pipeline.update_mvp(&self.queue, view_projection);
+        self.pipeline
+            .update_uniforms(&self.queue, view_projection, self.day_factor);
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) => f,

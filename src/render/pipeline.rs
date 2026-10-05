@@ -21,6 +21,11 @@ use crate::world::atlas;
 struct Uniforms {
     /// Matriz modelo * vista * proyeccion, aplanada en 16 floats.
     mvp: [f32; 16],
+    /// Factor dia/noche (0..1) que multiplica la **luz de cielo**. La luz de
+    /// bloque (antorchas) no se ve afectada.
+    day_factor: f32,
+    /// Relleno para que el uniform mida un multiplo de 16 bytes (lo exige wgpu).
+    _pad: [f32; 3],
 }
 
 /// Pipeline de dibujo de la escena (voxeles texturizados con el atlas).
@@ -76,7 +81,9 @@ impl ScenePipeline {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    // La matriz la usa el vertex shader; `day_factor`, el
+                    // fragment. Por eso el uniform es visible en ambas etapas.
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -237,10 +244,12 @@ impl ScenePipeline {
         (texture, view)
     }
 
-    /// Sube la matriz MVP al uniform buffer.
-    pub fn update_mvp(&self, queue: &wgpu::Queue, mvp: &Mat4) {
+    /// Sube la matriz MVP y el factor dia/noche al uniform buffer.
+    pub fn update_uniforms(&self, queue: &wgpu::Queue, mvp: &Mat4, day_factor: f32) {
         let uniforms = Uniforms {
             mvp: mvp.to_cols_array(),
+            day_factor,
+            _pad: [0.0; 3],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }

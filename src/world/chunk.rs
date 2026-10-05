@@ -224,6 +224,19 @@ impl Column {
         self.light_at(x, y, z)
     }
 
+    /// Luz de bloque (antorchas) en coordenadas que pueden salirse. Fuera, 0.
+    #[inline]
+    pub fn block_light_or_zero(&self, x: i32, y: i32, z: i32) -> u8 {
+        if x < 0 || y < 0 || z < 0 {
+            return 0;
+        }
+        let (x, y, z) = (x as usize, y as usize, z as usize);
+        if x >= CHUNK_SIZE || z >= CHUNK_SIZE || y >= WORLD_HEIGHT {
+            return 0;
+        }
+        self.block_light_at(x, y, z)
+    }
+
     /// Luz combinada (cielo vs bloque) en coordenadas que pueden salirse.
     #[inline]
     pub fn combined_or_zero(&self, x: i32, y: i32, z: i32) -> u8 {

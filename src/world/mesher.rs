@@ -38,7 +38,7 @@ pub fn mesh_column(column: &Column, origin: [f32; 3]) -> Vec<SectionMesh> {
 
                 // La antorcha no es un cubo: se dibuja como dos quads cruzados.
                 if block == Block::Torch {
-                    let light = combined_light_f(column, x, y, z);
+                    let (sky, block_light) = light_pair(column, x, y, z);
                     emit_torch_cross(
                         &mut section.0,
                         &mut section.1,
@@ -47,7 +47,8 @@ pub fn mesh_column(column: &Column, origin: [f32; 3]) -> Vec<SectionMesh> {
                         y,
                         z,
                         block,
-                        light,
+                        sky,
+                        block_light,
                     );
                     continue;
                 }
@@ -100,8 +101,18 @@ pub fn mesh_section(column: &Column, section: usize, origin: [f32; 3]) -> Sectio
 
                 // La antorcha no es un cubo: se dibuja como dos quads cruzados.
                 if block == Block::Torch {
-                    let light = combined_light_f(column, x, y, z);
-                    emit_torch_cross(&mut vertices, &mut indices, origin, x, y, z, block, light);
+                    let (sky, block_light) = light_pair(column, x, y, z);
+                    emit_torch_cross(
+                        &mut vertices,
+                        &mut indices,
+                        origin,
+                        x,
+                        y,
+                        z,
+                        block,
+                        sky,
+                        block_light,
+                    );
                     continue;
                 }
                 if !block.is_solid() {
@@ -167,9 +178,12 @@ fn add_face(
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-/// Luz combinada (cielo vs bloque) de una celda, normalizada a 0..1.
-fn combined_light_f(column: &Column, x: usize, y: usize, z: usize) -> f32 {
-    column.combined_light(x, y, z) as f32 / MAX_LIGHT as f32
+/// Par de luces `(cielo, bloque)` de una celda, normalizadas a 0..1.
+fn light_pair(column: &Column, x: usize, y: usize, z: usize) -> (f32, f32) {
+    (
+        column.light_at(x, y, z) as f32 / MAX_LIGHT as f32,
+        column.block_light_at(x, y, z) as f32 / MAX_LIGHT as f32,
+    )
 }
 
 /// Emite la geometria de una antorcha: **dos quads verticales cruzados**, uno en
@@ -189,7 +203,8 @@ pub(crate) fn emit_torch_cross(
     y: usize,
     z: usize,
     block: Block,
-    light: f32,
+    sky: f32,
+    block_light: f32,
 ) {
     let (x0, y0, z0) = (
         origin[0] + x as f32,
@@ -212,7 +227,7 @@ pub(crate) fn emit_torch_cross(
     for corners in [plane_x, plane_z] {
         let base = vertices.len() as u32;
         for (corner, uv) in corners.iter().zip(uvs.iter()) {
-            vertices.push(Vertex::with_light(*corner, *uv, light, tile));
+            vertices.push(Vertex::with_light(*corner, *uv, sky, block_light, tile));
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }

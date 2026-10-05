@@ -29,7 +29,7 @@ use crate::engine::window;
 use crate::math::Vec3;
 use crate::player::PlayerController;
 use crate::render::Renderer;
-use crate::scene::Camera;
+use crate::scene::{Camera, DayCycle};
 
 /// Estado global de la aplicacion.
 ///
@@ -58,6 +58,8 @@ pub struct App {
     world_saved: bool,
     /// Marca de tiempo del frame anterior, para calcular el `dt`.
     last_frame: Option<Instant>,
+    /// Hora del mundo y como afecta a la luz y al cielo.
+    day_cycle: DayCycle,
     /// Modo demo (`SOLARIA_DEMO`): congela la camara y elige la escena de la
     /// captura. La fisica y el resaltado se desactivan para que la vista no se
     /// desplace antes de la foto.
@@ -123,6 +125,11 @@ impl App {
     /// Un tick de simulacion: giro del raton, desplazamiento horizontal y
     /// fisica vertical (gravedad/suelo) del jugador.
     fn update(&mut self, dt: f32) {
+        // El tiempo del mundo avanza siempre (salvo en demo, que lo congela).
+        if !self.demo {
+            self.day_cycle.advance(dt);
+        }
+
         // Leemos TODO el input primero, para no mezclar prestamos.
         let (dx, dy) = self.input.take_mouse_delta();
         let forward = self.input.forward_axis();
@@ -343,6 +350,7 @@ impl ApplicationHandler for App {
         // la foto. El montaje vive en `engine::demo`.
         self.demo = demo::is_active();
         if self.demo {
+            self.day_cycle = DayCycle::new(demo::time_of_day());
             if let (Some(renderer), Some(camera)) = (self.renderer.as_mut(), self.camera.as_mut()) {
                 let torch = demo::build(renderer, camera);
                 println!("[engine] demo: escena lista (antorcha en {torch:?})");
@@ -466,9 +474,12 @@ impl ApplicationHandler for App {
                 }
 
                 // Dibujamos con la matriz de la camara actual (proyeccion * vista).
+                let day_factor = self.day_cycle.day_factor();
+                let sky = self.day_cycle.sky_color();
                 if let (Some(renderer), Some(camera)) =
                     (self.renderer.as_mut(), self.camera.as_ref())
                 {
+                    renderer.set_environment(day_factor, sky);
                     let view_projection = camera.view_projection();
                     let position = camera.position;
                     renderer.sync_streaming(position);

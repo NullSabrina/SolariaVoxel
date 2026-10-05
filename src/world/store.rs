@@ -135,6 +135,30 @@ impl World {
         true
     }
 
+    /// Luz de **cielo** (0..15) de una celda, en coords de mundo.
+    pub fn sky_light_at(&self, world: [i32; 3]) -> u8 {
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return 0;
+        }
+        let (pos, local) = Self::world_to_local(world);
+        match self.columns.get(&pos) {
+            Some(column) => column.light_at(local[0], local[1], local[2]),
+            None => 0,
+        }
+    }
+
+    /// Luz de **bloque** (antorchas, 0..15) de una celda, en coords de mundo.
+    pub fn block_light_at(&self, world: [i32; 3]) -> u8 {
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return 0;
+        }
+        let (pos, local) = Self::world_to_local(world);
+        match self.columns.get(&pos) {
+            Some(column) => column.block_light_at(local[0], local[1], local[2]),
+            None => 0,
+        }
+    }
+
     /// Luz total (cielo vs bloque) de una celda (0..15), en coords de mundo.
     pub fn light_at(&self, world: [i32; 3]) -> u8 {
         if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
