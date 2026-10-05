@@ -8,20 +8,22 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.3` — Segunda pasada de texturas + dim de UI
+## Estado actual: `v0.8.4` — Fisica AABB de entidades + simulacion de agua
 
-Mejora de calidad de arte con doctrina Minecraft/Luanti (16x16, 3-4 valores,
-formas de 2-4px, sin ruido de 1px):
+Primeras "mecanicas" de la Etapa 2, adaptadas al motor (1 byte por voxel):
 
-- 8 tiles repintados en LibreSprite: tierra e hierba con **terrones**, piedra
-  con **manchas grandes**, arena casi lisa, corteza con brillos, tablones con
-  **nudos** y lateral de mesa con **sierra**.
-- La UI **atenua el mundo** cuando hay ventana abierta (negro alfa 130).
-- Hereda de **v0.8.2**: mesa de crafteo. **v0.8.1**: texturas cartoon + hotbar
-  D. **v0.8.0**: hotbar, inventario, guardado de posicion.
+- **Fisica AABB de entidades** (`src/physics.rs`): gravedad, colision eje a eje
+  (X, Z, Y), anti-tunelado, friccion y **flotabilidad** en agua. Es la base de
+  los futuros **mobs**.
+- **Agua que fluye** (`src/world/water.rs`): automata con niveles 1-8, caida,
+  propagacion con perdida por bloque, igualacion de superficies, fuentes
+  inagotables y conservacion. Corre a **10 Hz** aparte de la fisica y el render.
+  El mar y el agua colocada son **fuentes**; cavar bajo el agua la hace fluir.
+- Hereda de **v0.8.3**: texturas + dim. **v0.8.2**: mesa de crafteo.
+  **v0.8.0**: hotbar, inventario, guardado de posicion.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar. Siguiente (Etapa 2): **crafteo** (rejilla + recetas) y **mobs**.
+der = colocar. Siguiente (Etapa 2): **mobs** (usando `physics`) y **lava**.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -87,8 +89,11 @@ src/
 │   ├── mesher.rs    Meshing naive con face culling (referencia).
 │   ├── greedy.rs    Greedy meshing (fusiona caras; separa el agua).
 │   ├── raycast.rs   Raycast de voxeles (que bloque se apunta).
+│   ├── recipe.rs    Recetas de crafteo (rejilla 3x3 -> resultado).
+│   ├── water.rs     Simulacion de agua (niveles, propagacion, 10 Hz).
 │   ├── save.rs      Versionado + guardado/carga del mundo (bincode).
 │   └── store.rs     World: columnas en memoria + streaming por radio.
+├── physics.rs       Fisica AABB de entidades (gravedad, colision, flotar).
 └── math/
     ├── vec3.rs      Vector de 3 componentes.
     ├── mat4.rs      Matriz 4x4 column-major (perspectiva, look-at).

@@ -547,6 +547,34 @@ impl Renderer {
         true
     }
 
+    /// Avanza la simulacion de agua y **re-meshea** las columnas que cambiaron
+    /// (y sus vecinas). El agua no emite luz, asi que no recomputamos la luz de
+    /// bloque: solo la geometria. Devuelve cuantas celdas proceso.
+    pub fn tick_water(&mut self, budget: usize) -> usize {
+        let dirty = self.world.tick_water(budget);
+        if dirty.is_empty() {
+            return 0;
+        }
+        // La cara de una columna depende de sus vecinas, asi que re-mesheamos el
+        // anillo 3x3 (igual que al editar un bloque).
+        let mut to_remesh: Vec<ChunkPos> = Vec::new();
+        for pos in &dirty {
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+                    if self.world.is_loaded(n) && !to_remesh.contains(&n) {
+                        to_remesh.push(n);
+                    }
+                }
+            }
+        }
+        for n in to_remesh {
+            let meshes = self.build_column_meshes(n);
+            self.meshes.insert(n, Box::new(meshes));
+        }
+        dirty.len()
+    }
+
     /// Aplica **muchos** cambios de bloque y regenera las mallas afectadas una
     /// sola vez (en lugar de una vez por bloque, como `set_block`). Es lo que
     /// usa la escena demo para construir rapido. Devuelve cuantos se aplicaron.

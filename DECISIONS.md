@@ -1282,6 +1282,53 @@ Cielo con dim medido: 120,181,247 -> 86,131,180 (mezcla 51% negro exacta).
 
 
 
+### 2026-10-05 (v0.8.4) — Fisica AABB de entidades + simulacion de agua
+
+**Decision.** Abrir dos sistemas de "mecanicas" adaptados a este motor (que
+guarda **1 byte por voxel** con un `enum Block` sin campos, asi que **no** se
+puede copiar el `Block::Water { level, source, flow }` del prompt original):
+
+1. **Fisica AABB de entidades** (`src/physics.rs`): caja alineada a ejes,
+   gravedad, resolucion de colision **eje a eje en orden X, Z, Y** (la vertical
+   al final para que `on_ground` sea exacto), **anti-tunelado** (recorre el
+   barrido completo, no solo la posicion final), friccion de suelo y
+   **flotabilidad/arrastre** en el agua. Es la base de los **mobs**; no toca la
+   fisica del jugador (cilindro propio).
+2. **Simulacion de agua** (`src/world/water.rs` + `World::tick_water`):
+   automata celular con **niveles 1..=8**, caida, propagacion horizontal con
+   `FLOW_DECAY = 1` (una fuente forma un charco de radio `MAX_LEVEL - 1`, no
+   inunda el mundo), igualacion de superficies, **fuentes** inagotables y
+   **conservacion** en modo finito. El nivel **no cabe en el bloque**: se guarda
+   en `World` como mapa de desbordes (`Block::Water` **sin** entrada = fuente;
+   **con** entrada = flujo). Corre a **10 Hz**, apartado de la fisica y del
+   render, con presupuesto de celdas por tick.
+
+**Motivo.** El usuario pidio implementar el prompt de "fisica AABB + agua". Ese
+texto asume entidades, un `Block` con campos y `Lava`, que aqui no existen; se
+ha **adaptado** en vez de copiado (la propia guia lo pedia). El agua estatica
+actual (mar relleno al nivel del mar) no reacciona a las ediciones: con el
+automata, cavar bajo el mar o colocar agua produce flujo real.
+
+**Alternativas descartadas.** (a) Meter el nivel en el `enum Block` (15
+variantes `Water1..15`): contamina el enum, `face_tile` y el guardado por un
+dato puramente de runtime. (b) `Block` con datos (`Water { level }`): rompe el
+"1 byte/voxel", el meshing y el formato binario. (c) Flujo **hacia arriba** por
+presion / cascada diagonal / evaporacion: el modelo MC-like no sube agua por
+presion; se documentan fuera de alcance. (d) `Lava` + obsidiana: necesitan
+bloques y texturas nuevas (los aporta la IA de diseno); quedan pendientes.
+
+**Consecuencia.** `src/physics.rs` (AABB + `move_and_collide`, 6 tests) y
+`src/world/water.rs` (`Fluid`, `FluidGrid`, `step_cell`, `DirtyQueue`, 8 tests).
+`World` gana `water`/`water_queue`, `water_at`, `tick_water` e implementa
+`FluidGrid`; `Renderer::tick_water` re-meshea el anillo 3x3 (el agua no emite
+luz); `App` acumula el tick a 10 Hz. Un `Block::Water` colocado por el jugador
+es fuente; el mar ya lo es sin marcarlo (sin entrada = fuente). **No** se
+persisten los niveles de flujo: al recargar, el agua fluyente vuelve a ser
+fuente hasta que la simulacion la drene (documentado). Bench: 100 ticks de una
+charca 16x16 en ~2 ms (~0.02 ms/tick); el objetivo de "1M de bloques activos <
+16 ms" **no** se alcanza con este diseno (sin paralelismo por chunk ni
+almacenamiento compacto). 143 tests.
+
 ---
 
 ## Plantilla para futuras entradas

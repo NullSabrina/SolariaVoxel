@@ -23,6 +23,7 @@ use super::block::Block;
 use super::chunk::{CHUNK_SIZE, Column, SECTION_COUNT, WORLD_HEIGHT};
 use super::save::{ChunkPos, ChunkRecord};
 use super::terrain::TerrainGenerator;
+use super::water::{self, Fluid, FluidGrid};
 
 /// Un mundo vivo: columnas cargadas + cache + generador.
 pub struct World {
@@ -37,6 +38,12 @@ pub struct World {
     view_radius: i32,
     /// Ultimo centro de carga (para no recalcular si no cambio).
     last_center: Option<ChunkPos>,
+    /// Niveles de agua **que fluyen** (desbordes sobre el estado por defecto).
+    /// Un bloque `Water` **sin** entrada aqui es una fuente (el oceano o el agua
+    /// colocada por el jugador); con entrada, es agua que fluye.
+    water: HashMap<[i32; 3], Fluid>,
+    /// Celdas de agua pendientes de simular (cola con deduplicacion).
+    water_queue: water::DirtyQueue,
 }
 
 impl World {
@@ -49,6 +56,8 @@ impl World {
             modified: HashMap::new(),
             view_radius,
             last_center: None,
+            water: HashMap::new(),
+            water_queue: water::DirtyQueue::new(),
         };
         // Las columnas restauradas se marcan como modificadas y se aplican
         // encima del terreno generado cuando se carguen.
@@ -138,6 +147,14 @@ impl World {
         // Toda columna editada se guarda; registramos su chunk.
         self.modified
             .insert(pos, ChunkRecord::from_column(column, TERRAIN_SECTION));
+        // El agua: un bloque `Water` nuevo es fuente (sin desborde); cualquier
+        // otro bloque borra el desborde previo. Ademas, los vecinos pueden
+        // reaccionar (agua que cae a un hueco, etc.).
+        self.water.remove(&world);
+        self.enqueue_water(world);
+        for d in NEIGHBORS6 {
+            self.enqueue_water([world[0] + d[0], world[1] + d[1], world[2] + d[2]]);
+        }
         // La luz la recalcula el mundo entero justo despues (cruza chunks).
         true
     }
@@ -457,6 +474,124 @@ impl World {
     pub fn modified_records(&self) -> &HashMap<ChunkPos, ChunkRecord> {
         &self.modified
     }
+
+    /// Estado de agua de una celda del mundo (fuente, flujo con nivel, o nada).
+    pub fn water_at(&self, world: [i32; 3]) -> Fluid {
+        if self.get_block(world) == Block::Water {
+            self.water.get(&world).copied().unwrap_or(Fluid::Source)
+        } else {
+            Fluid::None
+        }
+    }
+
+    /// Nivel de agua de una celda (0 si no hay).
+    pub fn water_level(&self, world: [i32; 3]) -> u8 {
+        self.water_at(world).level()
+    }
+
+    /// Encela una celda de agua pendiente (si la columna esta cargada).
+    fn enqueue_water(&mut self, world: [i32; 3]) {
+        if !(0..WORLD_HEIGHT as i32).contains(&world[1]) {
+            return;
+        }
+        let (pos, _) = Self::world_to_local(world);
+        if self.columns.contains_key(&pos) {
+            self.water_queue.push(world);
+        }
+    }
+
+    /// Escribe el estado de agua de una celda **sin** marcarla como editada
+    /// (la simulacion reescribe el bloque `Water`/`Air` a su gusto). Mantiene el
+    /// desborde `water` coherente con el bloque.
+    fn set_water_raw(&mut self, world: [i32; 3], f: Fluid) {
+        let (pos, local) = Self::world_to_local(world);
+        let Some(column) = self.columns.get_mut(&pos) else {
+            return;
+        };
+        let current = column.get(local[0], local[1], local[2]);
+        match f {
+            Fluid::None => {
+                self.water.remove(&world);
+                if current == Block::Water {
+                    column.set(local[0], local[1], local[2], Block::Air);
+                }
+            }
+            Fluid::Source => {
+                self.water.remove(&world);
+                if current != Block::Water {
+                    column.set(local[0], local[1], local[2], Block::Water);
+                }
+            }
+            Fluid::Flow(level) => {
+                self.water.insert(world, Fluid::Flow(level));
+                if current != Block::Water {
+                    column.set(local[0], local[1], local[2], Block::Water);
+                }
+            }
+        }
+    }
+
+    /// Avanza la simulacion de agua hasta `budget` celdas. Devuelve las columnas
+    /// que cambiaron (para re-meshearlas).
+    pub fn tick_water(&mut self, budget: usize) -> Vec<ChunkPos> {
+        let mut dirty: Vec<ChunkPos> = Vec::new();
+        let mut processed = 0usize;
+        while processed < budget {
+            let Some(p) = self.water_queue.pop() else {
+                break;
+            };
+            processed += 1;
+            if !(0..WORLD_HEIGHT as i32).contains(&p[1]) {
+                continue;
+            }
+            let (pos, _) = Self::world_to_local(p);
+            if !self.columns.contains_key(&pos) {
+                continue;
+            }
+            if water::step_cell(self, p) {
+                if !dirty.contains(&pos) {
+                    dirty.push(pos);
+                }
+                for n in water::neighborhood(p) {
+                    self.enqueue_water(n);
+                }
+            }
+        }
+        dirty
+    }
+}
+
+/// Los 6 vecinos ortogonales.
+const NEIGHBORS6: [[i32; 3]; 6] = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1],
+];
+
+/// El mundo actua como rejilla para la simulacion de agua.
+impl FluidGrid for World {
+    fn in_bounds(&self, p: [i32; 3]) -> bool {
+        if !(0..WORLD_HEIGHT as i32).contains(&p[1]) {
+            return false;
+        }
+        let (pos, _) = Self::world_to_local(p);
+        self.columns.contains_key(&pos)
+    }
+
+    fn is_solid(&self, p: [i32; 3]) -> bool {
+        self.get_block(p).is_solid()
+    }
+
+    fn fluid(&self, p: [i32; 3]) -> Fluid {
+        self.water_at(p)
+    }
+
+    fn set_fluid(&mut self, p: [i32; 3], f: Fluid) {
+        self.set_water_raw(p, f);
+    }
 }
 
 /// Seccion que contiene la superficie del terreno (y 64..80).
@@ -682,5 +817,59 @@ mod tests {
             dirty.len(),
             t.elapsed()
         );
+    }
+
+    #[test]
+    fn el_agua_de_un_hueco_se_extiende_y_reporta_chunks_sucios() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 0, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        // Suelo de piedra a y=100 y una fuente de agua encima.
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                world.set_block([x, 100, z], Block::Stone);
+            }
+        }
+        world.set_block([8, 101, 8], Block::Water);
+        // El bloque de agua colocado es fuente (inagotable).
+        assert!(world.water_at([8, 101, 8]).is_source());
+
+        let mut dirty_total = 0usize;
+        for _ in 0..120 {
+            dirty_total += world.tick_water(100_000).len();
+        }
+        assert!(dirty_total > 0, "tick_water deberia reportar chunks sucios");
+        // Se ha extendido por el suelo.
+        assert!(
+            world.water_at([9, 101, 8]).is_water(),
+            "el agua no se extendio"
+        );
+        assert!(world.water_at([8, 101, 8]).is_source(), "la fuente sigue");
+        // El nivel decrece al alejarse de la fuente.
+        assert!(world.water_level([8, 101, 8]) > world.water_level([9, 101, 8]));
+    }
+
+    #[test]
+    fn bench_tick_agua() {
+        use super::super::block::Block;
+        let mut world = World::new(1, 0, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                world.set_block([x, 100, z], Block::Stone);
+            }
+        }
+        world.set_block([8, 101, 8], Block::Water);
+        let t = std::time::Instant::now();
+        let mut cells = 0usize;
+        for _ in 0..100 {
+            cells += world.tick_water(100_000).len();
+        }
+        println!(
+            "[agua] 100 ticks de una charca 16x16: {:?} ({} chunk-updates)",
+            t.elapsed(),
+            cells
+        );
+        assert!(world.water_at([9, 101, 8]).is_water());
     }
 }

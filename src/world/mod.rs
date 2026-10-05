@@ -20,6 +20,7 @@ pub mod recipe;
 pub mod save;
 pub mod store;
 pub mod terrain;
+pub mod water;
 
 pub use block::{Block, Face};
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};
@@ -32,3 +33,4 @@ pub use save::{
 };
 pub use store::{StreamChange, World};
 pub use terrain::{Biome, SEA_LEVEL, TerrainGenerator};
+pub use water::{Fluid, MAX_LEVEL};

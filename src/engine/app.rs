@@ -75,6 +75,8 @@ pub struct App {
     fps_accum: f32,
     /// Hora del mundo y como afecta a la luz y al cielo.
     day_cycle: DayCycle,
+    /// Acumulador para el tick de agua (10 Hz), separado de la fisica y el render.
+    water_timer: f32,
     /// Modo demo (`SOLARIA_DEMO`): congela la camara y elige la escena de la
     /// captura. La fisica y el resaltado se desactivan para que la vista no se
     /// desplace antes de la foto.
@@ -112,6 +114,14 @@ const ITEMS: [crate::world::Block; 9] = [
 
 /// Escala de la interfaz (pixels de mundo -> pixels de pantalla).
 const UI_SCALE: f32 = 2.0;
+
+/// Periodo del tick de **agua**, en segundos (10 Hz). Va aparte de la fisica y
+/// del render: el agua fluye mas despacio y cuesta menos por frame.
+const WATER_PERIOD: f32 = 0.1;
+
+/// Celdas de agua procesadas por tick. Si hay mas, se reparten entre ticks: el
+/// agua fluye mas lento pero el juego no se congela.
+const WATER_BUDGET: usize = 8192;
 
 /// Indice de ranura para las teclas `1`..`9`.
 fn digit_slot(code: KeyCode) -> Option<usize> {
@@ -178,6 +188,15 @@ impl App {
         // El tiempo del mundo avanza siempre (salvo en demo, que lo congela).
         if !self.demo {
             self.day_cycle.advance(dt);
+
+            // Tick de agua a 10 Hz, independiente del framerate.
+            self.water_timer += dt;
+            if self.water_timer >= WATER_PERIOD {
+                self.water_timer -= WATER_PERIOD;
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.tick_water(WATER_BUDGET);
+                }
+            }
         }
 
         // Leemos TODO el input primero, para no mezclar prestamos.
