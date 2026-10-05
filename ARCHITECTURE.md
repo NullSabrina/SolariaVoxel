@@ -42,7 +42,7 @@ main.rs ──> lib.rs ──> engine::run()
 | Modulo | Responsabilidad | Depende de |
 | ------ | --------------- | ---------- |
 | `engine` | Ciclo de vida de la app, eventos de winit, input, ventana. | `render`, `scene`, `player`, `world`, `math` |
-| `render` | Todo lo que toca `wgpu`: superficie, pipelines, mallas, shaders. | `world` (para meshear), `scene`, `math` |
+| `render` | Todo lo que toca `wgpu`: superficie, pipelines, mallas, shaders e **interfaz 2D** (hotbar/inventario). | `world` (para meshear), `scene`, `math` |
 | `scene` | Que hay en la escena: la camara FPS y el ciclo dia/noche. | `math` |
 | `player` | Fisica del jugador: vertical (gravedad/salto/vuelo), colision horizontal y test de solape bloque/jugador. | `scene`, `world` (tipos), `math` |
 | `world` | Datos del mundo: bloques, columnas, meshing, raycast, guardado. | `render::mesh` (el tipo `Vertex`), `math` |
@@ -136,6 +136,9 @@ TerrainGenerator (semilla)
 - **`ChunkRecord`**: los bloques de un chunk editado, con su propia
   `format_version` y `generator_version`. Desde v2 los bytes van comprimidos con
   LZ4.
+- **`WorldSave`**: la cabecera + los chunks editados + la **posicion del jugador**
+  (desde el formato v3; los mundos v2 se leen con la posicion por defecto via el
+  espejo `WorldSaveV2`).
 - **`FORMAT_VERSION`** (layout binario) y **`GENERATOR_VERSION`** (algoritmo de
   terreno) son **independientes**: un mundo viejo puede seguir generando igual
   aunque cambie el formato de archivo.
@@ -189,6 +192,7 @@ capturas: el render, el pipeline y la integracion de eventos.
 - Logica de bloques/chunks/meshing/raycast -> `world`.
 - Estado del jugador (inventario, salud, colision) -> `player`.
 - Camara, entidades, iluminacion de escena -> `scene`.
+- Interfaz 2D (HUD, hotbar, menus) -> `render` (`render::ui` + `render::gui`).
 - Nuevos efectos visuales (particulas) -> `render` (o un `render::vfx`).
 - Un sistema de juego (crafteo, IA) -> un modulo nuevo al mismo nivel.
 - Cualquier cosa que necesite `wgpu` -> solo dentro de `render`.

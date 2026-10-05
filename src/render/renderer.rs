@@ -21,9 +21,11 @@ use winit::window::Window;
 
 use crate::math::{Frustum, Mat4, Vec3};
 use crate::render::color::srgb_to_linear;
+use crate::render::gui;
 use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
 use crate::render::pipeline::ScenePipeline;
+use crate::render::ui::{UiPipeline, UiQuad};
 use crate::world::{
     Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, StreamChange, WORLD_HEIGHT,
     World, greedy, raycast,
@@ -138,6 +140,10 @@ pub struct Renderer {
     highlight_pipeline: HighlightPipeline,
     highlight_mesh: Option<Mesh>,
 
+    /// Pipeline de la interfaz 2D (hotbar/inventario) y su textura.
+    ui: UiPipeline,
+    _gui_texture: wgpu::Texture,
+
     /// El mundo en memoria.
     world: World,
     /// Mallas por columna: se recrean al entrar/salir columnas del radio.
@@ -202,6 +208,15 @@ impl Renderer {
             config.format,
             Self::DEPTH_FORMAT,
         );
+        // Textura de interfaz + su pipeline (comparte la vista del atlas).
+        let (gui_texture, gui_view) = Self::create_gui_texture(&device, &queue);
+        let ui = UiPipeline::new(
+            &device,
+            pipeline.atlas_view(),
+            &gui_view,
+            config.format,
+            Self::DEPTH_FORMAT,
+        );
 
         // Mundo con radio 4 (9x9 = 81 columnas), con los chunks restaurados.
         let view_radius = 4;
@@ -224,6 +239,8 @@ impl Renderer {
             pipeline,
             highlight_pipeline,
             highlight_mesh: None,
+            ui,
+            _gui_texture: gui_texture,
             world,
             meshes: HashMap::new(),
             mesh_queue: VecDeque::new(),
@@ -233,6 +250,46 @@ impl Renderer {
         // Carga inicial del mundo alrededor del origen.
         renderer.sync_streaming(Vec3::new(0.0, 64.0, 0.0));
         Ok(renderer)
+    }
+
+    /// Crea la textura de la interfaz (hotbar/inventario) a partir de [`gui`].
+    fn create_gui_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let size = wgpu::Extent3d {
+            width: gui::GUI_W,
+            height: gui::GUI_H,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("solaria.gui"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let pixels = gui::build_pixels();
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(gui::GUI_W * 4),
+                rows_per_image: Some(gui::GUI_H),
+            },
+            size,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
     }
 
     fn create_depth(
@@ -554,10 +611,19 @@ impl Renderer {
     }
 
     /// Dibuja y presenta un frame.
-    pub fn render(&mut self, view_projection: &Mat4, camera_pos: Vec3) {
+    pub fn render(&mut self, view_projection: &Mat4, camera_pos: Vec3, ui_quads: &[UiQuad]) {
         // Antes de dibujar, avanzamos el meshing pendiente con un presupuesto de
         // tiempo para no dar tirones al descubrir chunks.
         self.pump_meshing(MESH_BUDGET_MS);
+
+        // Prepara la interfaz (pixels -> NDC, subida al buffer) antes del pase.
+        self.ui.prepare(
+            &self.device,
+            &self.queue,
+            ui_quads,
+            self.config.width,
+            self.config.height,
+        );
 
         let fog_color = [
             self.clear_color.r as f32,
@@ -671,6 +737,9 @@ impl Renderer {
                 pass.set_pipeline(self.highlight_pipeline.pipeline());
                 highlight.draw(&mut pass);
             }
+
+            // Interfaz 2D (hotbar/inventario) al final, siempre encima.
+            self.ui.draw(&mut pass);
         }
 
         self.queue.submit(Some(encoder.finish()));

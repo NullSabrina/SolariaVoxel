@@ -10,18 +10,21 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.9 — Arboles y texturas de madera/hojas
+//! ## Estado actual: v0.8.0 — Hotbar, inventario y guardado de posicion
 //!
-//! * **Arboles** por bioma (bosque 5%, nieve 2%, desierto no): tronco de `Wood`
-//!   y copa de `Leaves`, deterministicos y sin cortar en el borde del chunk.
-//! * **Hojas transparentes** (no solidas, con huecos de alfa 0 y cutout) como en
-//!   Minecraft/Luanti: se ven y se atraviesan.
-//! * Texturas de **tronco** (veta vertical), **extremo** (anillos) y **tablones**
-//!   redibujadas con nuestra paleta (referencia Luanti). Nuevo bloque `Planks`.
-//! * Sobre v0.7.8: oceanos. v0.7.7: texturas de tierra. v0.7.5: cuevas.
+//! Inicio de la **Etapa 2 (gameplay)**:
+//! * **Hotbar** de 9 ranuras (barra rapida) con iconos de bloque, arte generado
+//!   por codigo (referencia del usuario, opcion D). Se elige con `1`..`9` o la
+//!   rueda; la ranura activa se resalta.
+//! * **Inventario** (`E`): rejilla 3x3 con todos los bloques; click para
+//!   asignarlos a la ranura activa.
+//! * **Guardado completo de la posicion** del jugador (`FORMAT_VERSION` 3); se
+//!   restaura al cargar. Compatible con mundos v2.
+//! * Nuevo **pipeline de interfaz 2D** (`render::ui`) y textura de GUI
+//!   (`render::gui`), ademas del bloque `Planks` (ya en v0.7.9).
 //!
-//! **Etapa 1 del roadmap cerrada.** Siguiente: **Etapa 2 (gameplay)** — hotbar/
-//! inventario, crafteo, mobs y **guardado completo** (posicion del jugador).
+//! Siguiente (Etapa 2): **crafteo** (rejilla + recetas) y **mobs**; el crafteo
+//! reusara este sistema de interfaz.
 //!
 //! ## Organizacion del codigo
 //!

@@ -349,6 +349,12 @@ impl ScenePipeline {
     pub fn layout(&self) -> &wgpu::PipelineLayout {
         &self.layout
     }
+
+    /// Vista del atlas (la comparte el pipeline de interfaz para los iconos).
+    #[inline]
+    pub fn atlas_view(&self) -> &wgpu::TextureView {
+        &self._atlas_view
+    }
 }
 
 #[cfg(test)]

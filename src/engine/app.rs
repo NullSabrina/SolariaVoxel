@@ -48,8 +48,14 @@ pub struct App {
     flying: bool,
     /// Bloque apuntado por la camara en el ultimo frame (y su cara).
     selection: Option<crate::world::RayHit>,
-    /// Bloque que se coloca con el click derecho (se cambia con las teclas 1-3).
-    selected_block: crate::world::Block,
+    /// Barra rapida: 9 ranuras con un bloque cada una.
+    hotbar: [crate::world::Block; 9],
+    /// Ranura seleccionada de la barra (0..9).
+    hotbar_sel: usize,
+    /// ¿Esta abierto el inventario? (`E`).
+    inventory_open: bool,
+    /// Ultima posicion del cursor en pixels (para el inventario).
+    cursor: (f32, f32),
     /// Semilla del mundo (de la partida o cargada de disco).
     seed: u32,
     /// Ficha del mundo con su versionado, para actualizarla al guardar.
@@ -80,6 +86,38 @@ fn now_unix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// Bloques disponibles en la barra rapida y en el inventario.
+const ITEMS: [crate::world::Block; 9] = [
+    crate::world::Block::Stone,
+    crate::world::Block::Dirt,
+    crate::world::Block::Grass,
+    crate::world::Block::Sand,
+    crate::world::Block::Wood,
+    crate::world::Block::Planks,
+    crate::world::Block::Leaves,
+    crate::world::Block::Snow,
+    crate::world::Block::Torch,
+];
+
+/// Escala de la interfaz (pixels de mundo -> pixels de pantalla).
+const UI_SCALE: f32 = 2.0;
+
+/// Indice de ranura para las teclas `1`..`9`.
+fn digit_slot(code: KeyCode) -> Option<usize> {
+    Some(match code {
+        KeyCode::Digit1 => 0,
+        KeyCode::Digit2 => 1,
+        KeyCode::Digit3 => 2,
+        KeyCode::Digit4 => 3,
+        KeyCode::Digit5 => 4,
+        KeyCode::Digit6 => 5,
+        KeyCode::Digit7 => 6,
+        KeyCode::Digit8 => 7,
+        KeyCode::Digit9 => 8,
+        _ => return None,
+    })
 }
 
 /// Arranca el motor: crea el bucle de eventos y lo ejecuta.
@@ -243,6 +281,10 @@ impl App {
         for (pos, record) in renderer.snapshot_modified() {
             save.set_chunk(pos, record);
         }
+        // Guardado completo: la posicion del jugador.
+        if let Some(camera) = self.camera.as_ref() {
+            save.player_pos = [camera.position.x, camera.position.y, camera.position.z];
+        }
         // Ratio de compresion medio (raw / comprimido) de los chunks.
         let ratio = if save.chunks.is_empty() {
             1.0
@@ -283,10 +325,114 @@ impl App {
             }
         }
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.set_block(target, self.selected_block);
-            println!("[edit] colocado {:?} en {target:?}", self.selected_block);
+            let block = self.hotbar[self.hotbar_sel];
+            renderer.set_block(target, block);
+            println!("[edit] colocado {block:?} en {target:?}");
         }
         self.update_selection();
+    }
+
+    /// Tamano de la ventana en pixels logicos (o (1,1) si aun no hay ventana).
+    fn window_size_f(&self) -> (f32, f32) {
+        self.window
+            .as_ref()
+            .map(|w| {
+                let s = w.inner_size();
+                (s.width as f32, s.height as f32)
+            })
+            .unwrap_or((1.0, 1.0))
+    }
+
+    /// Celdas (rectangulos) del inventario 3x3, centradas en la ventana.
+    fn inventory_cells(&self, win_w: f32, win_h: f32) -> Vec<[f32; 4]> {
+        use crate::render::gui;
+        let slot = gui::SLOT as f32 * UI_SCALE;
+        let gap = 6.0;
+        let (cols, rows) = (3usize, 3usize);
+        let grid_w = cols as f32 * slot + (cols as f32 - 1.0) * gap;
+        let grid_h = rows as f32 * slot + (rows as f32 - 1.0) * gap;
+        let x0 = (win_w - grid_w) * 0.5;
+        let y0 = (win_h - grid_h) * 0.5;
+        let mut out = Vec::with_capacity(cols * rows);
+        for i in 0..(cols * rows) {
+            let cx = x0 + (i % cols) as f32 * (slot + gap);
+            let cy = y0 + (i / cols) as f32 * (slot + gap);
+            out.push([cx, cy, slot, slot]);
+        }
+        out
+    }
+
+    /// Construye los quads de la interfaz (hotbar + inventario).
+    fn build_ui(&self, win_w: f32, win_h: f32) -> Vec<crate::render::UiQuad> {
+        use crate::render::{UiQuad, gui, region_uv};
+        use crate::world::Face;
+        let mut quads: Vec<UiQuad> = Vec::new();
+        let slot = gui::SLOT as f32 * UI_SCALE;
+        let inset = 3.0 * UI_SCALE;
+
+        // Hotbar centrada abajo.
+        let bar_w = gui::HOTBAR.w as f32 * UI_SCALE;
+        let bar_h = gui::HOTBAR.h as f32 * UI_SCALE;
+        let bar_x = ((win_w - bar_w) * 0.5).floor();
+        let bar_y = (win_h - bar_h - 8.0).floor();
+        quads.push(UiQuad {
+            rect: [bar_x, bar_y, bar_w, bar_h],
+            uv: region_uv(gui::HOTBAR),
+            layer: -1,
+        });
+        for (i, item) in self.hotbar.iter().enumerate() {
+            let sx = bar_x + (1.0 + i as f32 * gui::SLOT as f32) * UI_SCALE;
+            let sy = bar_y + UI_SCALE;
+            if i == self.hotbar_sel {
+                quads.push(UiQuad {
+                    rect: [sx, sy, slot, slot],
+                    uv: region_uv(gui::SELECTION),
+                    layer: -1,
+                });
+            }
+            quads.push(UiQuad {
+                rect: [
+                    sx + inset,
+                    sy + inset,
+                    slot - 2.0 * inset,
+                    slot - 2.0 * inset,
+                ],
+                uv: [0.0, 0.0, 1.0, 1.0],
+                layer: item.face_tile(Face::PosY) as i32,
+            });
+        }
+
+        // Inventario: rejilla 3x3 con todos los bloques disponibles.
+        if self.inventory_open {
+            for (cell, item) in self.inventory_cells(win_w, win_h).iter().zip(ITEMS.iter()) {
+                let [cx, cy, cw, ch] = *cell;
+                quads.push(UiQuad {
+                    rect: [cx, cy, cw, ch],
+                    uv: region_uv(gui::SLOT_REGION),
+                    layer: -1,
+                });
+                quads.push(UiQuad {
+                    rect: [cx + inset, cy + inset, cw - 2.0 * inset, ch - 2.0 * inset],
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    layer: item.face_tile(Face::PosY) as i32,
+                });
+            }
+        }
+        quads
+    }
+
+    /// Un click en el inventario: elige el bloque de la celda pulsada.
+    fn inventory_click(&mut self) {
+        let (win_w, win_h) = self.window_size_f();
+        let (mx, my) = self.cursor;
+        for (cell, item) in self.inventory_cells(win_w, win_h).iter().zip(ITEMS.iter()) {
+            let [x, y, w, h] = *cell;
+            if mx >= x && mx < x + w && my >= y && my < y + h {
+                self.hotbar[self.hotbar_sel] = *item;
+                println!("[engine] ranura {} = {item:?}", self.hotbar_sel + 1);
+                return;
+            }
+        }
     }
 }
 
@@ -310,9 +456,9 @@ impl ApplicationHandler for App {
             }
         };
 
-        // Cargamos el mundo de disco si existe (semilla + chunks editados).
+        // Cargamos el mundo de disco si existe (semilla + chunks editados + pos).
         let path = world_path();
-        let (seed, restored, header) = match crate::world::load_and_migrate(&path) {
+        let (seed, restored, header, player_pos) = match crate::world::load_and_migrate(&path) {
             Ok(save) => {
                 let restored: Vec<_> = save
                     .chunks
@@ -320,12 +466,13 @@ impl ApplicationHandler for App {
                     .map(|(pos, rec)| (*pos, rec.clone()))
                     .collect();
                 println!(
-                    "[world] mundo cargado: semilla {} | formato v{} | {} chunks",
+                    "[world] mundo cargado: semilla {} | formato v{} | {} chunks | jugador en {:?}",
                     save.header.seed,
                     save.header.format_version,
-                    save.chunks.len()
+                    save.chunks.len(),
+                    save.player_pos
                 );
-                (save.header.seed, restored, save.header)
+                (save.header.seed, restored, save.header, save.player_pos)
             }
             Err(e) => {
                 println!("[world] sin mundo previo ({e}); se crea uno nuevo (semilla 13371)");
@@ -334,6 +481,7 @@ impl ApplicationHandler for App {
                     seed,
                     Vec::new(),
                     crate::world::WorldHeader::new(seed, now_unix()),
+                    crate::world::save::DEFAULT_PLAYER_POS,
                 )
             }
         };
@@ -348,10 +496,12 @@ impl ApplicationHandler for App {
         }
         self.seed = seed;
         self.world_header = header;
+        // Barra rapida por defecto.
+        self.hotbar = ITEMS;
 
-        // Camara FPS: en el centro del chunk, a ras de suelo. La fisica la
-        // posara sobre el terreno antes del primer frame.
-        let mut camera = Camera::new(Vec3::new(8.0, 76.0, 20.0));
+        // Camara FPS: donde la dejo el jugador (guardado completo), o el spawn
+        // por defecto. La fisica la posara sobre el terreno antes del primer frame.
+        let mut camera = Camera::new(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
         camera.pitch_deg = -12.0;
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
@@ -389,7 +539,7 @@ impl ApplicationHandler for App {
         self.window = Some(window);
 
         println!("[engine] click = capturar raton | WASD = andar | Espacio = saltar");
-        println!("[engine] 1/2/3 = piedra/madera/antorcha | F = volar | Escape = salir");
+        println!("[engine] 1-9/rueda = ranura | E = inventario | F = volar | Escape = salir");
     }
 
     /// Eventos de la ventana (foco, teclado, botones, resize...).
@@ -412,14 +562,32 @@ impl ApplicationHandler for App {
                     self.input.on_key(code, event.state);
 
                     match code {
-                        // Escape: libera el raton; si ya esta libre, sale.
+                        // Escape: cierra el inventario; si no, libera el raton; si
+                        // ya esta libre, sale.
                         KeyCode::Escape if event.state == ElementState::Pressed => {
-                            if self.mouse_locked {
+                            if self.inventory_open {
+                                self.inventory_open = false;
+                            } else if self.mouse_locked {
                                 self.unlock_mouse();
                             } else {
                                 self.save_world();
                                 event_loop.exit();
                             }
+                        }
+                        // E: abre/cierra el inventario (libera el raton al abrir).
+                        KeyCode::KeyE if event.state == ElementState::Pressed => {
+                            self.inventory_open = !self.inventory_open;
+                            if self.inventory_open {
+                                self.unlock_mouse();
+                            }
+                            println!(
+                                "[engine] inventario {}",
+                                if self.inventory_open {
+                                    "abierto"
+                                } else {
+                                    "cerrado"
+                                }
+                            );
                         }
                         // F: alterna modo vuelo.
                         KeyCode::KeyF if event.state == ElementState::Pressed => {
@@ -429,18 +597,12 @@ impl ApplicationHandler for App {
                                 if self.flying { "ON" } else { "OFF" }
                             );
                         }
-                        // 1/2/3: elige el bloque que se coloca con click derecho.
-                        KeyCode::Digit1 if event.state == ElementState::Pressed => {
-                            self.selected_block = crate::world::Block::Stone;
-                            println!("[engine] bloque a colocar: piedra");
-                        }
-                        KeyCode::Digit2 if event.state == ElementState::Pressed => {
-                            self.selected_block = crate::world::Block::Wood;
-                            println!("[engine] bloque a colocar: madera");
-                        }
-                        KeyCode::Digit3 if event.state == ElementState::Pressed => {
-                            self.selected_block = crate::world::Block::Torch;
-                            println!("[engine] bloque a colocar: antorcha (emite luz)");
+                        // 1..9: selecciona la ranura de la hotbar.
+                        _ if event.state == ElementState::Pressed => {
+                            if let Some(slot) = digit_slot(code) {
+                                self.hotbar_sel = slot;
+                                println!("[engine] ranura {} ({:?})", slot + 1, self.hotbar[slot]);
+                            }
                         }
                         _ => {}
                     }
@@ -453,18 +615,44 @@ impl ApplicationHandler for App {
                 button,
                 ..
             } => match button {
-                // Click izquierdo: captura el cursor; si ya esta capturado, rompe.
+                // Click izquierdo: en el inventario elige bloque; capturado, rompe;
+                // si no, captura el cursor.
                 MouseButton::Left => {
-                    if self.mouse_locked {
+                    if self.inventory_open {
+                        self.inventory_click();
+                    } else if self.mouse_locked {
                         self.break_block();
                     } else {
                         self.lock_mouse();
                     }
                 }
                 // Click derecho: coloca (solo con el cursor capturado).
-                MouseButton::Right if self.mouse_locked => self.place_block(),
+                MouseButton::Right if self.mouse_locked && !self.inventory_open => {
+                    self.place_block();
+                }
                 _ => {}
             },
+
+            // Rueda del raton: cambia de ranura en la hotbar.
+            WindowEvent::MouseWheel { delta, .. } => {
+                if !self.inventory_open {
+                    use winit::event::MouseScrollDelta;
+                    let step = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y.signum(),
+                        MouseScrollDelta::PixelDelta(p) => p.y.signum() as f32,
+                    };
+                    if step > 0.0 {
+                        self.hotbar_sel = (self.hotbar_sel + 8) % 9;
+                    } else if step < 0.0 {
+                        self.hotbar_sel = (self.hotbar_sel + 1) % 9;
+                    }
+                }
+            }
+
+            // Posicion del cursor (para el inventario).
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = (position.x as f32, position.y as f32);
+            }
 
             // Si perdemos el foco (alt-tab), liberamos el cursor para no
             // dejarlo atrapado.
@@ -504,6 +692,10 @@ impl ApplicationHandler for App {
                 // Dibujamos con la matriz de la camara actual (proyeccion * vista).
                 let day_factor = self.day_cycle.day_factor();
                 let sky = self.day_cycle.sky_color();
+                // Interfaz (hotbar/inventario) construida antes de prestar el
+                // renderer para no mezclar prestamos.
+                let (win_w, win_h) = self.window_size_f();
+                let ui = self.build_ui(win_w, win_h);
                 if let (Some(renderer), Some(camera)) =
                     (self.renderer.as_mut(), self.camera.as_ref())
                 {
@@ -511,7 +703,7 @@ impl ApplicationHandler for App {
                     let view_projection = camera.view_projection();
                     let position = camera.position;
                     renderer.sync_streaming(position);
-                    renderer.render(&view_projection, position);
+                    renderer.render(&view_projection, position, &ui);
                 }
 
                 // FPS en el titulo: se actualiza cada ~0.5 s con el tiempo real.

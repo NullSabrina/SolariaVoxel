@@ -8,20 +8,24 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.7.9` — Arboles y texturas de madera/hojas
+## Estado actual: `v0.8.0` — Hotbar, inventario y guardado de posicion
 
-- **Arboles** por bioma (bosque 5%, nieve 2%, desierto no): tronco `Wood` y copa
-  `Leaves`, deterministicos y sin cortarse en el borde del chunk.
-- **Hojas transparentes** (no solidas, con huecos alfa 0 y cutout), como en
-  Minecraft/Luanti: se ven y se atraviesan.
-- Texturas de **tronco** (veta vertical), **extremo** (anillos) y **tablones** con
-  nuestra paleta (referencia Luanti). Nuevo bloque `Planks` (para crafteo).
-- Sobre **v0.7.8**: oceanos (agua translucida, playas, nado). **v0.7.7**: texturas
-  de tierra con grano fino. **v0.7.6**: optimizacion del streaming. **v0.7.5**:
-  cuevas + luz de cielo lateral. **v0.7.4**: culling + niebla.
+Inicio de la **Etapa 2 (gameplay)**:
 
-**Etapa 1 del roadmap cerrada.** Siguiente: **Etapa 2 (gameplay)** — hotbar/
-inventario, crafteo, mobs y **guardado completo** (posicion del jugador).
+- **Hotbar** de 9 ranuras con iconos de bloque (arte generado por codigo, estilo
+  de la referencia D). Se elige con **`1`..`9`** o la **rueda**; la ranura activa
+  se resalta.
+- **Inventario** con **`E`**: rejilla 3x3 con todos los bloques; **click** para
+  asignarlos a la ranura activa.
+- **Guardado completo de la posicion** del jugador (`FORMAT_VERSION` 3), que se
+  restaura al cargar. Compatible con mundos v2 (posicion por defecto).
+- Nuevo **pipeline de interfaz 2D** (`render::ui`) + textura de GUI
+  (`render::gui`).
+- Sobre **v0.7.9**: arboles + hojas transparentes + texturas de madera. v0.7.8:
+  oceanos. v0.7.5: cuevas. v0.7.4: culling + niebla.
+
+Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
+der = colocar. Siguiente (Etapa 2): **crafteo** (rejilla + recetas) y **mobs**.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -43,11 +47,12 @@ Veras en consola la GPU y el formato de superficie elegidos.
 Controles:
 - **Click izquierdo** (sin captura): captura el raton.
 - **Click izquierdo** (capturado): **rompe** el bloque apuntado.
-- **Click derecho** (capturado): **coloca** el bloque seleccionado al lado.
-- **1 / 2 / 3**: elige piedra / madera / antorcha.
-- **W / A / S / D**: andar. **Espacio**: saltar.
+- **Click derecho** (capturado): **coloca** el bloque de la ranura activa.
+- **1 / 2 / ... / 9** o **rueda**: elige la ranura de la hotbar.
+- **E**: abre/cierra el **inventario** (click para asignar un bloque a la ranura).
+- **W / A / S / D**: andar. **Espacio**: saltar / nadar.
 - **F**: alterna modo vuelo (Espacio/Shift sube/baja).
-- **Escape**: libera el raton; si ya esta libre, cierra la aplicacion.
+- **Escape**: cierra el inventario / libera el raton; si ya esta libre, cierra.
 
 ## Tests
 

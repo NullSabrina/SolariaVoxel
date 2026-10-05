@@ -29,7 +29,8 @@ use super::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Column, WORLD_HEIGHT};
 ///
 /// * v1: `ChunkRecord.blocks` eran 4096 bytes sin comprimir.
 /// * v2: `ChunkRecord.blocks` guarda bytes **comprimidos con LZ4** (y un flag).
-pub const FORMAT_VERSION: u32 = 2;
+/// * v3: `WorldSave` guarda ademas la **posicion del jugador**.
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Version actual del generador de terreno.
 ///
@@ -180,6 +181,20 @@ pub struct WorldSave {
     pub header: WorldHeader,
     /// Chunks modificados, indexados por su posicion.
     pub chunks: HashMap<ChunkPos, ChunkRecord>,
+    /// Posicion del jugador (guardado completo). Desde el formato v3.
+    pub player_pos: [f32; 3],
+}
+
+/// Regresion del jugador por defecto (si un mundo viejo no la trae).
+pub const DEFAULT_PLAYER_POS: [f32; 3] = [8.0, 76.0, 20.0];
+
+/// Espejo del `WorldSave` **v2** (sin `player_pos`), para poder leer mundos
+/// guardados antes de v3 y migrarlos. Bincode es posicional: sin este espejo no
+/// se puede deserializar un archivo v2 en el struct actual.
+#[derive(Encode, Decode)]
+struct WorldSaveV2 {
+    header: WorldHeader,
+    chunks: HashMap<ChunkPos, ChunkRecord>,
 }
 
 impl WorldSave {
@@ -188,6 +203,7 @@ impl WorldSave {
         Self {
             header: WorldHeader::new(seed, created_at),
             chunks: HashMap::new(),
+            player_pos: DEFAULT_PLAYER_POS,
         }
     }
 
@@ -208,11 +224,22 @@ impl WorldSave {
     }
 
     /// Lee y deserializa un mundo de disco. **No** migra todavia; llama a
-    /// [`load_and_migrate`] para eso.
+    /// [`load_and_migrate`] para eso. Acepta tambien el formato v2 (sin la
+    /// posicion del jugador) rellenandola con el valor por defecto.
     pub fn load_from(path: &Path) -> Result<Self, SaveError> {
         let bytes = std::fs::read(path)?;
-        let (save, _len): (WorldSave, usize) = bincode::decode_from_slice(&bytes, standard())?;
-        Ok(save)
+        if let Ok((save, _len)) = bincode::decode_from_slice::<WorldSave, _>(&bytes, standard()) {
+            return Ok(save);
+        }
+        // Formato v2 (o anterior): sin `player_pos`.
+        let (v2, _len): (WorldSaveV2, usize) = bincode::decode_from_slice(&bytes, standard())?;
+        let mut header = v2.header;
+        header.format_version = FORMAT_VERSION;
+        Ok(WorldSave {
+            header,
+            chunks: v2.chunks,
+            player_pos: DEFAULT_PLAYER_POS,
+        })
     }
 }
 
@@ -305,6 +332,19 @@ impl WorldMigrator for V1ToV2 {
     }
 }
 
+/// Migrador v2 -> v3: la posicion del jugador es un campo nuevo del `WorldSave`;
+/// los chunks no cambian (solo sube la version).
+pub struct V2ToV3;
+
+impl WorldMigrator for V2ToV3 {
+    fn from_version(&self) -> u32 {
+        2
+    }
+    fn to_version(&self) -> u32 {
+        3
+    }
+}
+
 /// Cadena de migradores: los aplica en orden hasta llegar al formato actual.
 #[derive(Default)]
 pub struct MigrationChain {
@@ -315,7 +355,7 @@ impl MigrationChain {
     /// Crea la cadena con los migradores conocidos por el motor.
     pub fn with_builtins() -> Self {
         Self {
-            migrators: vec![Box::new(V1ToV2)],
+            migrators: vec![Box::new(V1ToV2), Box::new(V2ToV3)],
         }
     }
 
@@ -426,6 +466,34 @@ mod tests {
         );
         // Y descomprimir devuelve los 4096 bloques.
         assert_eq!(record.decompressed_blocks().len(), 4096);
+    }
+
+    #[test]
+    fn la_posicion_del_jugador_se_guarda() {
+        let mut save = WorldSave::new(1, 0);
+        save.player_pos = [12.5, 70.25, -3.75];
+        let path = temp_path("player_pos");
+        save.save_to(&path).unwrap();
+        let loaded = WorldSave::load_from(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(loaded.player_pos, [12.5, 70.25, -3.75]);
+    }
+
+    #[test]
+    fn un_mundo_v2_sin_posicion_se_lee_con_la_por_defecto() {
+        // Codificamos el struct v2 (sin `player_pos`) y comprobamos que se puede
+        // leer rellenando la posicion por defecto.
+        let v2 = WorldSaveV2 {
+            header: WorldHeader::new(9, 123),
+            chunks: HashMap::new(),
+        };
+        let bytes = bincode::encode_to_vec(&v2, standard()).unwrap();
+        let path = temp_path("v2_nopos");
+        std::fs::write(&path, &bytes).unwrap();
+        let loaded = WorldSave::load_from(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(loaded.header.seed, 9);
+        assert_eq!(loaded.player_pos, DEFAULT_PLAYER_POS);
     }
 
     #[test]

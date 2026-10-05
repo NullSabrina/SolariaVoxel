@@ -1157,6 +1157,42 @@ tile 7 con alfa 0. 118 tests. Demo de arboles verificada en captura.
 verdad. Siguiente: **Etapa 2 (gameplay, v0.8.x)**: hotbar/inventario, crafteo,
 mobs y **guardado completo** (posicion del jugador).
 
+### 2026-10-05 (v0.8.0) — Hotbar, inventario y guardado de posicion (Etapa 2)
+
+**Decision.** Empezar la **Etapa 2 (gameplay)** con: **hotbar** de 9 ranuras,
+**inventario** desplegable (`E`) y **guardado completo de la posicion** del
+jugador. El arte de la interfaz sigue la referencia del usuario (opcion **D**:
+marco de madera con ranuras hundidas).
+
+**Motivo.**
+* La seleccion de bloque era fija (teclas 1/2/3). Una **hotbar** es el minimo de
+  "gameplay": elegir entre varios bloques e ir cambiando.
+* "Guardado completo" (hito de la Etapa 2): hoy el mundo siempre reaparecia en el
+  spawn; ahora se guarda y restaura la **posicion** del jugador.
+
+**Render (nuevo).** La interfaz 2D necesita su propio pipeline: los vertices van
+ya en **NDC** (la CPU convierte de pixels), sin z-buffer real (`depth_compare:
+Always`, sin escritura) y con **blending alfa**. El fragment elige textura por la
+**capa** del vertice: `-1` = textura de interfaz (`render::gui`), `>= 0` = tile del
+atlas (icono de bloque), asi un solo pipeline dibuja marcos e iconos. La textura de
+interfaz se **genera por codigo** (como el atlas procedural) para no meter un PNG
+binario aparte y tenerla versionada.
+
+**Alternativas descartadas.** (a) Dibujar la interfaz con el pipeline de escena
+(3D): habria que pasar una proyeccion ortografica y perderia la simplicidad de
+"pixels". (b) PNG de interfaz hecho a mano en LibreSprite: el usuario lo pidio,
+pero crear un documento nuevo por script no es fiable; se genera por codigo y se
+puede refinar luego. (c) Inventario con drag&drop: demasiado para v0.8.0.
+
+**Consecuencia.** `render::gui` (textura) + `render::ui` (pipeline, `UiQuad`,
+`region_uv`) + `ui.wgsl`. `Renderer::render` recibe los quads. `App`: `hotbar`,
+`hotbar_sel`, `inventory_open`, cursor; teclas `1`-`9`, `E`, rueda. `save.rs`:
+`WorldSave.player_pos` + `FORMAT_VERSION` 3 + migrador `V2ToV3` y lectura
+compatible de v2 (`WorldSaveV2`). 123 tests.
+
+**Pendiente (Etapa 2).** **Crafteo** (rejilla + recetas; la segunda referencia del
+usuario) y **mobs**. El crafteo reusara `render::ui`.
+
 
 
 
