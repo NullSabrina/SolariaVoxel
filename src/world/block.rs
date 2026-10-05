@@ -57,6 +57,8 @@ pub enum Block {
     Torch,
     /// Nieve: superficie de los biomas frios.
     Snow,
+    /// Agua: no es solida (se nada/se atraviesa) y **translucida**.
+    Water,
 }
 
 impl Default for Block {
@@ -79,6 +81,7 @@ impl Block {
             6 => Block::Leaves,
             7 => Block::Torch,
             8 => Block::Snow,
+            9 => Block::Water,
             _ => Block::Air,
         }
     }
@@ -89,16 +92,22 @@ impl Block {
         self as u8
     }
 
-    /// ¿Ocupa espacio? (el aire y la antorcha no bloquean).
+    /// ¿Ocupa espacio? (el aire, la antorcha y el agua no bloquean).
     #[inline]
     pub fn is_solid(self) -> bool {
-        !matches!(self, Block::Air | Block::Torch)
+        !matches!(self, Block::Air | Block::Torch | Block::Water)
     }
 
-    /// ¿Es un bloque que se dibuja pero no bloquea? (la antorcha).
+    /// ¿Es un bloque que se dibuja pero no bloquea? (la antorcha y el agua).
     #[inline]
     pub fn is_visible(self) -> bool {
-        matches!(self, Block::Torch)
+        matches!(self, Block::Torch | Block::Water)
+    }
+
+    /// ¿Es un liquido? (para la fisica de nado y el render translucido).
+    #[inline]
+    pub fn is_liquid(self) -> bool {
+        matches!(self, Block::Water)
     }
 
     /// Luz que **emite** el bloque (0..15). La antorcha emite 14.
@@ -135,6 +144,8 @@ impl Block {
             Block::Torch => 8,
             // Nieve (biomas frios).
             Block::Snow => 9,
+            // Agua (translucida; tile con alfa).
+            Block::Water => 10,
         }
     }
 }
@@ -156,8 +167,10 @@ mod tests {
     }
 
     #[test]
-    fn solo_el_aire_no_es_solido() {
+    fn solo_el_aire_la_antorcha_y_el_agua_no_son_solidos() {
         assert!(!Block::Air.is_solid());
+        assert!(!Block::Torch.is_solid());
+        assert!(!Block::Water.is_solid());
         assert!(Block::Grass.is_solid());
     }
 
@@ -172,6 +185,14 @@ mod tests {
     }
 
     #[test]
+    fn el_agua_es_visible_no_solida_y_liquida() {
+        assert!(!Block::Water.is_solid());
+        assert!(Block::Water.is_visible());
+        assert!(Block::Water.is_liquid());
+        assert_eq!(Block::Water.face_tile(Face::PosY), 10);
+    }
+
+    #[test]
     fn face_tile_es_coherente_en_todas_las_caras() {
         // Cada bloque solido debe devolver un tile valido en sus 6 caras; la
         // hierba y la madera distinguen arriba/abajo del resto.
@@ -183,9 +204,10 @@ mod tests {
             Block::Wood,
             Block::Leaves,
             Block::Snow,
+            Block::Water,
         ] {
             for face in Face::ALL {
-                assert!(b.face_tile(face) < 10, "{b:?} {face:?}");
+                assert!(b.face_tile(face) < 11, "{b:?} {face:?}");
             }
         }
         // Hierba: verde arriba, tierra abajo, lateral distinto.

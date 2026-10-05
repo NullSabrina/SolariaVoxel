@@ -10,20 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.7 — Texturas de tierra con grano fino (estilo Luanti)
+//! ## Estado actual: v0.7.8 — Oceanos (agua translucida, playas, nado)
 //!
-//! * El **dirt** (tile 2) y el **lateral de hierba** (tile 1) se redibujan como
-//!   **grano fino de bajo contraste** (nuestra paleta, tonos comprimidos y
-//!   repartidos píxel a píxel) en vez de manchas grandes de tono oscuro/claro.
-//!   Referencia de estilo: Luanti/Minetest (16x16, `grass_side` sobre `dirt`).
-//! * El **fallback procedural** (`atlas.rs`) se alinea con el mismo grano, para
-//!   clones sin `assets/atlas.png`.
-//! * Sobre v0.7.6: optimizacion del streaming (cola de meshing con presupuesto,
-//!   greedy y luz mas rapidos). v0.7.5: cuevas + luz de cielo lateral.
+//! * Nuevo bloque **`Water`** (id 9, tile 10): no solido y **translucido**.
+//! * **Generacion**: el aire entre la superficie y el **nivel del mar** se rellena
+//!   de agua (estilo `ocean.level` de Terasology / `water_level` de Luanti); las
+//!   columnas a ras de agua tienen **playa/fondo de arena**.
+//! * **Pase de transparencia**: el agua se separa de la geometria opaca en el
+//!   mesher y se dibuja en un pipeline con **blending alfa** y sin escritura de z.
+//! * **Nado**: en el agua la gravedad es menor (flotabilidad) y Espacio sube.
+//! * Sobre v0.7.7: texturas de tierra con grano fino. v0.7.6: optimizacion del
+//!   streaming. v0.7.5: cuevas + luz de cielo lateral.
 //!
-//! Siguiente (v0.7.x del roadmap): **oceanos** (v0.7.8): nivel del mar, agua,
-//! playas y un **pase de transparencia**. Pendiente tambien el **palo 3D** del
-//! `.bbmodel` y la **antorcha de pared**.
+//! Siguiente: pulido (palo 3D del `.bbmodel`, antorcha de pared) o inventario
+//! segun el roadmap (etapa 2, gameplay).
 //!
 //! ## Organizacion del codigo
 //!

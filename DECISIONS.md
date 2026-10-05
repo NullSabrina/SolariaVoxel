@@ -1076,6 +1076,48 @@ color. 115 tests. `GENERATOR_VERSION` no cambia.
 **Roadmap.** **Oceanos pasa a v0.7.8** (la optimizacion de v0.7.6 ya habia corrido
 el numero).
 
+### 2026-10-05 (v0.7.8) — Oceanos (agua translucida, playas y nado)
+
+**Decision.** Hito `v0.7.x` de la guia: **oceanos**. Bloque **`Water`** (id 9,
+tile 10), generacion de mares/lagos, playas de arena, **pase de transparencia** y
+nado basico.
+
+**Referencias (pedidas).** De **Terasology** (TerraForge): `ocean.level` define el
+nivel hasta el que se rellena de agua, y `ocean.palette` el bloque; de **Luanti**:
+`water_level` en el mapgen y liquidos **translucidos** (`translucent_liquids`,
+antes `opaque_water`). Adoptamos ambos: rellenar de `Water` el aire entre la altura
+del terreno y `SEA_LEVEL`, con la translucidez como opcion de render.
+
+**Motivo/estilo.** El agua se rellena **por columna** hasta el nivel del mar (el
+`ocean.level` de Terasology): simple y suficiente para mares/lagos. Las columnas a
+ras de agua (altura <= mar+1) usan **arena** de superficie (playa y fondo marino),
+evitando hierba bajo el agua.
+
+**Render.** El agua no puede ir en el mismo pase que lo opaco: necesita
+**blending** y **no** escribir z (si no, el agua taparia lo de detras en el orden
+de dibujo). El greedy separa la geometria de agua a su propio buffer
+(`greedy_section_query` devuelve 4 vecs) y el renderer la dibuja en un **segundo
+pase** con un pipeline gemelo (mismo shader/layout/bind group, pero
+`BlendState::ALPHA_BLENDING`, `depth_write_enabled: false`, `cull_mode: None`). El
+tile de agua (10) es azul con **alfa 175** en el atlas.
+
+**Nado.** El agua es no solida: el jugador cae hasta el fondo. Para que se sienta
+bien, dentro del agua la **gravedad se reduce** (`WATER_GRAVITY_SCALE`) y Espacio
+**nada hacia arriba** (`SWIM_UP_SPEED`). El `App` pregunta por el bloque en la
+cabeza y los pies.
+
+**Alternativas descartadas.** (a) Agua **opaca** (sin pase nuevo): se ve como un
+muro azul; no es un oceano. (b) Agua por **cutout** (alfa 0/255): no es
+translucida. (c) Un unico pipeline con blending para todo: los bloques opacos
+tendrian blending y orden incorrecto.
+
+**Consecuencia.** `Block::Water` + `is_liquid`; `TILES` 10->11 y tile 10 en
+`atlas.png`/fallback. `greedy_section_query` -> 4 buffers; `SectionMeshes` en el
+renderer (opaco + agua); `ScenePipeline::water_pipeline`; `Renderer::is_water_at`.
+`terrain.rs`: `coastal_block` + relleno de agua; `GENERATOR_VERSION` 5. Fisica:
+parametro `in_water` en `PlayerController::update`. Demo `SOLARIA_OCEAN=1`. 117
+tests.
+
 
 
 

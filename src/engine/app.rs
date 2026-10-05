@@ -180,8 +180,23 @@ impl App {
         } else {
             0.0
         };
+        // ¿Esta el jugador en el agua? (cabeza o pies dentro de agua) -> flota.
+        let feet = Vec3::new(
+            camera.position.x,
+            camera.position.y - crate::player::EYE_HEIGHT,
+            camera.position.z,
+        );
+        let in_water = world.is_water_at(camera.position) || world.is_water_at(feet);
         let mut player = self.player;
-        player.update(camera, is_solid, fly_up, flying, jump && !flying, dt);
+        player.update(
+            camera,
+            is_solid,
+            fly_up,
+            flying,
+            jump && !flying,
+            in_water,
+            dt,
+        );
         self.player = player;
     }
 
@@ -357,7 +372,9 @@ impl ApplicationHandler for App {
         if self.demo {
             self.day_cycle = DayCycle::new(demo::time_of_day());
             if let (Some(renderer), Some(camera)) = (self.renderer.as_mut(), self.camera.as_mut()) {
-                if demo::biomes_active() {
+                if demo::ocean_active() {
+                    demo::build_ocean_overview(renderer, camera);
+                } else if demo::biomes_active() {
                     demo::build_overview(camera);
                 } else if demo::collide_active() {
                     demo::build_collision(renderer, camera);

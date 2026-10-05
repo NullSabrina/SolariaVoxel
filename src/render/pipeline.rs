@@ -43,6 +43,9 @@ struct Uniforms {
 /// Pipeline de dibujo de la escena (voxeles texturizados con el atlas).
 pub struct ScenePipeline {
     pipeline: wgpu::RenderPipeline,
+    /// Variante para el **agua**: mismo shader/layout/bind group, pero con
+    /// blending alfa y sin escritura de z (translucido).
+    water_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 
@@ -199,8 +202,49 @@ impl ScenePipeline {
             cache: None,
         });
 
+        // 7. Variante de **agua**: mismo shader/layout/bind group, pero con
+        //    blending alfa, sin escritura de z y sin culling (se ve desde arriba
+        //    y desde dentro del agua). Se dibuja en un pase posterior a lo opaco.
+        let water_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scene.water.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(Vertex::layout())],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             pipeline,
+            water_pipeline,
             uniform_buffer,
             bind_group,
             _atlas_texture: atlas_texture,
@@ -286,6 +330,12 @@ impl ScenePipeline {
     #[inline]
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
         &self.pipeline
+    }
+
+    /// Pipeline del agua (blending, sin escritura de z).
+    #[inline]
+    pub fn water_pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.water_pipeline
     }
 
     /// Acceso al bind group (para `pass.set_bind_group`).

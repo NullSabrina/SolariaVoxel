@@ -153,8 +153,13 @@ una migracion**; hay tests que lo verifican.
   directo a la GPU sin transponer.
 - **Un bloque = un `u8`** en el chunk (1 byte/voxel; 16^3 = 4096 bytes).
 - **`is_solid` vs `is_visible`**: `is_solid` = colisiona y ocluye caras;
-  `is_visible` = se dibuja pero no bloquea (la antorcha). El mesher dibuja
-  `is_solid || is_visible` y solo oculta una cara si el vecino es solido.
+  `is_visible` = se dibuja pero no bloquea (la antorcha y el **agua**). El mesher
+  dibuja `is_solid || is_visible` y solo oculta una cara si el vecino es solido.
+- **Agua translucida**: el agua es visible no solida y, ademas, se **separa** en
+  el greedy a su propio buffer; el renderer la dibuja en un **pase aparte** con
+  blending alfa y sin escritura de z (`ScenePipeline::water_pipeline`). Los oceanos
+  se generan rellenando de agua el aire bajo el **nivel del mar** (`SEA_LEVEL`),
+  con playas de arena en las columnas a ras de agua.
 - **El raycast** golpea `is_solid || is_visible` (se puede apuntar la antorcha).
 - **Luz**: `u8` por celda (0..15) para cielo y para bloque, por separado. En el
   vertice van normalizadas a 0..1 (`sky`, `block`); el `day_factor` (0..1) las

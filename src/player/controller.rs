@@ -42,6 +42,15 @@ pub const PLAYER_RADIUS: f32 = 0.3;
 /// todos lados; sin esto el jugador se quedaria clavado en cada subida.
 pub const STEP_HEIGHT: f32 = 1.0;
 
+/// Velocidad de ascenso al **nadar** (Espacio dentro del agua), en bloques/s.
+pub const SWIM_UP_SPEED: f32 = 3.5;
+
+/// Factor que reduce la gravedad dentro del agua (flotabilidad).
+const WATER_GRAVITY_SCALE: f32 = 0.30;
+
+/// Factor que reduce la velocidad maxima de caida dentro del agua.
+const WATER_FALL_SCALE: f32 = 0.40;
+
 /// Margen para no "chocar" con el bloque sobre el que estamos de pie: la caja de
 /// colision no incluye exactamente los extremos (pies y cabeza).
 const SKIN: f32 = 1e-3;
@@ -67,6 +76,8 @@ impl PlayerController {
     /// * `fly_up`: en modo vuelo, `+1` subir / `-1` bajar.
     /// * `flying`: si es `true`, ignora la gravedad.
     /// * `jump`: si esta en el suelo, da un salto.
+    /// * `in_water`: si es `true`, hay flotabilidad y Espacio nada hacia arriba.
+    #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
         camera: &mut Camera,
@@ -74,6 +85,7 @@ impl PlayerController {
         fly_up: f32,
         flying: bool,
         jump: bool,
+        in_water: bool,
         dt: f32,
     ) {
         let feet_y = camera.position.y - EYE_HEIGHT;
@@ -87,15 +99,28 @@ impl PlayerController {
             return;
         }
 
-        // 1. Salto (solo si estamos apoyados).
-        if jump && self.on_ground {
+        // 1. Salto (en el suelo) o braceo hacia arriba (en el agua).
+        if in_water && jump {
+            self.vertical_velocity = SWIM_UP_SPEED;
+            self.on_ground = false;
+        } else if jump && self.on_ground {
             self.vertical_velocity = JUMP_SPEED;
             self.on_ground = false;
         }
 
-        // 2. Gravedad, limitada en ambos sentidos.
+        // 2. Gravedad (reducida en el agua = flotabilidad), limitada.
+        let gravity = if in_water {
+            GRAVITY * WATER_GRAVITY_SCALE
+        } else {
+            GRAVITY
+        };
+        let max_fall = if in_water {
+            MAX_FALL_SPEED * WATER_FALL_SCALE
+        } else {
+            MAX_FALL_SPEED
+        };
         self.vertical_velocity =
-            (self.vertical_velocity - GRAVITY * dt).clamp(-MAX_FALL_SPEED, JUMP_SPEED);
+            (self.vertical_velocity - gravity * dt).clamp(-max_fall, JUMP_SPEED);
 
         // 3. Integracion vertical. Subdividimos el paso si cae muy rapido, para
         //    no atravesar un bloque fino entre dos frames.
@@ -373,7 +398,15 @@ mod tests {
         let mut camera = test_camera();
         let mut player = PlayerController::new();
         for _ in 0..120 {
-            player.update(&mut camera, flat_solid, 0.0, false, false, 1.0 / 60.0);
+            player.update(
+                &mut camera,
+                flat_solid,
+                0.0,
+                false,
+                false,
+                false,
+                1.0 / 60.0,
+            );
         }
         assert!(player.on_ground, "deberia estar en el suelo");
         assert!((camera.position.y - (4.0 + EYE_HEIGHT)).abs() < 0.1);
@@ -385,7 +418,15 @@ mod tests {
         camera.update_view();
         let mut player = PlayerController::new();
         for _ in 0..1200 {
-            player.update(&mut camera, flat_solid, 0.0, false, false, 1.0 / 30.0);
+            player.update(
+                &mut camera,
+                flat_solid,
+                0.0,
+                false,
+                false,
+                false,
+                1.0 / 30.0,
+            );
         }
         assert!(camera.position.y >= 4.0 + EYE_HEIGHT - 0.1);
         assert!(player.on_ground);
@@ -396,7 +437,7 @@ mod tests {
         let mut camera = test_camera();
         let mut player = PlayerController::new();
         let start = camera.position.y;
-        player.update(&mut camera, flat_solid, 1.0, true, false, 0.5);
+        player.update(&mut camera, flat_solid, 1.0, true, false, false, 0.5);
         assert!(camera.position.y > start);
         assert!(!player.on_ground);
     }
@@ -406,14 +447,22 @@ mod tests {
         let mut camera = test_camera();
         let mut player = PlayerController::new();
         // Sin estar en el suelo, un salto no hace nada.
-        player.update(&mut camera, flat_solid, 0.0, false, true, 1.0 / 60.0);
+        player.update(&mut camera, flat_solid, 0.0, false, true, false, 1.0 / 60.0);
         assert!(player.vertical_velocity <= 0.0);
         // Dejamos que aterrice.
         for _ in 0..120 {
-            player.update(&mut camera, flat_solid, 0.0, false, false, 1.0 / 60.0);
+            player.update(
+                &mut camera,
+                flat_solid,
+                0.0,
+                false,
+                false,
+                false,
+                1.0 / 60.0,
+            );
         }
         assert!(player.on_ground);
-        player.update(&mut camera, flat_solid, 0.0, false, true, 1.0 / 60.0);
+        player.update(&mut camera, flat_solid, 0.0, false, true, false, 1.0 / 60.0);
         assert!(player.vertical_velocity > 5.0, "deberia haber saltado");
     }
 
@@ -679,6 +728,7 @@ mod tests {
                 0.0,
                 false,
                 jump,
+                false,
                 dt,
             );
             world.update_streaming([camera.position.x, camera.position.y, camera.position.z]);

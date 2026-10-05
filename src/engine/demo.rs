@@ -13,7 +13,7 @@ use crate::math::Vec3;
 use crate::player::EYE_HEIGHT;
 use crate::render::Renderer;
 use crate::scene::Camera;
-use crate::world::Block;
+use crate::world::{Block, SEA_LEVEL};
 
 /// ¿Esta activo el modo demo? (variable de entorno `SOLARIA_DEMO`).
 pub fn is_active() -> bool {
@@ -38,6 +38,42 @@ pub fn collide_active() -> bool {
 /// ¿Mostrar la vista aerea de biomas? (`SOLARIA_BIOMES`).
 pub fn biomes_active() -> bool {
     std::env::var("SOLARIA_BIOMES").is_ok()
+}
+
+/// ¿Mostrar una vista de oceano? (`SOLARIA_OCEAN`).
+pub fn ocean_active() -> bool {
+    std::env::var("SOLARIA_OCEAN").is_ok()
+}
+
+/// Vista de **oceano** (`SOLARIA_OCEAN=1`): busca una columna cercana cuyo fondo
+/// este por debajo del nivel del mar y coloca la camara elevada mirandola, para
+/// ver el agua translucida y la playa.
+pub fn build_ocean_overview(renderer: &Renderer, camera: &mut Camera) {
+    let sea = SEA_LEVEL;
+    let mut target: Option<(i32, i32, i32)> = None;
+    'search: for cz in -6..6 {
+        for cx in -6..6 {
+            let x = cx * 16 + 8;
+            let z = cz * 16 + 8;
+            let mut y = crate::world::WORLD_HEIGHT as i32 - 1;
+            while y > 0 {
+                if renderer.is_solid_at(Vec3::new(x as f32, y as f32, z as f32)) {
+                    if y < sea - 2 {
+                        target = Some((x, y, z));
+                        break 'search;
+                    }
+                    break;
+                }
+                y -= 1;
+            }
+        }
+    }
+    let (x, s, z) = target.unwrap_or((8, sea - 4, 20));
+    camera.position = Vec3::new(x as f32 + 0.5, (s + 28) as f32, z as f32 + 0.5);
+    camera.yaw_deg = 0.0;
+    camera.pitch_deg = -45.0;
+    camera.update_view();
+    println!("[engine] demo: vista de oceano sobre ({x},{s},{z})");
 }
 
 /// Vista aerea para ver los biomas (`SOLARIA_BIOMES=1`): sube la camara y mira

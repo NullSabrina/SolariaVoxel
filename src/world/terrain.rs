@@ -131,11 +131,28 @@ impl TerrainGenerator {
                 let wz = world_z + z as i32;
                 let height = self.height(wx, wz);
                 let biome = self.biome_at(wx, wz);
+                // Cerca del nivel del mar (o por debajo) la superficie es **arena**
+                // (playa o fondo marino), sin importar el bioma.
+                let coastal = height <= (SEA_LEVEL as usize) + 1;
                 for y in 0..height {
                     if self.is_cave(wx, y as i32, wz, height) {
                         continue; // cueva: dejamos aire
                     }
-                    column.set(x, y, z, surface_block(y, height, biome));
+                    let block = if coastal {
+                        coastal_block(y, height)
+                    } else {
+                        surface_block(y, height, biome)
+                    };
+                    column.set(x, y, z, block);
+                }
+                // Oceano/lago: rellenamos de **agua** el aire entre la superficie
+                // y el nivel del mar (estilo `ocean.level`/`water_level`).
+                if height < SEA_LEVEL as usize {
+                    for y in height..SEA_LEVEL as usize {
+                        if column.get(x, y, z) == Block::Air {
+                            column.set(x, y, z, Block::Water);
+                        }
+                    }
                 }
             }
         }
@@ -160,6 +177,16 @@ fn surface_block(y: usize, height: usize, biome: Biome) -> Block {
             Biome::Desert => Block::Sand,
             _ => Block::Dirt,
         }
+    } else {
+        Block::Stone
+    }
+}
+
+/// Bloque de la profundidad `y` en una columna **costera/submarina**: arena en
+/// las capas de arriba, piedra debajo.
+fn coastal_block(y: usize, height: usize) -> Block {
+    if y + 4 >= height {
+        Block::Sand
     } else {
         Block::Stone
     }
@@ -229,17 +256,64 @@ mod tests {
         let generator = TerrainGenerator::new(99);
         let column = generator.generate_column(0, 0);
         let h = generator.height(0, 0);
-        // La capa de arriba debe ser la del bioma de esa columna.
-        let expected = match generator.biome_at(0, 0) {
-            Biome::Desert => Block::Sand,
-            Biome::Forest => Block::Grass,
-            Biome::Snow => Block::Snow,
+        // La capa de arriba depende del bioma... salvo cerca del mar, donde es
+        // arena (playa/fondo marino).
+        let expected = if h <= SEA_LEVEL as usize + 1 {
+            Block::Sand
+        } else {
+            match generator.biome_at(0, 0) {
+                Biome::Desert => Block::Sand,
+                Biome::Forest => Block::Grass,
+                Biome::Snow => Block::Snow,
+            }
         };
         assert_eq!(column.get(0, h - 1, 0), expected);
-        // El subsuelo no es aire y la superficie tiene aire encima.
+        // El subsuelo no es aire.
         assert!(column.get(0, h - 2, 0).is_solid());
-        assert_eq!(column.get(0, h, 0), Block::Air);
+        // Encima de la superficie: aire, o **agua** si la columna esta bajo el
+        // nivel del mar.
+        let above = column.get(0, h, 0);
+        if h < SEA_LEVEL as usize {
+            assert_eq!(above, Block::Water);
+        } else {
+            assert_eq!(above, Block::Air);
+        }
         assert_eq!(column.get(0, 0, 0), Block::Stone);
+    }
+
+    #[test]
+    fn el_agua_llena_hasta_el_nivel_del_mar_y_hay_playa_de_arena() {
+        let generator = TerrainGenerator::new(13_371);
+        let mar = SEA_LEVEL as usize;
+        let mut fondo_ok = false;
+        let mut playa_ok = false;
+        'outer: for cz in -4..4 {
+            for cx in -4..4 {
+                let column = generator.generate_column(cx * 16, cz * 16);
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let wx = cx * 16 + x as i32;
+                        let wz = cz * 16 + z as i32;
+                        let h = generator.height(wx, wz);
+                        if h + 3 < mar {
+                            // Fondo marino: arena, y agua hasta el nivel del mar.
+                            assert_eq!(column.get(x, mar - 1, z), Block::Water, "tope de agua");
+                            assert_eq!(column.get(x, h - 1, z), Block::Sand, "fondo de arena");
+                            fondo_ok = true;
+                        } else if h == mar + 1 {
+                            // Justo por encima del agua: playa de arena.
+                            assert_eq!(column.get(x, h - 1, z), Block::Sand, "playa");
+                            playa_ok = true;
+                        }
+                        if fondo_ok && playa_ok {
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(fondo_ok, "no se encontro fondo marino");
+        assert!(playa_ok, "no se encontro playa");
     }
 
     #[test]

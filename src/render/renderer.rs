@@ -68,8 +68,16 @@ fn sky_color_from_srgb(c: [f32; 3]) -> wgpu::Color {
     }
 }
 
-/// Mallas de una columna: una `Option<Mesh>` por seccion.
-type ColumnMeshes = [Option<Mesh>; SECTION_COUNT];
+/// Mallas de una seccion: la **opaca** y la de **agua** (translucida), separadas
+/// porque el agua se dibuja en un pase con blending y sin escritura de z.
+#[derive(Default)]
+struct SectionMeshes {
+    opaque: Option<Mesh>,
+    water: Option<Mesh>,
+}
+
+/// Mallas de una columna: una `SectionMeshes` por seccion.
+type ColumnMeshes = [SectionMeshes; SECTION_COUNT];
 
 /// Distancia (bloques) a la que empieza la niebla.
 const FOG_START: f32 = 40.0;
@@ -359,7 +367,7 @@ impl Renderer {
         let base_z = pos.z * CHUNK_SIZE as i32;
 
         let Some(column) = self.world.column(pos) else {
-            return std::array::from_fn(|_| None);
+            return std::array::from_fn(|_| SectionMeshes::default());
         };
         // La gran mayoria de consultas caen **dentro** de la columna (lectura
         // directa, sin HashMap ni `div_euclid`); solo los bordes (-1 / 16) miran
@@ -388,7 +396,7 @@ impl Renderer {
             }
         };
 
-        let mut out: ColumnMeshes = std::array::from_fn(|_| None);
+        let mut out: ColumnMeshes = std::array::from_fn(|_| SectionMeshes::default());
         for (section, slot) in out.iter_mut().enumerate() {
             // Las secciones sin nada que dibujar no generan geometria; saltarlas
             // evita 24 pasadas de greedy por columna (y hace barato el re-mesheo
@@ -396,13 +404,21 @@ impl Renderer {
             if self.world.section_is_empty(pos, section) {
                 continue;
             }
-            let (v, i) = greedy::greedy_section_query(&query, &light, section, origin);
+            let (v, i, wv, wi) = greedy::greedy_section_query(&query, &light, section, origin);
             if !v.is_empty() {
-                *slot = Some(Mesh::new(
+                slot.opaque = Some(Mesh::new(
                     &self.device,
                     &format!("col_{}_{}_sec_{section}", pos.x, pos.z),
                     &v,
                     &i,
+                ));
+            }
+            if !wv.is_empty() {
+                slot.water = Some(Mesh::new(
+                    &self.device,
+                    &format!("col_{}_{}_sec_{section}_water", pos.x, pos.z),
+                    &wv,
+                    &wi,
                 ));
             }
         }
@@ -432,6 +448,17 @@ impl Renderer {
             point.y.floor() as i32,
             point.z.floor() as i32,
         ])
+    }
+
+    /// ¿Hay **agua** en este punto del mundo (coordenadas en bloques)?
+    pub fn is_water_at(&self, point: Vec3) -> bool {
+        self.world
+            .get_block([
+                point.x.floor() as i32,
+                point.y.floor() as i32,
+                point.z.floor() as i32,
+            ])
+            .is_liquid()
     }
 
     /// Lanza un rayo y devuelve el primer bloque **golpeable** (solido, o visible
@@ -601,19 +628,40 @@ impl Renderer {
             pass.set_pipeline(self.pipeline.pipeline());
             pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
             let section = CHUNK_SIZE as f32;
+            // Pase opaco.
             for (pos, column) in &self.meshes {
                 let (wx, wz) = (
                     (pos.x * CHUNK_SIZE as i32) as f32,
                     (pos.z * CHUNK_SIZE as i32) as f32,
                 );
-                for (index, mesh) in column.iter().enumerate() {
-                    let Some(mesh) = mesh else {
+                for (index, section_meshes) in column.iter().enumerate() {
+                    let Some(mesh) = section_meshes.opaque.as_ref() else {
                         continue;
                     };
                     let y0 = index as f32 * section;
-                    let min = [wx, y0, wz];
-                    let max = [wx + section, y0 + section, wz + section];
-                    if frustum.intersects_aabb(min, max) {
+                    if frustum
+                        .intersects_aabb([wx, y0, wz], [wx + section, y0 + section, wz + section])
+                    {
+                        mesh.draw(&mut pass);
+                    }
+                }
+            }
+            // Pase de agua (translucido): mismo bind group, otro pipeline
+            // (blending, sin escritura de z).
+            pass.set_pipeline(self.pipeline.water_pipeline());
+            for (pos, column) in &self.meshes {
+                let (wx, wz) = (
+                    (pos.x * CHUNK_SIZE as i32) as f32,
+                    (pos.z * CHUNK_SIZE as i32) as f32,
+                );
+                for (index, section_meshes) in column.iter().enumerate() {
+                    let Some(mesh) = section_meshes.water.as_ref() else {
+                        continue;
+                    };
+                    let y0 = index as f32 * section;
+                    if frustum
+                        .intersects_aabb([wx, y0, wz], [wx + section, y0 + section, wz + section])
+                    {
                         mesh.draw(&mut pass);
                     }
                 }

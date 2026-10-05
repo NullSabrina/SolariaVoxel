@@ -8,21 +8,24 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.7.7` — Texturas de tierra con grano fino (estilo Luanti)
+## Estado actual: `v0.7.8` — Oceanos (agua translucida, playas, nado)
 
-- El **dirt** (tile 2) y el **lateral de hierba** (tile 1) se redibujan como
-  **grano fino de bajo contraste** (nuestra paleta, tonos comprimidos repartidos
-  píxel a píxel) en lugar de manchas grandes. Estilo tomado de Luanti/Minetest.
-- El **fallback procedural** (`atlas.rs`) se alinea con el mismo grano.
-- Sobre **v0.7.6**: optimizacion del streaming (cola de meshing con presupuesto,
-  greedy y luz mas rapidos). **v0.7.5**: cuevas (Perlin 3D) + luz de cielo
-  lateral. **v0.7.4**: culling + niebla. **v0.7.3**: re-mesheo de vecinas.
-  **v0.7.2**: colision por huella + auto-escalon. **v0.7.1**: altura por bloque.
-  **v0.7.0**: biomas (Worley) y `Snow`.
+- Nuevo bloque **`Water`** (id 9, tile 10): no solido y **translucido**.
+- **Generacion**: el aire entre la superficie y el **nivel del mar** se rellena de
+  agua (estilo `ocean.level` de Terasology / `water_level` de Luanti); las
+  columnas a ras de agua tienen **playa/fondo de arena**.
+- **Pase de transparencia**: el agua se separa del material opaco en el mesher y
+  se dibuja con **blending alfa** (sin escritura de z).
+- **Nado**: en el agua hay flotabilidad (gravedad reducida) y Espacio sube.
+- Sobre **v0.7.7**: texturas de tierra con grano fino (estilo Luanti). **v0.7.6**:
+  optimizacion del streaming. **v0.7.5**: cuevas + luz de cielo lateral.
+  **v0.7.4**: culling + niebla. **v0.7.3**: re-mesheo de vecinas. **v0.7.2**:
+  colision por huella + auto-escalon. **v0.7.1**: altura por bloque. **v0.7.0**:
+  biomas (Worley) y `Snow`.
 
-Siguiente (v0.7.x del roadmap): **oceanos** (v0.7.8): nivel del mar, agua, playas
-y un **pase de transparencia**. Pendiente tambien el palo 3D del `.bbmodel` y la
-antorcha de pared.
+Siguiente: pulido (palo 3D del `.bbmodel`, antorcha de pared) o el inicio de la
+etapa 2 (gameplay: inventario, crafteo) segun el roadmap. Pendiente tambien
+**nadar** mas pulido y el resto de la etapa.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

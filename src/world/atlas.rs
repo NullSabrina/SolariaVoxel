@@ -15,7 +15,7 @@
 pub const TILE: u32 = 16;
 
 /// Numero de tiles en el atlas (0..TILES).
-pub const TILES: u32 = 10;
+pub const TILES: u32 = 11;
 
 /// Tiles por fila.
 pub const COLS: u32 = 4;
@@ -209,6 +209,19 @@ fn tile_color(tile: u32, x: u32, y: u32, noise: i32) -> [u8; 4] {
             };
             opaque(c)
         }
+        // 10: agua: azul translucida (alfa < 255) con una ondulacion suave. El
+        // shader no la descarta (alfa > 0.5) y el pase de agua la mezcla.
+        10 => {
+            let a = 175u8;
+            let c = if noise > 6 {
+                [86, 150, 226]
+            } else if noise > -5 {
+                [54, 116, 200]
+            } else {
+                [40, 96, 178]
+            };
+            [c[0], c[1], c[2], a]
+        }
         _ => [0, 0, 0, 0],
     }
 }
@@ -262,10 +275,8 @@ mod tests {
     fn el_atlas_tiene_el_tamano_esperado() {
         let pixels = build_pixels();
         assert_eq!(pixels.len(), (WIDTH * HEIGHT * 4) as usize);
-        // Comprobamos por tile (no como rebanada plana, porque el atlas tiene 12
-        // huecos para 9 tiles y las celdas sin usar quedan a cero). Todos los
-        // tiles son opacos EXCEPTO el 8 (antorcha), que necesita transparencia
-        // para el cutout.
+        // Todos los tiles son opacos EXCEPTO el 8 (antorcha, cutout) y el 10
+        // (agua, translucida), que necesitan alfa.
         for tile in 0..TILES {
             let col = tile % COLS;
             let row = tile / COLS;
@@ -276,9 +287,11 @@ mod tests {
                     let i = ((py * WIDTH + px) * 4) as usize;
                     let alpha = pixels[i + 3];
                     if tile == 8 {
-                        // El fondo es transparente y la antorcha opaca; basta
-                        // con que existan ambas cosas.
+                        // El fondo es transparente y la antorcha opaca.
                         assert!(alpha == 0 || alpha == 255);
+                    } else if tile == 10 {
+                        // El agua es translucida.
+                        assert!(alpha > 0 && alpha < 255, "tile 10 debe ser translucido");
                     } else {
                         assert_eq!(alpha, 255, "tile {tile} pixel ({x},{y})");
                     }

@@ -37,6 +37,19 @@ struct FaceKey {
     block_light: u8,
 }
 
+/// Combina una malla opaca y una de agua en una sola (offset de indices).
+fn merge_meshes(
+    mut v: Vec<Vertex>,
+    mut i: Vec<u32>,
+    wv: Vec<Vertex>,
+    wi: Vec<u32>,
+) -> (Vec<Vertex>, Vec<u32>) {
+    let base = v.len() as u32;
+    v.extend(wv);
+    i.extend(wi.into_iter().map(|x| x + base));
+    (v, i)
+}
+
 /// Genera la malla de una columna entera con greedy meshing.
 ///
 /// Devuelve `(vertices, indices)` en **coordenadas de mundo** (ya sumado
@@ -49,7 +62,8 @@ pub fn greedy_column(column: &Column, origin: [f32; 3]) -> (Vec<Vertex>, Vec<u32
             column.block_light_or_zero(x, y, z),
         )
     };
-    greedy_range(&query, &light, 0, WORLD_HEIGHT, origin)
+    let (v, i, wv, wi) = greedy_range(&query, &light, 0, WORLD_HEIGHT, origin);
+    merge_meshes(v, i, wv, wi)
 }
 
 /// Greedy meshing de una seccion concreta (16 capas).
@@ -65,7 +79,8 @@ pub fn greedy_section(
             column.block_light_or_zero(x, y, z),
         )
     };
-    greedy_section_query(&query, &light, section, origin)
+    let (v, i, wv, wi) = greedy_section_query(&query, &light, section, origin);
+    merge_meshes(v, i, wv, wi)
 }
 
 /// Greedy meshing de una seccion usando consultas de bloque y luz **externas**.
@@ -73,12 +88,16 @@ pub fn greedy_section(
 /// `query(x, y, z)` devuelve el bloque en coordenadas **locales** de la columna
 /// (puede mirar fuera, 0..16, para el vecino: eso es lo que evita los muros
 /// internos). `light(x, y, z)` devuelve `(cielo, bloque)` 0..15 de esa celda.
+///
+/// Devuelve `(vertices_opacos, indices_opacos, vertices_agua, indices_agua)`: el
+/// agua va aparte porque se dibuja en un **pase translucido** distinto.
+#[allow(clippy::type_complexity)]
 pub fn greedy_section_query(
     query: &dyn Fn(i32, i32, i32) -> Block,
     light: &dyn Fn(i32, i32, i32) -> (u8, u8),
     section: usize,
     origin: [f32; 3],
-) -> (Vec<Vertex>, Vec<u32>) {
+) -> (Vec<Vertex>, Vec<u32>, Vec<Vertex>, Vec<u32>) {
     let y_start = section * CHUNK_SIZE;
     let y_end = (y_start + CHUNK_SIZE).min(WORLD_HEIGHT);
     greedy_range(query, light, y_start, y_end, origin)
@@ -94,15 +113,18 @@ pub fn greedy_section_query(
 ///
 /// Por eso el rango vertical acota `v` en caras verticales y `c` en las
 /// horizontales, y el "alto" del rectangulo nunca cruza el limite de seccion.
+#[allow(clippy::type_complexity)]
 fn greedy_range(
     query: &dyn Fn(i32, i32, i32) -> Block,
     light: &dyn Fn(i32, i32, i32) -> (u8, u8),
     y_start: usize,
     y_end: usize,
     origin: [f32; 3],
-) -> (Vec<Vertex>, Vec<u32>) {
+) -> (Vec<Vertex>, Vec<u32>, Vec<Vertex>, Vec<u32>) {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
+    let mut water_vertices = Vec::new();
+    let mut water_indices = Vec::new();
 
     for face in Face::ALL {
         let horizontal = matches!(face, Face::PosY | Face::NegY);
@@ -161,10 +183,15 @@ fn greedy_range(
                     }
 
                     // Emitimos el rectangulo. `v` local se convierte a coordenada
-                    // real del plano.
+                    // real del plano. El agua va a su propio buffer (translucido).
+                    let (target_v, target_i) = if key.block == Block::Water.id() {
+                        (&mut water_vertices, &mut water_indices)
+                    } else {
+                        (&mut vertices, &mut indices)
+                    };
                     emit_quad(
-                        &mut vertices,
-                        &mut indices,
+                        target_v,
+                        target_i,
                         face,
                         u,
                         v_range.0 + v,
@@ -216,7 +243,7 @@ fn greedy_range(
         }
     }
 
-    (vertices, indices)
+    (vertices, indices, water_vertices, water_indices)
 }
 
 /// Decide que asoma en la celda `(u, v)` del plano `face`, en la capa `c`.
@@ -240,19 +267,20 @@ fn mask_value(
     };
 
     let block = query(x as i32, y as i32, z as i32);
-    // Solo los bloques solidos aportan caras de cubo. La antorcha (visible pero
-    // no solida) se emite aparte, como una cruz de dos planos (ver el bucle de
-    // antorchas en `greedy_range`).
-    if !block.is_solid() {
-        return None;
-    }
     let (ox, oy, oz) = face.offset();
     // El vecino puede estar fuera de la columna (otro chunk): la query decide.
     let (nx, ny, nz) = (x as i32 + ox, y as i32 + oy, z as i32 + oz);
     let neighbor = query(nx, ny, nz);
-    // Solo se oculta la cara si el vecino es SOLIDO (una antorcha no tapa).
-    if neighbor.is_solid() {
-        return None; // cara oculta (o vecino en otro chunk)
+    if block == Block::Water {
+        // El agua es visible pero no solida: solo asoma su cara contra **aire**
+        // (no contra agua ni contra un solido, que la ocluye).
+        if neighbor == Block::Water || neighbor.is_solid() {
+            return None;
+        }
+    } else if !block.is_solid() || neighbor.is_solid() {
+        // La antorcha (visible no solida) y el aire no entran en el greedy de
+        // cubos; solo se oculta una cara si el vecino es SOLIDO.
+        return None;
     }
     // La luz que recibe esta cara es la de la celda de aire de delante.
     let (sky, block_light) = light(nx, ny, nz);
