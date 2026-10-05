@@ -918,6 +918,45 @@ una antorcha se habria saltado (bug latente; hay test). 103 tests.
 **Desplazamiento de roadmap.** Cuevas pasa a **v0.7.4** y oceanos a **v0.7.5**.
 `GENERATOR_VERSION` sigue en 3 (el terreno no cambia).
 
+### 2026-10-05 (v0.7.4) — Rendimiento, niebla y luz que cruza chunks
+
+**Decision.** Cuatro cambios de renderizado/iluminacion que estaban anotados como
+"limitaciones":
+1. **Back-face culling** en el pipeline, corrigiendo antes el **winding de las
+   caras horizontales** (`PosY`/`NegY`), que estaba invertido (su normal miraba
+   hacia dentro). Las antorchas emiten sus dos orientaciones.
+2. **Frustum culling** por seccion: se descartan las mallas cuyo AABB cae fuera
+   del frustum (`math::Frustum`, extraido de `view_projection`).
+3. **Niebla a distancia** en el fragment shader (funde con el color del cielo, que
+   ya cambia con el dia/noche) para disimular el borde del area cargada.
+4. **Luz de bloque que cruza chunks**: `World::recompute_block_light` hace el BFS
+   de antorchas a nivel de mundo (antes era por columna, y se cortaba en el borde).
+5. **FPS** visibles en el titulo de la ventana.
+
+**Motivo.** El culling y el salto de secciones vacias (v0.7.3) abaratan el dibujo;
+el winding estaba mal y por eso `cull_mode` estaba en `None`. La niebla es la
+forma estandar de tapar el limite del radio de carga sin cargar mas chunks. El
+corte de luz en las fronteras era visible al poner antorchas cerca de un borde.
+
+**Alternativas descartadas.** (a) Subir el radio de carga para esconder el borde:
+mas memoria y meshing, y el problema no desaparece, solo se aleja. (b) No emitir
+las caras del borde cargado: dejaria ver el vacio a traves del terreno. (c) Fog
+"de altura" tipo volumetrico: sobredimensionado.
+
+**Verificacion.** FPS en el titulo (build debug: ~780 fps). Test del winding
+(la normal geometrica de cada cara debe coincidir con su salida) y de frustum
+(fuera/dentro/rodeando la camara). Test de luz cruzando el borde de chunk (13 a
+1 bloque, 0 al quitar la antorcha). 110 tests.
+
+**Deuda pendiente (honesta).** La **luz de cielo sigue siendo columnar** (sin
+propagacion lateral). No es visible hoy porque el terreno es de **altura** (sin
+voladizos ni cuevas): cualquier celda de aire tiene cielo encima de su propia
+columna, asi que 15 es correcto. Se vuelve necesaria con las **cuevas** (v0.7.5),
+donde si habra techos; se hara alli, junto con la propagacion entre chunks.
+
+**Desplazamiento de roadmap.** Cuevas pasa a **v0.7.5** y oceanos a **v0.7.6**.
+`GENERATOR_VERSION` sigue en 3.
+
 
 
 

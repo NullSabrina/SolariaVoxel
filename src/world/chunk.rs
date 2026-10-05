@@ -143,6 +143,17 @@ impl Column {
         self.block_light[Self::light_index(x, y, z)]
     }
 
+    /// Ajusta la luz de bloque en una posicion (la usa el BFS del mundo).
+    #[inline]
+    pub fn set_block_light(&mut self, x: usize, y: usize, z: usize, level: u8) {
+        self.block_light[Self::light_index(x, y, z)] = level.min(MAX_LIGHT);
+    }
+
+    /// Pone a cero la luz de bloque de toda la columna (antes de recomputarla).
+    pub fn clear_block_light(&mut self) {
+        self.block_light.fill(0);
+    }
+
     /// Luz total que recibe una celda: el **maximo** de cielo y de bloque. Es lo
     /// que finalmente se dibuja (una antorcha ilumina una cueva a oscuras).
     #[inline]

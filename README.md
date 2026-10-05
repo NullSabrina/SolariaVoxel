@@ -8,23 +8,25 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.7.3` — Caras de borde del streaming (muros/grietas)
+## Estado actual: `v0.7.4` — Rendimiento, niebla y luz que cruza chunks
 
-- Al cargar/descargar columnas se **reconstruyen las vecinas** de borde: se
-  acaban los **muros oscuros** (caras de mas) y los **huecos** (caras de menos)
-  que aparecian en el limite entre chunks al moverse.
-- `build_column_meshes` **salta secciones vacias** (solo meshea las que tienen
-  geometria), lo que abarata el re-mesheo de vecinas.
-- Sobre **v0.7.2**: colision vertical por **huella** + **auto-escalon** (la
-  camara ya no se queda embebida en escalones). **v0.7.1**: altura y bioma por
-  bloque (colinas suaves). **v0.7.0**: biomas (desierto/bosque/nieve) con ruido
-  **Worley** y el bloque `Snow`; cierra la etapa 1 ("mundo jugable"). v0.6.5:
-  colision horizontal. v0.6.4: ciclo dia/noche. v0.6.3: consolidacion. v0.6.2:
-  antorcha como cruz fina + atlas de texturas. v0.6.1: block light. v0.6.0: luz
-  de cielo. v0.5.x: LZ4 + streaming. v0.4.x: romper/colocar, greedy, colisiones.
+- **Back-face culling** (con el winding de las caras horizontales corregido) y
+  **frustum culling** por seccion: menos trabajo de GPU.
+- **Niebla a distancia** que se funde con el color del cielo (y cambia con el
+  dia/noche): da profundidad y disimula el borde del area cargada.
+- **Luz de bloque que cruza chunks** (BFS a nivel de mundo): una antorcha cerca
+  de un borde ilumina la columna vecina. Se acaba el corte de luz en la frontera.
+- **FPS** visibles en el titulo de la ventana.
+- Sobre **v0.7.3**: re-mesheo de vecinas al hacer streaming (muros/grietas).
+  **v0.7.2**: colision por huella + auto-escalon. **v0.7.1**: altura por bloque.
+  **v0.7.0**: biomas (desierto/bosque/nieve) con ruido **Worley** y el bloque
+  `Snow`. v0.6.x: luz, antorcha, ciclo dia/noche, colision horizontal. v0.5.x:
+  LZ4 + streaming. v0.4.x: romper/colocar, greedy, colisiones.
 
-Siguiente (v0.7.x del roadmap): **cuevas** (v0.7.4) y **oceanos** (v0.7.5).
-Pendiente tambien el palo 3D del `.bbmodel` y la antorcha de pared.
+Siguiente (v0.7.x del roadmap): **cuevas** (v0.7.5) y **oceanos** (v0.7.6). Al
+llegar las cuevas habra que dar **propagacion lateral a la luz de cielo** (hoy es
+por columna vertical). Pendiente tambien el palo 3D del `.bbmodel` y la antorcha
+de pared.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

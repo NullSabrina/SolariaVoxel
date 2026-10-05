@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 
 use super::block::Block;
-use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
+use super::chunk::{CHUNK_SIZE, Column, SECTION_COUNT, WORLD_HEIGHT};
 use super::save::{ChunkPos, ChunkRecord};
 use super::terrain::TerrainGenerator;
 
@@ -138,8 +138,9 @@ impl World {
         // Toda columna editada se guarda; registramos su chunk.
         self.modified
             .insert(pos, ChunkRecord::from_column(column, TERRAIN_SECTION));
-        // La luz depende de que haya techo o no: la recalculamos.
-        self.recompute_light(pos);
+        // La luz de cielo de la columna (columnar) se recalcula aqui; la de
+        // bloque la recalcula el mundo entero (cruza chunks) aparte.
+        self.recompute_skylight(pos);
         true
     }
 
@@ -198,17 +199,95 @@ impl World {
         if let Some(record) = self.modified.get(&pos) {
             apply_record(&mut column, record);
         }
-        // Calculamos las dos luces tras generar/restaurar la columna.
+        // Calculamos la luz de cielo tras generar/restaurar la columna. La luz
+        // de bloque se calcula a nivel de **mundo** (cruza chunks), no aqui.
         column.compute_skylight();
-        column.compute_block_light();
         self.columns.insert(pos, column);
     }
 
-    /// Recalcula la luz (cielo y bloque) de una columna cargada (tras editarla).
-    fn recompute_light(&mut self, pos: ChunkPos) {
+    /// Recalcula la luz de cielo de una columna cargada (tras editarla).
+    fn recompute_skylight(&mut self, pos: ChunkPos) {
         if let Some(column) = self.columns.get_mut(&pos) {
             column.compute_skylight();
-            column.compute_block_light();
+        }
+    }
+
+    /// Recalcula la **luz de bloque** (antorchas) de todo el mundo cargado.
+    ///
+    /// A diferencia de la version por columna, este BFS **cruza chunks**: la luz
+    /// de una antorcha cerca de un borde ilumina tambien la columna vecina, asi
+    /// que no aparece un corte de luz en la frontera.
+    pub fn recompute_block_light(&mut self) {
+        use std::collections::VecDeque;
+
+        // 1. Recolectar los emisores de las secciones no vacias (la mayoria de
+        //    las 24 de una columna no tienen nada que emitir).
+        let mut sources: Vec<(i32, i32, i32, u8)> = Vec::new();
+        for (pos, column) in &self.columns {
+            let bx = pos.x * CHUNK_SIZE as i32;
+            let bz = pos.z * CHUNK_SIZE as i32;
+            for section in 0..SECTION_COUNT {
+                if column.section_is_empty(section) {
+                    continue;
+                }
+                let y0 = section * CHUNK_SIZE;
+                for y in y0..(y0 + CHUNK_SIZE).min(WORLD_HEIGHT) {
+                    for z in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            let e = column.get(x, y, z).light_emission();
+                            if e > 0 {
+                                sources.push((bx + x as i32, y as i32, bz + z as i32, e));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Limpiar y sembrar las fuentes.
+        let mut queue: VecDeque<(i32, i32, i32, u8)> = VecDeque::new();
+        for column in self.columns.values_mut() {
+            column.clear_block_light();
+        }
+        for (x, y, z, e) in sources {
+            let (pos, local) = Self::world_to_local([x, y, z]);
+            if let Some(column) = self.columns.get_mut(&pos) {
+                column.set_block_light(local[0], local[1], local[2], e);
+                queue.push_back((x, y, z, e));
+            }
+        }
+
+        // 3. Propagar a los 6 vecinos (en coordenadas de mundo, cruzando chunks).
+        const NEIGHBORS: [(i32, i32, i32); 6] = [
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 1, 0),
+            (0, -1, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+        ];
+        while let Some((x, y, z, level)) = queue.pop_front() {
+            if level <= 1 {
+                continue;
+            }
+            let next = level - 1;
+            for (dx, dy, dz) in NEIGHBORS {
+                let (nx, ny, nz) = (x + dx, y + dy, z + dz);
+                if ny < 0 || ny >= WORLD_HEIGHT as i32 {
+                    continue;
+                }
+                let (pos, local) = Self::world_to_local([nx, ny, nz]);
+                let Some(column) = self.columns.get_mut(&pos) else {
+                    continue;
+                };
+                if column.get(local[0], local[1], local[2]).is_solid() {
+                    continue;
+                }
+                if column.block_light_at(local[0], local[1], local[2]) < next {
+                    column.set_block_light(local[0], local[1], local[2], next);
+                    queue.push_back((nx, ny, nz, next));
+                }
+            }
         }
     }
 
@@ -350,5 +429,24 @@ mod tests {
         assert_eq!(pos, ChunkPos::new(-1, -2));
         assert_eq!(local[0], CHUNK_SIZE - 1); // -1 mod 16
         assert_eq!(local[2], CHUNK_SIZE - 1); // -17 mod 16
+    }
+
+    #[test]
+    fn la_luz_de_antorcha_cruza_el_borde_de_chunk() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([0.0, 100.0, 0.0]); // chunks -1..1 en x y z
+
+        // Antorcha en el ultimo bloque del chunk 0 (mundo x=15), bien alto para
+        // que sea aire. El bloque vecino (mundo x=16) esta en el chunk 1.
+        assert!(world.set_block([15, 100, 0], Block::Torch));
+        world.recompute_block_light();
+        assert_eq!(world.block_light_at([16, 100, 0]), 13, "no cruzo el borde");
+        assert_eq!(world.block_light_at([20, 100, 0]), 9, "a 5 bloques");
+
+        // Al quitar la antorcha, la luz se apaga tambien al otro lado.
+        assert!(world.set_block([15, 100, 0], Block::Air));
+        world.recompute_block_light();
+        assert_eq!(world.block_light_at([16, 100, 0]), 0);
     }
 }

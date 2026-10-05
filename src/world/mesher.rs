@@ -192,8 +192,9 @@ fn light_pair(column: &Column, x: usize, y: usize, z: usize) -> (f32, f32) {
 /// descarta el alfa bajo (cutout), asi que solo se ve la llama y el palo, no el
 /// fondo transparente.
 ///
-/// El pipeline dibuja sin *culling* (caras traseras incluidas), asi que cada
-/// plano se emite una sola vez y se ve por sus dos caras.
+/// El pipeline dibuja con *back-face culling*, asi que cada plano se emite con
+/// las **dos orientaciones** (ambos windings comparten los 4 vertices y solo
+/// cambian los indices): la cruz se ve por delante y por detras.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_torch_cross(
     vertices: &mut Vec<Vertex>,
@@ -229,7 +230,21 @@ pub(crate) fn emit_torch_cross(
         for (corner, uv) in corners.iter().zip(uvs.iter()) {
             vertices.push(Vertex::with_light(*corner, *uv, sky, block_light, tile));
         }
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        // Las dos orientaciones (mismos vertices, indices invertidos).
+        indices.extend_from_slice(&[
+            base,
+            base + 1,
+            base + 2,
+            base,
+            base + 2,
+            base + 3,
+            base,
+            base + 2,
+            base + 1,
+            base,
+            base + 3,
+            base + 2,
+        ]);
     }
 }
 
@@ -289,9 +304,9 @@ mod tests {
         column.set(8, 8, 8, Block::Torch);
         let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
         assert_eq!(sections.len(), 1);
-        // Dos planos x 4 vertices, dos planos x 2 triangulos.
+        // Dos planos x 4 vertices; cada plano con las dos orientaciones (4 tri).
         assert_eq!(sections[0].vertices.len(), 8);
-        assert_eq!(sections[0].indices.len(), 12);
+        assert_eq!(sections[0].indices.len(), 24);
         // Todas las caras usan el tile de la antorcha.
         assert!(sections[0].vertices.iter().all(|v| v.tile == 8));
         assert!(

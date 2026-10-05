@@ -343,6 +343,18 @@ fn emit_quad(
         }
     };
 
+    // Las caras horizontales estaban con el ciclo al reves (su normal apuntaba
+    // hacia dentro), lo que impedia activar el *back-face culling*. Invertimos el
+    // ciclo (y las UVs con el) para que la normal mire hacia fuera como el resto.
+    let (corners, uvs) = if matches!(face, Face::PosY | Face::NegY) {
+        (
+            [corners[0], corners[3], corners[2], corners[1]],
+            [uvs[0], uvs[3], uvs[2], uvs[1]],
+        )
+    } else {
+        (corners, uvs)
+    };
+
     let base = vertices.len() as u32;
     for (corner, uv) in corners.iter().zip(uvs.iter()) {
         // Luces normalizadas 0..1 (la cara recibe las de la celda de delante).
@@ -429,9 +441,9 @@ mod tests {
         let mut column = Column::empty();
         column.set(8, 8, 8, Block::Torch);
         let (vertices, indices) = greedy_column(&column, [0.0; 3]);
-        // Dos planos x 4 vertices, dos planos x 2 triangulos (nada de 6 caras).
+        // Dos planos x 4 vertices; cada plano con las dos orientaciones (4 tri).
         assert_eq!(vertices.len(), 8, "dos quads cruzados");
-        assert_eq!(indices.len(), 12);
+        assert_eq!(indices.len(), 24);
         assert!(vertices.iter().all(|v| v.tile == 8));
     }
 
@@ -475,5 +487,45 @@ mod tests {
             vertices.iter().any(|v| v.sky > 0.9 && v.block == 0.0),
             "deberia haber caras con cielo alto y bloque nulo"
         );
+    }
+
+    #[test]
+    fn todas_las_caras_miran_hacia_fuera() {
+        // Con `cull_mode: Back` activo, una cara con la normal invertida
+        // desaparece. Comprobamos la normal geometrica del primer triangulo de
+        // cada cara contra su direccion de salida.
+        use crate::math::Vec3;
+        let outward = |f: Face| match f {
+            Face::PosX => Vec3::new(1.0, 0.0, 0.0),
+            Face::NegX => Vec3::new(-1.0, 0.0, 0.0),
+            Face::PosY => Vec3::new(0.0, 1.0, 0.0),
+            Face::NegY => Vec3::new(0.0, -1.0, 0.0),
+            Face::PosZ => Vec3::new(0.0, 0.0, 1.0),
+            Face::NegZ => Vec3::new(0.0, 0.0, -1.0),
+        };
+        for face in Face::ALL {
+            let mut verts = Vec::new();
+            let mut idx = Vec::new();
+            let key = FaceKey {
+                block: Block::Stone.id(),
+                face,
+                sky: 15,
+                block_light: 0,
+            };
+            emit_quad(&mut verts, &mut idx, face, 0, 0, 0, 1, 1, key, [0.0; 3]);
+            let p = |i: usize| {
+                Vec3::new(
+                    verts[i].position[0],
+                    verts[i].position[1],
+                    verts[i].position[2],
+                )
+            };
+            let normal = (p(1) - p(0)).cross(p(2) - p(0)).normalize();
+            assert!(
+                normal.dot(outward(face)) > 0.9,
+                "{face:?}: normal {normal:?} no mira hacia {:?}",
+                outward(face)
+            );
+        }
     }
 }

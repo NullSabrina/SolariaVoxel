@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
-use crate::math::{Mat4, Vec3};
+use crate::math::{Frustum, Mat4, Vec3};
 use crate::render::color::srgb_to_linear;
 use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
@@ -70,18 +70,29 @@ fn sky_color_from_srgb(c: [f32; 3]) -> wgpu::Color {
 /// Mallas de una columna: una `Option<Mesh>` por seccion.
 type ColumnMeshes = [Option<Mesh>; SECTION_COUNT];
 
+/// Distancia (bloques) a la que empieza la niebla.
+const FOG_START: f32 = 40.0;
+/// Distancia (bloques) a la que la niebla es total. Coincide con el borde del
+/// area cargada (~64 bloques en los ejes), asi que lo funde con el cielo.
+const FOG_END: f32 = 64.0;
+
 /// Columnas ya cargadas cuyas mallas hay que reconstruir tras un cambio de
-/// streaming: las **colindantes** (4-vecinos) de cada columna cargada o
-/// descargada. Sus caras de borde cambian al aparecer/desaparecer el vecino.
-/// Se deduplica y se excluyen las propias columnas cargadas (ya se acaban de
-/// meshear en `sync_streaming`).
+/// streaming: las **colindantes** de cada columna cargada o descargada, en el
+/// anillo 3x3 (incluidas diagonales: la luz de bloque viaja a columnas que tocan
+/// la esquina). Se deduplica y se excluyen las propias columnas cargadas (ya se
+/// acaban de meshear en `sync_streaming`).
 fn columns_to_remesh(change: &StreamChange, is_loaded: impl Fn(ChunkPos) -> bool) -> Vec<ChunkPos> {
     let mut out: Vec<ChunkPos> = Vec::new();
     for pos in change.loaded.iter().chain(change.unloaded.iter()) {
-        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            let n = ChunkPos::new(pos.x + dx, pos.z + dz);
-            if is_loaded(n) && !out.contains(&n) {
-                out.push(n);
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dz == 0 {
+                    continue;
+                }
+                let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+                if is_loaded(n) && !out.contains(&n) {
+                    out.push(n);
+                }
             }
         }
     }
@@ -247,6 +258,9 @@ impl Renderer {
         if change.is_empty() {
             return;
         }
+        // La luz de bloque puede haber cambiado (torches que entran/salen): la
+        // recomputamos a nivel de mundo (cruza chunks) antes de meshear.
+        self.world.recompute_block_light();
         // Liberar mallas de columnas descargadas.
         for pos in &change.unloaded {
             self.meshes.remove(pos);
@@ -314,20 +328,18 @@ impl Renderer {
         out
     }
 
-    /// Reconstruye las mallas de la columna afectada (y sus vecinas, porque la
-    /// cara del borde cambia) tras editar un bloque.
-    fn refresh_around(&mut self, pos: ChunkPos) {
-        let neighbors = [
-            pos,
-            ChunkPos::new(pos.x + 1, pos.z),
-            ChunkPos::new(pos.x - 1, pos.z),
-            ChunkPos::new(pos.x, pos.z + 1),
-            ChunkPos::new(pos.x, pos.z - 1),
-        ];
-        for n in neighbors {
-            if self.world.is_loaded(n) {
-                let m = self.build_column_meshes(n);
-                self.meshes.insert(n, Box::new(m));
+    /// Reconstruye la malla de una columna cargada y la de su anillo **3x3**
+    /// (incluidas diagonales). Hace falta tras editar porque la luz de bloque
+    /// viaja hasta 15 bloques y puede cambiar caras de columnas vecinas en
+    /// diagonal; y tras cargar/descargar porque cambian las caras de borde.
+    fn refresh_area(&mut self, center: ChunkPos) {
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let n = ChunkPos::new(center.x + dx, center.z + dz);
+                if self.world.is_loaded(n) {
+                    let m = self.build_column_meshes(n);
+                    self.meshes.insert(n, Box::new(m));
+                }
             }
         }
     }
@@ -356,8 +368,11 @@ impl Renderer {
         if !self.world.set_block(voxel, block) {
             return false;
         }
+        // La luz de bloque cambio (puede ser una antorcha): recomputamos la del
+        // mundo y re-mesheamos el area afectada.
+        self.world.recompute_block_light();
         let (pos, _) = World::world_to_local(voxel);
-        self.refresh_around(pos);
+        self.refresh_area(pos);
         true
     }
 
@@ -374,21 +389,24 @@ impl Renderer {
                 touched.push(pos);
             }
         }
-        // Reconstruimos cada columna tocada y sus vecinas, sin repetir.
-        touched.sort_by_key(|p| (p.x, p.z));
-        touched.dedup();
+        // Recomputamos la luz de bloque del mundo UNA vez y reconstruimos el
+        // area 3x3 de cada columna tocada, sin repetir.
+        self.world.recompute_block_light();
+        let mut to_remesh: Vec<ChunkPos> = Vec::new();
         for pos in touched {
-            for n in [
-                pos,
-                ChunkPos::new(pos.x + 1, pos.z),
-                ChunkPos::new(pos.x - 1, pos.z),
-                ChunkPos::new(pos.x, pos.z + 1),
-                ChunkPos::new(pos.x, pos.z - 1),
-            ] {
-                if self.world.is_loaded(n) {
-                    let m = self.build_column_meshes(n);
-                    self.meshes.insert(n, Box::new(m));
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+                    if !to_remesh.contains(&n) {
+                        to_remesh.push(n);
+                    }
                 }
+            }
+        }
+        for n in to_remesh {
+            if self.world.is_loaded(n) {
+                let m = self.build_column_meshes(n);
+                self.meshes.insert(n, Box::new(m));
             }
         }
         applied
@@ -429,9 +447,25 @@ impl Renderer {
     }
 
     /// Dibuja y presenta un frame.
-    pub fn render(&mut self, view_projection: &Mat4) {
-        self.pipeline
-            .update_uniforms(&self.queue, view_projection, self.day_factor);
+    pub fn render(&mut self, view_projection: &Mat4, camera_pos: Vec3) {
+        let fog_color = [
+            self.clear_color.r as f32,
+            self.clear_color.g as f32,
+            self.clear_color.b as f32,
+        ];
+        self.pipeline.update_uniforms(
+            &self.queue,
+            view_projection,
+            [camera_pos.x, camera_pos.y, camera_pos.z],
+            self.day_factor,
+            fog_color,
+            FOG_START,
+            FOG_END,
+        );
+
+        // Frustum de la camara: descartamos las secciones fuera de la vista sin
+        // siquiera emitir su draw call.
+        let frustum = Frustum::from_view_projection(view_projection);
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) => f,
@@ -482,9 +516,22 @@ impl Renderer {
 
             pass.set_pipeline(self.pipeline.pipeline());
             pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
-            for column in self.meshes.values() {
-                for mesh in column.iter().flatten() {
-                    mesh.draw(&mut pass);
+            let section = CHUNK_SIZE as f32;
+            for (pos, column) in &self.meshes {
+                let (wx, wz) = (
+                    (pos.x * CHUNK_SIZE as i32) as f32,
+                    (pos.z * CHUNK_SIZE as i32) as f32,
+                );
+                for (index, mesh) in column.iter().enumerate() {
+                    let Some(mesh) = mesh else {
+                        continue;
+                    };
+                    let y0 = index as f32 * section;
+                    let min = [wx, y0, wz];
+                    let max = [wx + section, y0 + section, wz + section];
+                    if frustum.intersects_aabb(min, max) {
+                        mesh.draw(&mut pass);
+                    }
                 }
             }
 

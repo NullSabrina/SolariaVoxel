@@ -84,10 +84,18 @@ Puntos clave:
 - **Una malla por (columna, seccion)**: una columna tiene 24 secciones; la
   mayoria estan vacias y se **saltan sin meshear** (`World::section_is_empty`);
   solo se guardan las que tienen geometria (`ColumnMeshes = [Option<Mesh>; 24]`).
-- **Dos luces**: `compute_skylight` (cielo, por columna vertical) y
-  `compute_block_light` (antorchas, flood-fill BFS). El vertice lleva ambas por
-  separado; el shader dibuja `max(cielo * day_factor, bloque)`, de modo que la
-  noche apaga el sol pero no las antorchas.
+- **Dos luces**: `compute_skylight` (cielo, **por columna vertical**: correcta
+  para un terreno de altura, sin propagacion lateral todavia) y
+  `World::recompute_block_light` (antorchas, **flood-fill BFS a nivel de mundo**,
+  que **cruza chunks**). El vertice lleva ambas por separado; el shader dibuja
+  `max(cielo * day_factor, bloque)`, de modo que la noche apaga el sol pero no las
+  antorchas.
+- **Culling**: el pipeline usa **back-face culling** (la geometria mira hacia
+  fuera; las antorchas emiten sus dos orientaciones) y en `render` se descartan
+  las secciones cuyo AABB queda fuera del **frustum** (`math::Frustum`).
+- **Niebla**: el fragment shader funde con el color del cielo por distancia
+  (`fog_start`/`fog_end`), lo que da profundidad y disimula el borde del area
+  cargada.
 
 ## El pipeline de datos del mundo
 

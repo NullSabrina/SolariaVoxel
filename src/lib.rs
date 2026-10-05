@@ -10,21 +10,24 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.7.3 — Caras de borde del streaming (muros/grietas)
+//! ## Estado actual: v0.7.4 — Rendimiento, niebla y luz que cruza chunks
 //!
-//! * Al cargar/descargar columnas se **reconstruyen las vecinas** de borde: ya
-//!   no aparecen muros oscuros (caras de mas) ni huecos (caras de menos) en el
-//!   limite entre chunks.
-//! * `build_column_meshes` **salta secciones vacias** (no hace greedy de las 24;
-//!   solo de las que tienen geometria), lo que abarata el re-mesheo.
-//! * Sobre v0.7.2: colision vertical por huella + auto-escalon. v0.7.1: altura y
-//!   bioma por bloque. v0.7.0: biomas (Worley) y bloque `Snow`. v0.6.5: colision
-//!   horizontal. v0.6.4: ciclo dia/noche. v0.6.3: consolidacion. v0.6.2: antorcha
-//!   como cruz fina. v0.6.1: block light. v0.6.0: luz de cielo. v0.5.x: LZ4 +
-//!   streaming.
+//! * **Back-face culling** (winding corregido en las caras horizontales) y
+//!   **frustum culling** por seccion: menos trabajo de GPU.
+//! * **Niebla a distancia** (se funde con el cielo, que cambia con el dia/noche)
+//!   que disimula el borde del area cargada.
+//! * **Luz de bloque que cruza chunks**: una antorcha cerca de un borde ilumina
+//!   la columna vecina (BFS a nivel de mundo); se acaba el corte de luz.
+//! * FPS visibles en el titulo de la ventana.
+//! * Sobre v0.7.3: re-mesheo de vecinas al hacer streaming. v0.7.2: colision por
+//!   huella + auto-escalon. v0.7.1: altura por bloque. v0.7.0: biomas (Worley).
+//!   v0.6.x: luz, antorcha, ciclo dia/noche, colision horizontal.
 //!
-//! Siguiente (v0.7.x del roadmap): cuevas (v0.7.4) y oceanos (v0.7.5). Pendiente
-//! tambien el **palo 3D** del `.bbmodel` y la **antorcha de pared**.
+//! Siguiente (v0.7.x del roadmap): cuevas (v0.7.5) y oceanos (v0.7.6). Al llegar
+//! las cuevas habra que dar a la **luz de cielo propagacion lateral** (hoy es por
+//! columna vertical, correcta para un terreno de altura pero no para voladizos ni
+//! cuevas). Pendiente tambien el **palo 3D** del `.bbmodel` y la **antorcha de
+//! pared**.
 //!
 //! ## Organizacion del codigo
 //!

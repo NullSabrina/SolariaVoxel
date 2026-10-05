@@ -58,6 +58,9 @@ pub struct App {
     world_saved: bool,
     /// Marca de tiempo del frame anterior, para calcular el `dt`.
     last_frame: Option<Instant>,
+    /// Acumuladores para mostrar los FPS en el titulo de la ventana.
+    fps_frames: u32,
+    fps_accum: f32,
     /// Hora del mundo y como afecta a la luz y al cielo.
     day_cycle: DayCycle,
     /// Modo demo (`SOLARIA_DEMO`): congela la camara y elige la escena de la
@@ -466,14 +469,14 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 // Tiempo real transcurrido desde el frame anterior.
                 let now = Instant::now();
-                let dt = self
+                let raw_dt = self
                     .last_frame
                     .map(|last| (now - last).as_secs_f32())
                     .unwrap_or(0.0);
                 self.last_frame = Some(now);
                 // Limitamos el dt: si el proceso se quedo parado (arrastrando
                 // la ventana, breakpoint...) no queremos "teletransportarnos".
-                let dt = dt.clamp(0.0, 0.1);
+                let dt = raw_dt.clamp(0.0, 0.1);
 
                 self.update(dt);
                 // En modo demo no resaltamos (queremos ver el modelo limpio).
@@ -491,7 +494,19 @@ impl ApplicationHandler for App {
                     let view_projection = camera.view_projection();
                     let position = camera.position;
                     renderer.sync_streaming(position);
-                    renderer.render(&view_projection);
+                    renderer.render(&view_projection, position);
+                }
+
+                // FPS en el titulo: se actualiza cada ~0.5 s con el tiempo real.
+                self.fps_frames += 1;
+                self.fps_accum += raw_dt;
+                if self.fps_accum >= 0.5 {
+                    let fps = self.fps_frames as f32 / self.fps_accum;
+                    if let Some(window) = self.window.as_ref() {
+                        window.set_title(&format!("{}  |  {fps:.0} fps", window::TITLE));
+                    }
+                    self.fps_frames = 0;
+                    self.fps_accum = 0.0;
                 }
             }
 

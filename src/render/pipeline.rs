@@ -16,15 +16,27 @@ use crate::world::atlas;
 
 /// Datos que la CPU envia a la GPU cada frame. El layout DEBE coincidir con el
 /// `struct Uniforms` del shader `scene.wgsl`.
+///
+/// Cuidado con la alineacion: en WGSL un `vec3<f32>` exige offset multiple de 16
+/// (aunque ocupe 12), por eso el orden y el relleno estan pensados para que Rust
+/// y WGSL coincidan byte a byte.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Uniforms {
     /// Matriz modelo * vista * proyeccion, aplanada en 16 floats.
     mvp: [f32; 16],
+    /// Posicion de la camara (para la niebla por distancia).
+    camera_pos: [f32; 3],
     /// Factor dia/noche (0..1) que multiplica la **luz de cielo**. La luz de
     /// bloque (antorchas) no se ve afectada.
     day_factor: f32,
-    /// Relleno para que el uniform mida un multiplo de 16 bytes (lo exige wgpu).
+    /// Color del cielo (lineal) al que se funde la niebla.
+    fog_color: [f32; 3],
+    /// Distancia a la que empieza la niebla.
+    fog_start: f32,
+    /// Distancia a la que la niebla es total.
+    fog_end: f32,
+    /// Relleno para que el uniform mida un multiplo de 16 bytes.
     _pad: [f32; 3],
 }
 
@@ -159,8 +171,10 @@ impl ScenePipeline {
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 front_face: wgpu::FrontFace::Ccw,
-                // Seguimos sin descartar caras traseras; el z-buffer basta.
-                cull_mode: None,
+                // Descartamos caras traseras: la geometria esta orientada hacia
+                // fuera, asi que solo se rasteriza lo visible (menos trabajo de
+                // fragmento). Las antorchas emiten sus dos orientaciones.
+                cull_mode: Some(wgpu::Face::Back),
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -244,11 +258,25 @@ impl ScenePipeline {
         (texture, view)
     }
 
-    /// Sube la matriz MVP y el factor dia/noche al uniform buffer.
-    pub fn update_uniforms(&self, queue: &wgpu::Queue, mvp: &Mat4, day_factor: f32) {
+    /// Sube la matriz MVP, el factor dia/noche y los parametros de niebla.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_uniforms(
+        &self,
+        queue: &wgpu::Queue,
+        mvp: &Mat4,
+        camera_pos: [f32; 3],
+        day_factor: f32,
+        fog_color: [f32; 3],
+        fog_start: f32,
+        fog_end: f32,
+    ) {
         let uniforms = Uniforms {
             mvp: mvp.to_cols_array(),
+            camera_pos,
             day_factor,
+            fog_color,
+            fog_start,
+            fog_end,
             _pad: [0.0; 3],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -270,5 +298,17 @@ impl ScenePipeline {
     #[inline]
     pub fn layout(&self) -> &wgpu::PipelineLayout {
         &self.layout
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn el_uniform_mide_112_bytes() {
+        // El shader (scene.wgsl) asume esta medida exacta; si cambia el layout
+        // hay que actualizar alli tambien.
+        assert_eq!(std::mem::size_of::<Uniforms>(), 112);
     }
 }

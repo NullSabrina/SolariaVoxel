@@ -10,7 +10,11 @@
 // WGSL alinee un `vec3` a 16 (lo que descuadraria el layout respecto a Rust).
 struct Uniforms {
     mvp: mat4x4<f32>,
+    camera_pos: vec3<f32>,
     day_factor: f32,
+    fog_color: vec3<f32>,
+    fog_start: f32,
+    fog_end: f32,
     pad0: f32,
     pad1: f32,
     pad2: f32,
@@ -43,6 +47,8 @@ struct VertexOutput {
     @location(2) block: f32,
     // Los enteros entre etapas exigen interpolacion plana (sin interpolar).
     @location(3) @interpolate(flat) tile: u32,
+    // Posicion en el mundo, para la niebla por distancia.
+    @location(4) world_pos: vec3<f32>,
 };
 
 @vertex
@@ -53,6 +59,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.sky = input.sky;
     output.block = input.block;
     output.tile = input.tile;
+    output.world_pos = input.position;
     return output;
 }
 
@@ -70,5 +77,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let light = max(input.sky * uniforms.day_factor, input.block);
     let ambient = 0.15;
     let shade = ambient + (1.0 - ambient) * light;
-    return vec4<f32>(tex.rgb * shade, tex.a);
+    let lit = tex.rgb * shade;
+    // Niebla a distancia: funde el terreno lejano con el color del cielo, lo que
+    // ademas disimula el borde del area cargada.
+    let dist = length(input.world_pos - uniforms.camera_pos);
+    let span = max(uniforms.fog_end - uniforms.fog_start, 0.001);
+    let fog = clamp((dist - uniforms.fog_start) / span, 0.0, 1.0);
+    return vec4<f32>(mix(lit, uniforms.fog_color, fog), tex.a);
 }
