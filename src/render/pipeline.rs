@@ -36,8 +36,11 @@ struct Uniforms {
     fog_start: f32,
     /// Distancia a la que la niebla es total.
     fog_end: f32,
+    /// Tiempo (s) para animar el agua. Ocupa el primer `pad` del shader de
+    /// escena; asi el uniform sigue midiendo 112 bytes.
+    time: f32,
     /// Relleno para que el uniform mida un multiplo de 16 bytes.
-    _pad: [f32; 3],
+    _pad: [f32; 2],
 }
 
 /// Pipeline de dibujo de la escena (voxeles texturizados con el atlas).
@@ -202,14 +205,17 @@ impl ScenePipeline {
             cache: None,
         });
 
-        // 7. Variante de **agua**: mismo shader/layout/bind group, pero con
-        //    blending alfa, sin escritura de z y sin culling (se ve desde arriba
-        //    y desde dentro del agua). Se dibuja en un pase posterior a lo opaco.
+        // 7. Variante de **agua**: shader propio (`water.wgsl`, con UVs animadas
+        //    y especular), sin culling (se ve desde dentro) y sin escritura de z.
+        let water_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("water.shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/water.wgsl").into()),
+        });
         let water_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene.water.pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &water_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[Some(Vertex::layout())],
@@ -229,7 +235,7 @@ impl ScenePipeline {
             }),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &water_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -313,6 +319,7 @@ impl ScenePipeline {
         fog_color: [f32; 3],
         fog_start: f32,
         fog_end: f32,
+        time: f32,
     ) {
         let uniforms = Uniforms {
             mvp: mvp.to_cols_array(),
@@ -321,7 +328,8 @@ impl ScenePipeline {
             fog_color,
             fog_start,
             fog_end,
-            _pad: [0.0; 3],
+            time,
+            _pad: [0.0; 2],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }

@@ -14,6 +14,7 @@ pub mod atlas;
 pub mod block;
 pub mod caves;
 pub mod chunk;
+pub mod fluid_mesher;
 pub mod greedy;
 pub mod mesher;
 pub mod raycast;

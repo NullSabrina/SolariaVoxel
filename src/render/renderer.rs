@@ -155,6 +155,8 @@ pub struct Renderer {
     clear_color: wgpu::Color,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
     day_factor: f32,
+    /// Instante de arranque: da el tiempo que anima la superficie del agua.
+    start: Instant,
 }
 
 impl Renderer {
@@ -246,6 +248,7 @@ impl Renderer {
             mesh_queue: VecDeque::new(),
             clear_color: sky_color(),
             day_factor: 1.0,
+            start: Instant::now(),
         };
         // Carga inicial del mundo alrededor del origen.
         renderer.sync_streaming(Vec3::new(0.0, 64.0, 0.0));
@@ -452,6 +455,11 @@ impl Renderer {
                 (self.world.sky_light_at(w), self.world.block_light_at(w))
             }
         };
+        // Nivel de agua (0 = sin agua) en coordenadas locales, mirando el chunk
+        // vecino si hace falta: la interpolacion de esquinas cruza el borde, asi
+        // que la consulta debe cruzarlo tambien.
+        let level =
+            |x: i32, y: i32, z: i32| -> u8 { self.world.water_level([base_x + x, y, base_z + z]) };
 
         let mut out: ColumnMeshes = std::array::from_fn(|_| SectionMeshes::default());
         for (section, slot) in out.iter_mut().enumerate() {
@@ -461,7 +469,9 @@ impl Renderer {
             if self.world.section_is_empty(pos, section) {
                 continue;
             }
-            let (v, i, wv, wi) = greedy::greedy_section_query(&query, &light, section, origin);
+            // La geometria opaca sigue siendo greedy; el agua la genera el
+            // mesher fluido, que interpola las esquinas para dar la rampa.
+            let (v, i, _, _) = greedy::greedy_section_query(&query, &light, section, origin);
             if !v.is_empty() {
                 slot.opaque = Some(Mesh::new(
                     &self.device,
@@ -470,6 +480,8 @@ impl Renderer {
                     &i,
                 ));
             }
+            let (wv, wi) =
+                crate::world::fluid_mesher::fluid_section(&level, &query, &light, section, origin);
             if !wv.is_empty() {
                 slot.water = Some(Mesh::new(
                     &self.device,
@@ -671,6 +683,7 @@ impl Renderer {
             fog_color,
             FOG_START,
             FOG_END,
+            self.start.elapsed().as_secs_f32(),
         );
 
         // Frustum de la camara: descartamos las secciones fuera de la vista sin

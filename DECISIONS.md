@@ -1433,6 +1433,41 @@ sirviendo de filtro rapido de fuentes; la logica general queda en `step_cell`.
 `check_2x2_source`, tests). 159 tests; clippy limpio. Conserva la lava/obsidiana
 de v0.8.6 y sus tests.
 
+### 2026-10-05 (v0.8.8) — Agua como liquido continuo (mesher + shader)
+
+**Decision.** Sustituir el render del agua por cubos por una **lamina continua**:
+
+1. **`world::fluid_mesher`**: por cada celda de agua se emite una cara superior
+   cuyas 4 esquinas suben a `y + max(nivel, vecinos)/8` (se toma el maximo de las
+   celdas que comparten la esquina). Eso convierte el escalon de dos niveles en
+   una **rampa** (nivel 8 junto a nivel 4 -> esquina compartida a 1.0, esquina
+   opuesta a 0.5). Solo se emiten superficie (si arriba no hay agua ni solido) y
+   caras laterales expuestas al aire; el interior del agua no genera geometria.
+2. **`water.wgsl`** (nuevo): shader propio con **UVs animadas** (`time`), mezcla
+   de dos muestras con `sin` (ondulacion), normal por **derivadas** (`dpdx/dpdy`)
+   y **especular Blinn-Phong**; el color se oscurece donde hay poca luz (cuevas).
+3. **Pipeline**: la variante de agua usa `water.wgsl`, `cull_mode: None`,
+   `depth_write_enabled: false` y `depth_compare: Less` (ya estaba; se mantiene).
+   El `time` entra por el `uniform` reutilizando el primer `pad` (sigue en 112
+   bytes, sin cambiar el layout).
+
+**Motivo.** El usuario pidio que el agua "no se vea como bloques apilados".
+Antes el greedy emitia el agua como cubos de altura completa; con niveles 1-8
+habia escalones visibles.
+
+**Alternativas descartadas.** (a) Meter la altura del agua en el vertice y
+deformar en el vertex shader: no permite caras laterales conectadas correctas.
+(b) Un buffer de uniform nuevo solo para agua: cambiaba el layout compartido;
+reutilizar el pad no. (c) Teselar el agua (mas vertices): innecesario con la
+interpolacion por esquinas.
+
+**Consecuencia.** `fluid_mesher.rs` nuevo (tests: altura = nivel/8 y diferencia
+de 0.5 entre niveles 8 y 4); `render/shaders/water.wgsl`; `pipeline.rs` (shader
+de agua + campo `time` en el uniform); `renderer.rs` (usa `fluid_mesher` para el
+agua, guarda `start: Instant` y pasa `time`). 161 tests; clippy limpio. El agua
+del oceano (nivel 8) se ve igual que antes; las rampas aparecen en flujos y
+bordes de nivel.
+
 ---
 
 ## Plantilla para futuras entradas

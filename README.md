@@ -8,17 +8,16 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.7` — Optimización de worldgen y fluidos
+## Estado actual: `v0.8.8` — Agua como líquido continuo
 
-- **Terreno**: el ruido 2D se **cachea por columna** (16×16 evaluaciones, no una
-  por bloque `y`); **decoración inteligente** (nada de árboles en pendiente ni
-  flotando) y **mezcla en bordes de bioma**.
-- **Cuevas**: campo de **densidad 3D** (`túneles·0.7 + cámaras·0.3`) con
-  atenuación por profundidad.
-- **Agua**: **equilibrio** (el océano generado no cuesta CPU) y **fuentes 2×2**.
-- Hereda de **v0.8.6**: lava, obsidiana y atlas 64×80. **v0.8.5**: clima, 7
-  biomas, cuevas 3D y acuíferos. **v0.8.4**: física AABB + agua. **v0.8.2**:
-  mesa de crafteo.
+- Nuevo `world::fluid_mesher`: el agua ya no son cubos apilados; la cara superior
+  **interpola las esquinas** a `y + nivel/8`, así el borde entre dos niveles es
+  una **rampa** suave. Solo se emiten la superficie y las caras expuestas.
+- Shader propio `water.wgsl`: **UVs animadas** con `time`, mezcla de dos muestras
+  (ondulación), **especular** Blinn-Phong y agua más oscura donde no hay luz.
+- Pipeline de agua: `cull_mode: None`, sin escritura de z y blending alfa.
+- Hereda de **v0.8.7**: cache de ruido 2D, decoración inteligente, cuevas por
+  densidad. **v0.8.6**: lava, obsidiana. **v0.8.5**: clima, 7 biomas, acuíferos.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
 der = colocar (sobre una mesa, la abre). Siguiente (Etapa 2): **mobs** (usando

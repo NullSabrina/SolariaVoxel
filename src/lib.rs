@@ -10,17 +10,15 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.7 - Optimizacion de worldgen y fluidos
+//! ## Estado actual: v0.8.8 - Agua como liquido continuo
 //!
-//! * Terreno: el **ruido 2D se cachea por columna** (16x16 evaluaciones, no una
-//!   por bloque `y`), **decoracion inteligente** (arboles en pendiente/flotando
-//!   prohibidos) y **mezcla en bordes de bioma**.
-//! * Cuevas: campo de **densidad 3D** (`tuneles*0.7 + camaras*0.3`) con
-//!   atenuacion por profundidad.
-//! * Agua: **equilibrio** (el oceano generado no cuesta CPU) y **fuentes 2x2**
-//!   (`water::check_2x2_source`).
-//!
-//! Hereda de v0.8.6 (lava, obsidiana) y v0.8.5 (clima, cuevas 3D, acuiferos).
+//! * Nuevo `world::fluid_mesher`: el agua se dibuja como **lamina continua**;
+//!   las esquinas del quad superior interpolan `y + nivel/8` (rampa, sin
+//!   escalones) y solo se emiten superficie y caras expuestas.
+//! * Shader propio `water.wgsl`: **UVs animadas** con `time`, mezcla de dos
+//!   muestras, **especular** Blinn-Phong por derivadas y agua mas oscura sin luz.
+//! * Pipeline de agua: `cull_mode: None`, sin escritura de z y bandas alfa.
+//! * Hereda de v0.8.7 (worldgen/fluidos), v0.8.6 (lava, obsidiana).
 //!
 //! Siguiente (Etapa 2): **mobs** (usando `physics`).
 //!
