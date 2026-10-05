@@ -229,7 +229,7 @@ fn greedy_range(
                 let (sky, block_light) = light(x as i32, y as i32, z as i32);
                 let sky_f = sky as f32 / super::chunk::MAX_LIGHT as f32;
                 let block_f = block_light as f32 / super::chunk::MAX_LIGHT as f32;
-                super::mesher::emit_torch_cross(
+                super::mesher::emit_torch(
                     &mut vertices,
                     &mut indices,
                     origin,
@@ -479,9 +479,9 @@ mod tests {
         column.set(8, 8, 8, Block::Torch);
         let (vertices, indices) = greedy_column(&column, [0.0; 3]);
         // Dos planos x 4 vertices; cada plano con las dos orientaciones (4 tri).
-        // Dos planos cruzados (8) + el palo del modelo .bbmodel (6 caras x 4).
-        assert_eq!(vertices.len(), 8 + 24, "cruz + palo");
-        assert_eq!(indices.len(), 24 + 72);
+        // Solo el palo del modelo .bbmodel: 6 caras x 4 vertices.
+        assert_eq!(vertices.len(), 24, "palo de la antorcha");
+        assert_eq!(indices.len(), 72);
         assert!(vertices.iter().all(|v| v.tile == 8));
     }
 
@@ -494,8 +494,8 @@ mod tests {
         let (vertices, _) = greedy_column(&column, [0.0; 3]);
         assert_eq!(
             vertices.len(),
-            6 * 4 + 32,
-            "6 caras de piedra + cruz y palo"
+            6 * 4 + 24,
+            "6 caras de piedra + palo de la antorcha"
         );
     }
 

@@ -10,15 +10,14 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.9 - Inventario completo y antorcha 3D
+//! ## Estado actual: v0.8.10 - Antorcha fiel al modelo .bbmodel
 //!
-//! * El inventario muestra **todos los bloques** (`ITEMS`, rejilla de 8
-//!   columnas): ya salen tablones, agua, lava, obsidiana, tierra gruesa, grava
-//!   y podzol. La hotbar son los 9 primeros.
-//! * La antorcha anade el **palo 3D** de `assets/models/solaria_torch.bbmodel`
-//!   (cubo central) ademas de las dos tablas cruzadas.
-//! * Backend heredado de v0.8.8 (agua continua, fluid_mesher + water.wgsl),
-//!   v0.8.7 (cache de ruido 2D, decoracion, cuevas por densidad) y v0.8.6 (lava).
+//! * La antorcha se dibuja como el **palo 3D** de
+//!   `assets/models/solaria_torch.bbmodel` (cubo 7..9 x 0..10 x 7..9, UV 1:1 a
+//!   la columna de la llama). Las dos tablas cruzadas del modelo llevan textura
+//!   "blank" (transparente), asi que no se emiten.
+//! * Hereda de v0.8.9 (inventario con todos los bloques), v0.8.8 (agua continua),
+//!   v0.8.7 (cache de ruido 2D, decoracion, cuevas por densidad).
 //!
 //! Siguiente (Etapa 2): **mobs** (usando `physics`).
 //!

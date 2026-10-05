@@ -1501,6 +1501,30 @@ actualizados); `water.rs` (`check_2x2_source` y su test). 161 tests; clippy
 limpio. Backend de terreno/agua del prompt anterior (cache de ruido 2D,
 acuiferos, deteccion de equilibrio) ya venia de v0.8.7/v0.8.8.
 
+### 2026-10-05 (v0.8.10) — Antorcha corregida para coincidir con el .bbmodel
+
+**Decision.** La antorcha se dibuja como el **palo** del modelo, no como una
+cruz plana. El `.bbmodel` tiene tres cubos, pero el analisis de sus texturas (5
+entradas: `torch`, `torch_mc`, `torch_sprite.png`, `torch_32.png`, `blank`)
+revela que las tablas cruzadas usan la textura "blank" (transparente) en sus
+caras grandes, asi que el unico elemento visible es el palo (7..9 x 0..10 x
+7..9). Se emite como caja con UV **1:1** a la columna de la antorcha del sprite
+(`u 7..9`, `v 6..16`): asi la llama queda arriba y el palo debajo, sin la
+transparencia que dejaba la cruz plana casi invisible.
+
+**Motivo.** En v0.8.9 se anadio el palo *ademas* de la cruz plana (que no debia
+verse) y ademas se mapeaba el tile entero a una cara de 2px: en el juego la
+antorcha salia como una aguja marron sin llama. El usuario lo comparo con
+Blockbench (donde solo se ve el poste).
+
+**Alternativas descartadas.** (a) Mantener la cruz plana: es lo que no coincidia
+con Blockbench. (b) Renderizar los tres cubos con el tile: las tablas cruzadas
+aparecerian cuando en el modelo son transparentes.
+
+**Consecuencia.** `mesher.rs`: `emit_torch_cross` -> `emit_torch` (solo el palo
+3D), helper `emit_box`; tests de conteo actualizados (24 vertices, 72 indices).
+161 tests; clippy limpio. Captura `v0.8.10_antorcha.png` (poste con llama).
+
 ---
 
 ## Plantilla para futuras entradas
