@@ -8,18 +8,17 @@ guardado versionado del mundo.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.6.4` — Ciclo dia/noche
+## Estado actual: `v0.6.5` — Colision horizontal (la camara no entra en bloques)
 
-- **Hora del mundo** (`scene::DayCycle`): avanza sola. El **color del cielo** va
-  del azul del dia al naranja del amanecer/atardecer y al oscuro de la noche.
-- **Luz del sol** que se apaga al anochecer, mientras las **antorchas siguen
-  brillando**: el vertice lleva la luz de cielo y la de bloque por separado y el
-  shader usa `max(cielo * dia, bloque)`.
+- El jugador ya **no atraviesa paredes**: se mueve eje a eje contra el mundo y se
+  **desliza** a lo largo de las paredes. Antes solo habia fisica vertical, asi
+  que la camara podia meterse dentro del terreno caminando en horizontal.
+- Hereda de v0.6.4: **ciclo dia/noche** (luz de cielo y de bloque separadas).
 - Hereda de v0.6.3: consolidacion (tests + `ARCHITECTURE.md`). v0.6.2: la
-  **antorcha como cruz fina** (dos quads + cutout), raycast que golpea bloques
-  visibles no solidos, y el **atlas como array de texturas**.
-- Sobre v0.6.1: block light (antorcha emite 14). v0.6.0: luz de cielo. v0.5.x:
-  LZ4, mundo en memoria + streaming. v0.4.x: romper/colocar, greedy, colisiones.
+  **antorcha como cruz fina** (dos quads + cutout) y el **atlas como array de
+  texturas**.
+- Sobre v0.6.1: block light. v0.6.0: luz de cielo. v0.5.x: LZ4 + streaming.
+  v0.4.x: romper/colocar, greedy, colisiones.
 
 Pendiente (anotado en `DECISIONS.md`): el palo 3D del `.bbmodel`, la antorcha de
 pared inclinada 22.5°, y los biomas (v0.7.x del roadmap).

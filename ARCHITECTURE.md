@@ -44,7 +44,7 @@ main.rs ──> lib.rs ──> engine::run()
 | `engine` | Ciclo de vida de la app, eventos de winit, input, ventana. | `render`, `scene`, `player`, `world`, `math` |
 | `render` | Todo lo que toca `wgpu`: superficie, pipelines, mallas, shaders. | `world` (para meshear), `scene`, `math` |
 | `scene` | Que hay en la escena: la camara FPS y el ciclo dia/noche. | `math` |
-| `player` | Fisica vertical del jugador y test de solape bloque/jugador. | `scene`, `world` (tipos), `math` |
+| `player` | Fisica del jugador: vertical (gravedad/salto/vuelo), colision horizontal y test de solape bloque/jugador. | `scene`, `world` (tipos), `math` |
 | `world` | Datos del mundo: bloques, columnas, meshing, raycast, guardado. | `render::mesh` (el tipo `Vertex`), `math` |
 | `math` | Matematica 3D propia (`Vec3`, `Mat4`). | ninguna |
 
@@ -59,7 +59,8 @@ resumed()                 window_event(RedrawRequested)
   crear ventana             │
   crear Renderer            ├─ App::update(dt)      fisica del jugador + camara
   cargar/migrar mundo       │   + DayCycle::advance  (hora del mundo)
-  posar jugador (settle)    ├─ App::update_selection() raycast -> resaltado
+  posar jugador (settle)    │   + move_horizontal     (colision en X-Z)
+  [modo demo] escena fija   ├─ App::update_selection() raycast -> resaltado
   [modo demo] escena fija   └─ camera.view_projection()
                                 renderer.set_environment(day_factor, sky_color)
                                 renderer.sync_streaming(camara)

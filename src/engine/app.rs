@@ -151,21 +151,23 @@ impl App {
             camera.add_look(dx, dy);
         }
 
-        // Movimiento horizontal (el vertical lo resuelve la fisica).
-        if forward != 0.0 || right != 0.0 {
-            camera.walk(forward, right, 0.0, dt);
-        }
-
         // En modo demo la camara queda fija: no aplicamos la fisica, para que la
         // vista de la captura no se desplace antes de la foto.
         if self.demo {
             return;
         }
 
-        // Fisica vertical. La consulta de solido mira el mundo en coordenadas de
-        // bloque (cualquier columna cargada).
+        // Fisica. La consulta de solido mira el mundo en coordenadas de bloque
+        // (cualquier columna cargada).
         let world = renderer;
         let is_solid = move |point: Vec3| -> bool { world.is_solid_at(point) };
+
+        // Movimiento horizontal CON colision (no atravesamos paredes).
+        if forward != 0.0 || right != 0.0 {
+            let mut player = self.player;
+            player.move_horizontal(camera, is_solid, forward, right, dt);
+            self.player = player;
+        }
 
         // En modo vuelo, Espacio/Shift suben/bajan; en modo normal Space salta.
         let shift = self.input.is_pressed(winit::keyboard::KeyCode::ShiftLeft)
@@ -352,8 +354,12 @@ impl ApplicationHandler for App {
         if self.demo {
             self.day_cycle = DayCycle::new(demo::time_of_day());
             if let (Some(renderer), Some(camera)) = (self.renderer.as_mut(), self.camera.as_mut()) {
-                let torch = demo::build(renderer, camera);
-                println!("[engine] demo: escena lista (antorcha en {torch:?})");
+                if demo::collide_active() {
+                    demo::build_collision(renderer, camera);
+                } else {
+                    let torch = demo::build(renderer, camera);
+                    println!("[engine] demo: escena lista (antorcha en {torch:?})");
+                }
             }
         }
 

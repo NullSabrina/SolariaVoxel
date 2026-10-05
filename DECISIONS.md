@@ -768,6 +768,29 @@ Con el lote baja a menos de un segundo.
 **Consecuencia.** `demo::build` reune las ediciones en un `Vec` y llama a
 `set_blocks` una vez.
 
+### 2026-10-04 (v0.6.5) — Colision horizontal del jugador
+
+**Decision.** El movimiento horizontal deja de ser `Camera::walk` (sin colision)
+y pasa por `PlayerController::move_horizontal`: el jugador es una **caja** (radio
+`PLAYER_RADIUS`, alto `PLAYER_HEIGHT`) y se mueve **eje a eje** (primero X, luego
+Z). Si un eje choca con un bloque solido, ese eje se cancela y el otro sigue
+(deslizamiento).
+
+**Motivo.** Solo existia fisica **vertical** (gravedad/suelo); en horizontal el
+jugador atravesaba paredes y podia quedar dentro del terreno (la camara "entraba
+en los chunks"). Era el bug mas visible de la etapa "mundo jugable".
+
+**Alternativas descartadas.** (a) Resolver los dos ejes a la vez: bloquea el
+movimiento en diagonal contra una pared (no se desliza). (b) Caja de colision
+exacta (AABB por vertices): mas cara y no aporta en voxeles alineados a ejes.
+
+**Consecuencia.** Nuevo `PlayerController::move_horizontal` + `collides` (AABB
+contra voxeles). `App::update` lo llama antes de la fisica vertical. 4 tests
+nuevos (pared, deslizamiento, espacio libre, no chocar con el suelo). Demo
+`SOLARIA_COLLIDE=1` empuja al jugador contra un muro para verificar en captura
+que se detiene delante (z=18.37 con el muro en 18).
+
+
 
 
 

@@ -1,9 +1,15 @@
-//! Fisica vertical del jugador: gravedad y deteccion de suelo.
+//! Fisica del jugador: gravedad, suelo y **colision horizontal**.
 //!
-//! En v0.3.2 solo hay movimiento vertical: el jugador cae hasta posarse sobre el
-//! primer bloque solido. La logica esta **desacoplada** del mundo y del renderer:
-//! `update` recibe una funcion de consulta (`is_solid`), asi que se puede testear
-//! sin GPU ni chunks.
+//! La fisica esta **desacoplada** del mundo y del renderer: cada metodo recibe
+//! una funcion de consulta (`is_solid`), asi que se puede testear sin GPU ni
+//! chunks.
+//!
+//! * [`PlayerController::update`] resuelve la **vertical** (gravedad, suelo,
+//!   salto, vuelo).
+//! * [`PlayerController::move_horizontal`] mueve en el plano X-Z resolviendo la
+//!   **colision horizontal**: el jugador es una caja (radio `PLAYER_RADIUS`, alto
+//!   `PLAYER_HEIGHT`) y se mueve eje a eje, de modo que si choca con una pared se
+//!   **desliza** a lo largo de ella en lugar de quedarse clavado.
 //!
 //! Nota: en v0.3.1 el mundo se regenera "de golpe" al cruzar de chunk, y aquello
 //! era incompatible con un jugador a ras de suelo. Al subir el radio de streaming
@@ -30,6 +36,10 @@ pub const PLAYER_HEIGHT: f32 = 1.8;
 
 /// Radio del jugador en el plano horizontal (lo tratamos como un cilindro).
 pub const PLAYER_RADIUS: f32 = 0.3;
+
+/// Margen para no "chocar" con el bloque sobre el que estamos de pie: la caja de
+/// colision no incluye exactamente los extremos (pies y cabeza).
+const SKIN: f32 = 1e-3;
 
 /// El jugador resuelve la fisica vertical contra el mundo.
 #[derive(Debug, Clone, Copy, Default)]
@@ -117,6 +127,82 @@ impl PlayerController {
 
         camera.position.y = new_feet + EYE_HEIGHT;
         camera.update_view();
+    }
+
+    /// Mueve al jugador en el plano X-Z con **colision horizontal**.
+    ///
+    /// `forward` y `right` son los ejes de input en `[-1, 1]`. El movimiento se
+    /// resuelve **eje a eje**: primero X y luego Z. Si un eje choca contra un
+    /// bloque solido, ese eje se cancela y el otro sigue, de modo que el jugador
+    /// se **desliza** a lo largo de la pared en vez de quedarse clavado.
+    pub fn move_horizontal(
+        &mut self,
+        camera: &mut Camera,
+        is_solid: impl Fn(Vec3) -> bool,
+        forward: f32,
+        right: f32,
+        dt: f32,
+    ) {
+        let yaw = camera.yaw_deg.to_radians();
+        // "Adelante" horizontal (sin componente vertical), como `Camera::walk`.
+        let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
+        let right_v = fwd.cross(Vec3::Y);
+        let mut dir = fwd * forward + right_v * right;
+        if dir.length_squared() > 0.0 {
+            dir = dir.normalize();
+        }
+        let delta = dir * (camera.speed * dt);
+
+        // Eje X.
+        if delta.x != 0.0 {
+            let candidate = Vec3::new(
+                camera.position.x + delta.x,
+                camera.position.y,
+                camera.position.z,
+            );
+            if !Self::collides(candidate, &is_solid) {
+                camera.position.x = candidate.x;
+            }
+        }
+        // Eje Z.
+        if delta.z != 0.0 {
+            let candidate = Vec3::new(
+                camera.position.x,
+                camera.position.y,
+                camera.position.z + delta.z,
+            );
+            if !Self::collides(candidate, &is_solid) {
+                camera.position.z = candidate.z;
+            }
+        }
+        camera.update_view();
+    }
+
+    /// ¿La caja del jugador (radio `PLAYER_RADIUS`, alto `PLAYER_HEIGHT`, pies en
+    /// `pos.y - EYE_HEIGHT`) solapa algun bloque solido en `pos`?
+    fn collides(pos: Vec3, is_solid: &impl Fn(Vec3) -> bool) -> bool {
+        let feet = pos.y - EYE_HEIGHT;
+        let (x0, x1) = (pos.x - PLAYER_RADIUS, pos.x + PLAYER_RADIUS);
+        let (z0, z1) = (pos.z - PLAYER_RADIUS, pos.z + PLAYER_RADIUS);
+        // La caja no llega exactamente a los pies ni a la cabeza (`SKIN`), para
+        // no colisionar con el bloque del suelo ni con el techo por rozarlos.
+        let (y0, y1) = (feet + SKIN, feet + PLAYER_HEIGHT - SKIN);
+
+        let (ix0, ix1) = (x0.floor() as i32, x1.floor() as i32);
+        let (iy0, iy1) = (y0.floor() as i32, y1.floor() as i32);
+        let (iz0, iz1) = (z0.floor() as i32, z1.floor() as i32);
+
+        for x in ix0..=ix1 {
+            for y in iy0..=iy1 {
+                for z in iz0..=iz1 {
+                    // Centro del voxel, como espera la consulta del mundo.
+                    if is_solid(Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Posa la camara sobre la **superficie** del terreno en su columna `(x, z)`
@@ -319,5 +405,79 @@ mod tests {
         assert!(!block_overlaps_player([1, 0, 0], eye_at(0.5, 0.5)));
         // Pero uno en x=0 cubre 0..1 y si solapa.
         assert!(block_overlaps_player([0, 0, 0], eye_at(0.5, 0.5)));
+    }
+
+    // --- colision horizontal (move_horizontal) --------------------------------
+    // El jugador camina a `camera.speed` (8 u/s); con dt=1/60 avanza ~0.133.
+
+    fn test_camera_at(x: f32, z: f32) -> Camera {
+        let mut camera = Camera::new(Vec3::new(x, EYE_HEIGHT, z));
+        camera.yaw_deg = 0.0; // fwd = -Z, right = +X
+        camera.update_view();
+        camera
+    }
+
+    #[test]
+    fn en_espacio_abierto_se_mueve_libre() {
+        let mut camera = test_camera_at(0.5, 0.5);
+        let mut player = PlayerController::new();
+        let open = |_: Vec3| false;
+        player.move_horizontal(&mut camera, open, 0.0, 1.0, 1.0 / 60.0);
+        // Se movio ~0.133 en +X (right).
+        assert!((camera.position.x - (0.5 + 8.0 / 60.0)).abs() < 1e-3);
+        assert!((camera.position.z - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn no_atraviesa_una_pared() {
+        // Pared solida en x >= 2. El jugador parte en x=1.5 y empuja +X 2 s.
+        let mut camera = test_camera_at(1.5, 0.5);
+        let mut player = PlayerController::new();
+        let wall = |p: Vec3| p.x >= 2.0;
+        for _ in 0..120 {
+            player.move_horizontal(&mut camera, wall, 0.0, 1.0, 1.0 / 60.0);
+        }
+        // No entra en la pared (x + radio debe quedar por debajo de 2).
+        assert!(
+            camera.position.x + PLAYER_RADIUS < 2.0 + 1e-3,
+            "x={} (entro en la pared)",
+            camera.position.x
+        );
+        // Pero si se acerco (no se quedo clavado al primer paso).
+        assert!(camera.position.x > 1.5, "no se acerco a la pared");
+    }
+
+    #[test]
+    fn se_desliza_a_lo_largo_de_la_pared() {
+        // Pared en x >= 2. Empujamos en diagonal (+X bloqueado, -Z libre): el
+        // jugador debe deslizarse por Z aunque X se cancele.
+        let mut camera = test_camera_at(1.5, 0.5);
+        let mut player = PlayerController::new();
+        let wall = |p: Vec3| p.x >= 2.0;
+        for _ in 0..60 {
+            player.move_horizontal(&mut camera, wall, 1.0, 1.0, 1.0 / 60.0);
+        }
+        assert!(camera.position.z < 0.5 - 0.5, "no se deslizo por Z");
+        assert!(
+            camera.position.x + PLAYER_RADIUS < 2.0 + 1e-3,
+            "X atraveso la pared"
+        );
+    }
+
+    #[test]
+    fn no_colisiona_con_el_bloque_del_suelo() {
+        // Suelo solido en y < 4; el jugador esta de pie con los pies en y=4.
+        // Moverse en horizontal no debe chocar con el suelo.
+        let mut camera = test_camera_at(0.5, 0.5);
+        camera.position.y = 4.0 + EYE_HEIGHT;
+        camera.update_view();
+        let mut player = PlayerController::new();
+        let floor = |p: Vec3| p.y < 4.0;
+        player.move_horizontal(&mut camera, floor, 0.0, 1.0, 1.0 / 60.0);
+        assert!(
+            camera.position.x > 0.5 + 0.1,
+            "deberia moverse sobre el suelo, x={}",
+            camera.position.x
+        );
     }
 }

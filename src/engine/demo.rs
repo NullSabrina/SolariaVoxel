@@ -30,6 +30,62 @@ pub fn time_of_day() -> f32 {
         .rem_euclid(1.0)
 }
 
+/// ¿Mostrar el test de colision horizontal? (`SOLARIA_COLLIDE`).
+pub fn collide_active() -> bool {
+    std::env::var("SOLARIA_COLLIDE").is_ok()
+}
+
+/// Escena para **verificar la colision horizontal**: una pared solida delante y
+/// el jugador empujando hacia ella durante 3 s (sin input real: llamamos a
+/// `move_horizontal` en un bucle). Al capturar debe verse la pared de cerca y
+/// **no su interior**, prueba de que el jugador no la atraviesa.
+pub fn build_collision(renderer: &mut Renderer, camera: &mut Camera) {
+    let cx = camera.position.x.floor() as i32;
+    let cz = camera.position.z.floor() as i32;
+    let feet = (camera.position.y - EYE_HEIGHT).floor() as i32;
+    let plateau = feet + 1;
+
+    let mut edits: Vec<([i32; 3], Block)> = Vec::new();
+    // Plataforma plana.
+    for x in (cx - 3)..=(cx + 3) {
+        for z in (cz - 6)..=(cz + 3) {
+            edits.push(([x, plateau, z], Block::Grass));
+            for y in (plateau + 1)..(plateau + 8) {
+                edits.push(([x, y, z], Block::Air));
+            }
+        }
+    }
+    // Pared solida de 7x3 a 3 bloques al frente (-Z).
+    for dx in -3..=3 {
+        for dy in 0..3 {
+            edits.push(([cx + dx, plateau + 1 + dy, cz - 3], Block::Stone));
+        }
+    }
+    renderer.set_blocks(&edits);
+
+    // Jugador a 2 bloques de la pared, empujando hacia -Z (yaw 0, forward=1).
+    camera.position = Vec3::new(
+        cx as f32 + 0.5,
+        plateau as f32 + 1.0 + EYE_HEIGHT,
+        cz as f32 + 0.5,
+    );
+    camera.yaw_deg = 0.0;
+    camera.pitch_deg = 0.0;
+    camera.update_view();
+
+    let mut player = crate::player::PlayerController::new();
+    let query = |p: Vec3| renderer.is_solid_at(p);
+    for _ in 0..180 {
+        player.move_horizontal(camera, query, 1.0, 0.0, 1.0 / 60.0);
+    }
+    camera.pitch_deg = -5.0;
+    camera.update_view();
+    println!(
+        "[engine] demo: colision -> jugador en z={:.2}",
+        camera.position.z
+    );
+}
+
 /// Monta la escena de captura: una parcela plana de hierba con una antorcha
 /// delante, y coloca la camara mirandola desde cerca.
 ///
