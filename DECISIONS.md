@@ -1838,6 +1838,41 @@ reabrir.
 
 ---
 
+### 2026-10-05 (v0.9.1) — Persistencia de fluidos (auditoria FASE 7, parte 2)
+
+**Decision.** El formato de archivo sube a **v5**: `ChunkRecord` gana el campo
+`fluid` (nivel de flujo por celda, mismo indice `(y,z,x)` que `blocks`,
+comprimido con LZ4; **vacio** si la columna no tiene agua que fluya). Se anaden
+los espejos posicionales `ChunkRecordV4` y `WorldSaveV4` y el migrador
+**v4 -> v5**, que deja `fluid` vacio: un mundo v4 no guardaba niveles, asi que
+todo `Water` vuelve como **fuente**, que es exactamente como se comportaba.
+`apply_record` restaura bloques y niveles de flujo.
+
+**Motivo.** El audit (P1 agua, §11.5 / §5.6) exige que el agua que fluye
+sobreviva a cerrar y reabrir. Antes solo vivia en el `HashMap` en memoria (v0.9.0
+lo movio a la columna), asi que al recargar todo el flujo volvia a fuente y el
+mundo "perdia" el nivel real.
+
+**Alternativas descartadas.**
+- Empaquetar `fluid` en un *nibble* tambien en disco: el archivo se comprime con
+  LZ4 y el nibble complicaria `from_column`/`apply_record` por ~1 byte/celda
+  antes de comprimir; no compensa (la memoria en RAM ya es nibble).
+- Fusionar bloques y fluido en un unico payload comprimido: obligaria a un
+  formato entrelazado y a reescribir el migrador de bloques; campos separados
+  mantienen el layout simple y aditivo.
+- Reconstruir el flujo por simulacion al cargar: no es determinista y pagaria
+  CPU en cada carga; el agua no es derivable del bloque.
+
+**Consecuencia.** `world/save.rs` (`FORMAT_VERSION = 5`, `fluid`, espejos v4,
+`V4ToV5`, `decompressed_fluid`, `is_corrupt` valida ambos campos),
+`world/store.rs` (`apply_record` restaura flujo). 181 tests (incluye roundtrip
+de flujo, migracion v4->v5 y supervivencia a descarga/recarga); clippy
+`-D warnings` limpio. **Limites**: el remesheo de agua sigue siendo el anillo 3x3
+de columnas (v0.9.2) y la transparencia no esta ordenada (v0.9.3). Siguiente
+cuello de botella: el coste de re-meshear de mas al fluir agua.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

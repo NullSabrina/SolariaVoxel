@@ -917,12 +917,17 @@ impl FluidGrid for World {
 /// Seccion que contiene la superficie del terreno (y 64..80).
 pub const TERRAIN_SECTION: usize = 4;
 
-/// Aplica los bloques de un `ChunkRecord` a una columna (descomprime si hace
-/// falta). Escribe `record.height` capas a partir de `record.y0`, de modo que
-/// los registros migrados de v3 (una seccion en `y=64`) y los nuevos (columna
-/// completa) conviven.
+/// Aplica los bloques (y los niveles de flujo) de un `ChunkRecord` a una columna
+/// (descomprime si hace falta). Escribe `record.height` capas a partir de
+/// `record.y0`, de modo que los registros migrados de v3 (una seccion en `y=64`)
+/// y los nuevos (columna completa) conviven.
+///
+/// El campo `fluid` es opcional: si el registro no lo trae (v4 migrado o columna
+/// sin agua que fluya), los niveles quedan a 0 = todo `Water` es **fuente**, que
+/// es el comportamiento anterior.
 pub fn apply_record(column: &mut Column, record: &ChunkRecord) {
     let blocks = record.decompressed_blocks();
+    let fluid = record.decompressed_fluid();
     let y0 = record.y0 as usize;
     let y_end = (y0 + record.height as usize).min(WORLD_HEIGHT);
     let mut i = 0usize;
@@ -931,6 +936,11 @@ pub fn apply_record(column: &mut Column, record: &ChunkRecord) {
             for x in 0..CHUNK_SIZE {
                 if let Some(&id) = blocks.get(i) {
                     column.set(x, y, z, Block::from_u8(id));
+                }
+                if let Some(&level) = fluid.get(i)
+                    && level > 0
+                {
+                    column.set_flow(x, y, z, level);
                 }
                 i += 1;
             }
@@ -1272,6 +1282,39 @@ mod tests {
         // Un tick mas no reporta ningun chunk sucio ni procesa nada visible.
         assert!(world.tick_water(100_000).is_empty());
         assert!(world.water_at([8, 101, 8]).is_source());
+    }
+
+    #[test]
+    fn el_flujo_sobrevive_a_descargar_y_recargar_la_columna() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 0, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                world.set_block([x, 100, z], Block::Stone);
+            }
+        }
+        world.set_block([8, 101, 8], Block::Water);
+        for _ in 0..40 {
+            world.tick_water(100_000);
+        }
+        // Una celda que fluye (no la fuente), con nivel > 0.
+        let flow_cell = [9, 101, 8];
+        let level = world.water_level(flow_cell);
+        assert!(world.water_at(flow_cell).is_water());
+
+        // Nos alejamos 6 chunks: la columna (0,0) se descarga (volcando su
+        // registro, con fluido). Volvemos: debe restaurarse igual.
+        world.update_streaming([(CHUNK_SIZE * 6) as f32, 64.0, 0.0]);
+        assert!(!world.is_loaded(ChunkPos::new(0, 0)));
+        world.update_streaming([8.0, 120.0, 8.0]);
+
+        assert_eq!(
+            world.water_level(flow_cell),
+            level,
+            "el nivel de flujo se perdio al descargar/recargar"
+        );
+        assert_eq!(world.water_at([8, 101, 8]), Fluid::Source);
     }
 
     #[test]

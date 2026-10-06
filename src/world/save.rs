@@ -43,7 +43,11 @@ pub const LEGACY_TERRAIN_Y0: u32 = 64;
 /// * v3: `WorldSave` guarda ademas la **posicion del jugador**.
 /// * v4: `ChunkRecord` guarda **toda la columna** (`y0`, `height` y bloques de
 ///   las 24 secciones). Antes solo se persistia `y=64..80`.
-pub const FORMAT_VERSION: u32 = 4;
+/// * v5: `ChunkRecord` guarda ademas los **niveles de flujo del agua**
+///   (`fluid`), para que el agua que fluye no vuelva a fuente al recargar. Un
+///   registro v4 migra con `fluid` vacio = todo `Water` es fuente (comportamiento
+///   anterior, sin perdida de datos).
+pub const FORMAT_VERSION: u32 = 5;
 
 /// Version actual del generador de terreno.
 ///
@@ -115,6 +119,11 @@ impl WorldHeader {
 /// `blocks` guarda `height` capas de `16x16` empezando en `y0`, en orden
 /// `(y, z, x)`. En el formato v4 `y0 = 0` y `height = WORLD_HEIGHT` (columna
 /// completa); los registros migrados de v3 conservan `y0 = 64` y `height = 16`.
+///
+/// `fluid` (desde v5) guarda el **nivel de flujo** del agua con el mismo orden e
+/// indice que `blocks`: `0` = sin flujo (una celda `Water` sin flujo es fuente),
+/// `1..=MAX_LEVEL` = agua que fluye. Va **vacio** si la columna no tiene agua que
+/// fluya (lo normal: un oceano es todo fuentes), asi no se paga nada por ello.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct ChunkRecord {
     pub format_version: u32,
@@ -126,6 +135,8 @@ pub struct ChunkRecord {
     pub height: u32,
     /// Bloques (comprimidos con LZ4 si `compressed`).
     pub blocks: Vec<u8>,
+    /// Niveles de flujo del agua (comprimidos con LZ4 si `compressed`).
+    pub fluid: Vec<u8>,
 }
 
 /// Layout de `ChunkRecord` en los formatos v2/v3 (sin `y0`/`height`). Bincode es
@@ -138,15 +149,37 @@ struct ChunkRecordV3 {
     blocks: Vec<u8>,
 }
 
+/// Layout de `ChunkRecord` en el formato **v4** (columna completa, pero sin
+/// `fluid`). Bincode es posicional: decodificar un v4 con el layout v5 leería los
+/// bytes de `fluid` a continuacion y corromperia el resto del archivo.
+#[derive(Clone, Debug, Encode, Decode)]
+struct ChunkRecordV4 {
+    format_version: u32,
+    generator_version: u32,
+    compressed: bool,
+    y0: u32,
+    height: u32,
+    blocks: Vec<u8>,
+}
+
 impl ChunkRecord {
     /// Construye el registro a partir de una columna cargada (terreno generado
-    /// + ediciones). Guarda las 24 secciones y comprime con LZ4.
+    /// mas ediciones). Guarda las 24 secciones (bloques y niveles de flujo) y
+    /// comprime con LZ4. El campo `fluid` queda **vacio** si la columna no tiene
+    /// agua que fluya (el caso normal: un oceano entero son fuentes).
     pub fn from_column(column: &Column) -> Self {
         let mut raw = Vec::with_capacity(COLUMN_VOLUME);
+        let mut fluid = Vec::new();
+        if column.has_flow_storage() {
+            fluid.reserve(COLUMN_VOLUME);
+        }
         for y in 0..WORLD_HEIGHT {
             for z in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
                     raw.push(column.get(x, y, z).id());
+                    if column.has_flow_storage() {
+                        fluid.push(column.flow_at(x, y, z));
+                    }
                 }
             }
         }
@@ -157,6 +190,14 @@ impl ChunkRecord {
             y0: 0,
             height: WORLD_HEIGHT as u32,
             blocks: lz4_flex::compress_prepend_size(&raw),
+            // Vacio se deja vacio: comprimir un array de 0 bytes daria un
+            // payload no vacio que pareceria "hay fluido" (y `is_corrupt` lo
+            // confundiria con un chunk truncado).
+            fluid: if fluid.is_empty() {
+                Vec::new()
+            } else {
+                lz4_flex::compress_prepend_size(&fluid)
+            },
         }
     }
 
@@ -175,9 +216,26 @@ impl ChunkRecord {
         }
     }
 
-    /// ¿El payload no decodifica al tamano esperado? (chunk corrupto).
+    /// Niveles de flujo sin comprimir. Vacio si la columna no guardo fluidos
+    /// (oceano: todo fuentes) o si el payload esta corrupto.
+    pub fn decompressed_fluid(&self) -> Vec<u8> {
+        if self.fluid.is_empty() {
+            return Vec::new();
+        }
+        if self.compressed {
+            lz4_flex::decompress_size_prepended(&self.fluid).unwrap_or_default()
+        } else {
+            self.fluid.clone()
+        }
+    }
+
+    /// ¿El payload no decodifica al tamano esperado? (chunk corrupto). El campo
+    /// `fluid` solo se valida si el registro lo trae; vacio es valido.
     pub fn is_corrupt(&self) -> bool {
-        self.decompressed_blocks().len() != self.raw_len()
+        if self.decompressed_blocks().len() != self.raw_len() {
+            return true;
+        }
+        !self.fluid.is_empty() && self.decompressed_fluid().len() != self.raw_len()
     }
 
     /// Ratio de compresion (`raw / compressed`). 1.0 = no comprime.
@@ -203,6 +261,9 @@ impl ChunkRecord {
     pub fn migrate_to_v2(&mut self) {
         if !self.compressed {
             self.blocks = lz4_flex::compress_prepend_size(&self.blocks);
+            if !self.fluid.is_empty() {
+                self.fluid = lz4_flex::compress_prepend_size(&self.fluid);
+            }
             self.compressed = true;
         }
         self.format_version = 2;
@@ -231,6 +292,14 @@ struct WorldSaveV3 {
     player_pos: [f32; 3],
 }
 
+/// Espejo del `WorldSave` **v4** (columna completa sin fluido).
+#[derive(Encode, Decode)]
+struct WorldSaveV4 {
+    header: WorldHeader,
+    chunks: HashMap<ChunkPos, ChunkRecordV4>,
+    player_pos: [f32; 3],
+}
+
 /// Espejo del `WorldSave` **v2** (sin `player_pos`).
 #[derive(Encode, Decode)]
 struct WorldSaveV2 {
@@ -239,7 +308,7 @@ struct WorldSaveV2 {
 }
 
 /// Convierte un registro antiguo (una seccion) al formato de columna completo.
-/// La seccion vivia en `y = LEGACY_TERRAIN_Y0`.
+/// La seccion vivia en `y = LEGACY_TERRAIN_Y0`. Sin datos de fluido (vacio).
 fn upgrade_v3_record(old: ChunkRecordV3) -> ChunkRecord {
     ChunkRecord {
         format_version: 3,
@@ -248,6 +317,22 @@ fn upgrade_v3_record(old: ChunkRecordV3) -> ChunkRecord {
         y0: LEGACY_TERRAIN_Y0,
         height: CHUNK_SIZE as u32,
         blocks: old.blocks,
+        fluid: Vec::new(),
+    }
+}
+
+/// Convierte un registro v4 (columna completa, sin fluido) al v5. `fluid` vacio
+/// significa "todo `Water` es fuente", que es exactamente el comportamiento de
+/// v4: no se pierde ni se inventa agua.
+fn upgrade_v4_record(old: ChunkRecordV4) -> ChunkRecord {
+    ChunkRecord {
+        format_version: 4,
+        generator_version: old.generator_version,
+        compressed: old.compressed,
+        y0: old.y0,
+        height: old.height,
+        blocks: old.blocks,
+        fluid: Vec::new(),
     }
 }
 
@@ -304,9 +389,23 @@ impl WorldSave {
             });
         }
         match version {
-            4 => {
+            5 => {
                 let (save, _) = bincode::decode_from_slice::<WorldSave, _>(&bytes, standard())?;
                 Ok(save)
+            }
+            4 => {
+                let (v4, _) = bincode::decode_from_slice::<WorldSaveV4, _>(&bytes, standard())?;
+                let mut header = v4.header;
+                header.format_version = 4;
+                Ok(WorldSave {
+                    header,
+                    chunks: v4
+                        .chunks
+                        .into_iter()
+                        .map(|(p, r)| (p, upgrade_v4_record(r)))
+                        .collect(),
+                    player_pos: v4.player_pos,
+                })
             }
             3 => {
                 let (v3, _) = bincode::decode_from_slice::<WorldSaveV3, _>(&bytes, standard())?;
@@ -483,6 +582,26 @@ impl WorldMigrator for V3ToV4 {
     }
 }
 
+/// Migrador v4 -> v5: anade el campo `fluid` vacio. Los mundos v4 no guardaban
+/// niveles de flujo, asi que todo `Water` se interpreta como **fuente**, que es
+/// exactamente como se comportaban (cero perdida ni invencion de agua).
+pub struct V4ToV5;
+
+impl WorldMigrator for V4ToV5 {
+    fn from_version(&self) -> u32 {
+        4
+    }
+    fn to_version(&self) -> u32 {
+        5
+    }
+    fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
+        let mut r = chunk.clone();
+        r.fluid = Vec::new();
+        r.format_version = 5;
+        r
+    }
+}
+
 /// Cadena de migradores.
 #[derive(Default)]
 pub struct MigrationChain {
@@ -492,7 +611,12 @@ pub struct MigrationChain {
 impl MigrationChain {
     pub fn with_builtins() -> Self {
         Self {
-            migrators: vec![Box::new(V1ToV2), Box::new(V2ToV3), Box::new(V3ToV4)],
+            migrators: vec![
+                Box::new(V1ToV2),
+                Box::new(V2ToV3),
+                Box::new(V3ToV4),
+                Box::new(V4ToV5),
+            ],
         }
     }
 
@@ -688,6 +812,7 @@ mod tests {
             y0: 0,
             height: WORLD_HEIGHT as u32,
             blocks: lz4_flex::compress_prepend_size(&raw),
+            fluid: Vec::new(),
         };
         assert_eq!(record.first_unknown_id(), Some(200));
         assert!(!Block::is_known_id(200));
@@ -707,6 +832,7 @@ mod tests {
             y0: 0,
             height: WORLD_HEIGHT as u32,
             blocks: vec![1, 2, 3, 4], // LZ4 invalido
+            fluid: Vec::new(),
         };
         assert!(record.is_corrupt());
     }
@@ -777,6 +903,89 @@ mod tests {
         let mut col = Column::empty();
         crate::world::store::apply_record(&mut col, record);
         assert_eq!(col.get(2, 69, 3), Block::Wood);
+    }
+
+    #[test]
+    fn el_nivel_de_flujo_sobrevive_al_guardado_y_la_carga() {
+        let mut column = Column::empty();
+        column.set(3, 70, 4, Block::Water);
+        column.set(4, 70, 4, Block::Water);
+        // La celda 3 es fuente (flujo 0); la 4 fluye con nivel 5.
+        column.set_flow(4, 70, 4, 5);
+        let record = ChunkRecord::from_column(&column);
+        assert!(!record.fluid.is_empty(), "deberia guardar fluido");
+
+        let mut save = WorldSave::new(1, 0);
+        save.set_chunk(ChunkPos::new(0, 0), record);
+        let path = temp_path("fluid_roundtrip");
+        save.save_to(&path).unwrap();
+        let loaded = WorldSave::load_from(&path).unwrap();
+        cleanup(&path);
+
+        let mut restored = Column::empty();
+        crate::world::store::apply_record(
+            &mut restored,
+            loaded.chunks.get(&ChunkPos::new(0, 0)).unwrap(),
+        );
+        assert_eq!(restored.get(3, 70, 4), Block::Water);
+        assert_eq!(restored.flow_at(3, 70, 4), 0, "la fuente no tiene flujo");
+        assert_eq!(restored.flow_at(4, 70, 4), 5, "el flujo debe sobrevivir");
+    }
+
+    #[test]
+    fn una_columna_sin_agua_que_fluya_no_guarda_fluido() {
+        // Un oceano es todo fuentes: `from_column` no reserva el array de flujo.
+        let mut column = Column::empty();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                column.set(x, 70, z, Block::Water);
+            }
+        }
+        let record = ChunkRecord::from_column(&column);
+        assert!(
+            record.decompressed_fluid().is_empty(),
+            "sin agua que fluya, `fluid` debe ir vacio"
+        );
+        assert!(!record.is_corrupt());
+    }
+
+    #[test]
+    fn un_mundo_v4_se_migra_con_todo_el_agua_como_fuente() {
+        // Emulamos un archivo v4: columna completa sin campo `fluid`.
+        let mut raw = vec![Block::Air.id(); COLUMN_VOLUME];
+        let idx = (70 * CHUNK_SIZE + 4) * CHUNK_SIZE + 3;
+        raw[idx] = Block::Water.id();
+        let old = ChunkRecordV4 {
+            format_version: 4,
+            generator_version: GENERATOR_VERSION,
+            compressed: true,
+            y0: 0,
+            height: WORLD_HEIGHT as u32,
+            blocks: lz4_flex::compress_prepend_size(&raw),
+        };
+        let mut chunks = HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), old);
+        let mut header = WorldHeader::new(7, 1);
+        header.format_version = 4;
+        let v4 = WorldSaveV4 {
+            header,
+            chunks,
+            player_pos: [1.0, 2.0, 3.0],
+        };
+        let bytes = bincode::encode_to_vec(&v4, standard()).unwrap();
+        let path = temp_path("v4_fluid_migrate");
+        std::fs::write(&path, &bytes).unwrap();
+        let loaded = load_and_migrate(&path).unwrap();
+        cleanup(&path);
+
+        assert_eq!(loaded.header.format_version, FORMAT_VERSION);
+        assert_eq!(loaded.player_pos, [1.0, 2.0, 3.0]);
+        let record = loaded.chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert!(record.fluid.is_empty(), "v4 no traia fluido");
+        let mut col = Column::empty();
+        crate::world::store::apply_record(&mut col, record);
+        assert_eq!(col.get(3, 70, 4), Block::Water);
+        assert_eq!(col.flow_at(3, 70, 4), 0, "el agua v4 es fuente");
     }
 
     #[test]

@@ -8,23 +8,23 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.9.0` — Fluido local por columna
+## Estado actual: `v0.9.1` — Persistencia de fluidos
 
-FASE 7 (fluidos, parte 1) de la auditoría: el estado del agua deja de ser un
-`HashMap<[i32; 3], Fluid>` global.
+FASE 7 (fluidos, parte 2) de la auditoría: el agua que fluye ya no vuelve a
+fuente al recargar.
 
-- Los **niveles de flujo** viven en la `Column`, empaquetados en **nibbles**
-  (4 bits, `MAX_LEVEL = 8`) y asignados de forma **dispersa**: un océano (todo
-  fuentes) no reserva ni un byte. El flag "fuente" no se guarda: se infiere de
-  `Block::Water` con flujo 0.
-- El **active set** es la cola deduplicada de celdas: una celda en equilibrio
-  (océano quieto) sale al procesarse y no se re-encola, así que no cuesta CPU.
-  `World::pending_water_cells()` lo expone para diagnóstico y tests.
-- Hereda de **v0.8.18**: reuso de buffers GPU. **v0.8.17**: meshing CPU asíncrono.
+- `FORMAT_VERSION = 5`: `ChunkRecord` guarda los **niveles de flujo** del agua
+  (campo `fluid`, mismo índice que los bloques, LZ4; vacío si no hay flujo).
+- Migrador **v4 -> v5**: un mundo anterior no traía fluido, así que todo `Water`
+  se interpreta como **fuente**, exactamente su comportamiento previo (cero
+  pérdida). `ChunkRecordV4`/`WorldSaveV4` son el espejo posicional.
+- `apply_record` restaura bloques y niveles; el flujo sobrevive también a
+  descargar y recargar una columna en la misma sesión.
+- Hereda de **v0.9.0**: fluido local por columna (nibbles + active set).
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (auditoría): persistencia de
-fluidos, remeshing incremental, transparencia ordenada, registry, memoria.
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): remeshing
+incremental de fluidos, transparencia ordenada, registry, memoria.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
