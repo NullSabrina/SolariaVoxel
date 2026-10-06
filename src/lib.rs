@@ -10,20 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.16 - Meshing por secciones (dirty sections)
+//! ## Estado actual: v0.8.17 - Meshing CPU asincrono (+ revisiones)
 //!
-//! FASE 6 (parte de dirty sections) de la auditoria:
-//! * La cola de meshing es por **seccion** `(columna, seccion)`, no por columna.
-//! * Editar un bloque encola solo la seccion afectada (y las vecinas de borde
-//!   cuando toca un limite de seccion/chunk); antes `refresh_area` reconstruia 9
-//!   columnas x 24 secciones.
-//! * El resto (streaming/agua) encola todas las secciones de la columna; el pump
-//!   con presupuesto de tiempo salta las vacias.
+//! FASE 6 (meshing async) de la auditoria:
+//! * `world::mesh_snapshot`: `SectionSnapshot` (18x18x18 con anillo de 1 bloque)
+//!   que copia bloques/luz/agua de una seccion; el greedy/fluido corre sobre el.
+//! * `render::mesh_worker::MeshScheduler`: pool de hilos que meshea el snapshot
+//!   **sin tocar wgpu** y devuelve vertices/indices.
+//! * El hilo principal: construye el snapshot (barato), manda el trabajo, y en
+//!   `poll_meshing` **valida la revision** (descarta lo obsoleto) y sube a GPU.
+//! * Las secciones vacias se saltan sin snapshot.
 //!
-//! Hereda de v0.8.15 (luz de bloque incremental), v0.8.14 (streaming por jobs).
+//! Hereda de v0.8.16 (meshing por secciones), v0.8.15 (luz incremental).
 //!
-//! Siguiente (auditoria): meshing async en workers + revisiones, buffers GPU
-//! reutilizables, fluids (active set), registry.
+//! Siguiente (auditoria): reuso de buffers GPU, fluids (active set), registry.
 //!
 //! ## Organizacion del codigo
 //!

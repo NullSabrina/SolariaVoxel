@@ -24,11 +24,12 @@ use crate::render::color::srgb_to_linear;
 use crate::render::gui;
 use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
+use crate::render::mesh_worker::{MeshJob, MeshOutput, MeshScheduler};
 use crate::render::pipeline::ScenePipeline;
 use crate::render::ui::{UiPipeline, UiQuad};
+use crate::world::mesh_snapshot::section_snapshot;
 use crate::world::{
-    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, StreamChange, WORLD_HEIGHT,
-    World, greedy, raycast,
+    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, StreamChange, World, raycast,
 };
 
 /// Errores que pueden ocurrir al inicializar el renderer.
@@ -154,6 +155,10 @@ pub struct Renderer {
     /// Secciones pendientes de (re)meshear `(columna, seccion)`. Se van vaciando
     /// con un presupuesto de tiempo por frame para no dar tirones.
     mesh_queue: VecDeque<(ChunkPos, usize)>,
+    /// Pool de meshing CPU en hilos de trabajo.
+    mesh_scheduler: MeshScheduler,
+    /// Revision por seccion: descarta resultados de meshing obsoletos.
+    mesh_rev: HashMap<(ChunkPos, usize), u64>,
 
     clear_color: wgpu::Color,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
@@ -250,6 +255,8 @@ impl Renderer {
             world,
             meshes: HashMap::new(),
             mesh_queue: VecDeque::new(),
+            mesh_scheduler: MeshScheduler::new(2),
+            mesh_rev: HashMap::new(),
             clear_color: sky_color(),
             day_factor: 1.0,
             start: Instant::now(),
@@ -435,93 +442,89 @@ impl Renderer {
         }
     }
 
-    /// Meshea secciones de la cola hasta agotar un presupuesto de tiempo. Asi el
-    /// coste de descubrir/editar mundo se reparte entre frames y no da un tiron.
+    /// Envia a los workers el meshing de las secciones de la cola hasta agotar un
+    /// presupuesto de tiempo (construye el snapshot en el hilo principal, que es
+    /// barato). Reparte el coste entre frames y no da un tiron.
     fn pump_meshing(&mut self, budget_ms: f32) {
         let start = Instant::now();
         while let Some((pos, section)) = self.mesh_queue.pop_front() {
             if !self.world.is_loaded(pos) {
                 continue;
             }
-            let built = self.build_section_meshes(pos, section);
-            let entry = self
-                .meshes
-                .entry(pos)
-                .or_insert_with(|| Box::new(ColumnMeshes::default()));
-            entry[section] = built;
+            // Seccion vacia: no hay geometria. Limpia la malla y descarta
+            // cualquier resultado pendiente (revision nueva), sin snapshot.
+            if self.world.section_is_empty(pos, section) {
+                let entry = self
+                    .meshes
+                    .entry(pos)
+                    .or_insert_with(|| Box::new(ColumnMeshes::default()));
+                entry[section] = SectionMeshes::default();
+                let slot = self.mesh_rev.entry((pos, section)).or_insert(0);
+                *slot = slot.wrapping_add(1);
+                continue;
+            }
+            let revision = {
+                let entry = self.mesh_rev.entry((pos, section)).or_insert(0);
+                *entry = entry.wrapping_add(1);
+                *entry
+            };
+            let snapshot = section_snapshot(&self.world, pos, section);
+            let origin = World::chunk_origin(pos);
+            if !self.mesh_scheduler.request(MeshJob {
+                pos,
+                section,
+                revision,
+                origin,
+                snapshot,
+            }) {
+                eprintln!("[render] no se pudo encolar meshing de {pos:?} sec {section}");
+            }
             if start.elapsed().as_secs_f32() * 1000.0 >= budget_ms {
                 break;
             }
         }
     }
 
-    /// Construye la malla de **una seccion** (opaco + agua) de una columna,
-    /// consultando los vecinos para no dibujar muros internos entre chunks.
-    fn build_section_meshes(&self, pos: ChunkPos, section: usize) -> SectionMeshes {
-        let origin = World::chunk_origin(pos);
-        // Geometria ya en coordenadas de mundo.
-        let base_x = pos.x * CHUNK_SIZE as i32;
-        let base_z = pos.z * CHUNK_SIZE as i32;
-
-        let Some(column) = self.world.column(pos) else {
-            return SectionMeshes::default();
-        };
-        // Seccion sin geometria: nada que meshear.
-        if self.world.section_is_empty(pos, section) {
-            return SectionMeshes::default();
-        }
-        // La gran mayoria de consultas caen **dentro** de la columna (lectura
-        // directa); solo los bordes (-1 / 16) miran el chunk vecino.
-        let in_col = |x: i32, y: i32, z: i32| {
-            (0..CHUNK_SIZE as i32).contains(&x)
-                && (0..CHUNK_SIZE as i32).contains(&z)
-                && (0..WORLD_HEIGHT as i32).contains(&y)
-        };
-        let query = |x: i32, y: i32, z: i32| -> Block {
-            if in_col(x, y, z) {
-                column.get_or_air(x, y, z)
-            } else {
-                self.world.get_block([base_x + x, y, base_z + z])
+    /// Recoge las mallas terminadas en los workers y las sube a la GPU. Valida la
+    /// **revision**: si la seccion cambio mientras se mesheaba, el resultado se
+    /// descarta.
+    fn poll_meshing(&mut self) {
+        let outputs: Vec<MeshOutput> =
+            std::iter::from_fn(|| self.mesh_scheduler.try_recv()).collect();
+        for out in outputs {
+            if self.mesh_rev.get(&(out.pos, out.section)) != Some(&out.revision) {
+                continue; // obsoleto (la seccion cambio despues)
             }
-        };
-        let light = |x: i32, y: i32, z: i32| -> (u8, u8) {
-            if in_col(x, y, z) {
-                (
-                    column.light_or_zero(x, y, z),
-                    column.block_light_or_zero(x, y, z),
-                )
-            } else {
-                let w = [base_x + x, y, base_z + z];
-                (self.world.sky_light_at(w), self.world.block_light_at(w))
+            if !self.world.is_loaded(out.pos) {
+                continue;
             }
-        };
-        // Nivel de agua en coordenadas locales (cruza el borde para la rampa).
-        let level =
-            |x: i32, y: i32, z: i32| -> u8 { self.world.water_level([base_x + x, y, base_z + z]) };
-
-        let mut slot = SectionMeshes::default();
-        // La geometria opaca sigue siendo greedy; el agua la genera el mesher
-        // fluido, que interpola las esquinas para dar la rampa.
-        let (v, i, _, _) = greedy::greedy_section_query(&query, &light, section, origin);
-        if !v.is_empty() {
-            slot.opaque = Some(Mesh::new(
-                &self.device,
-                &format!("col_{}_{}_sec_{section}", pos.x, pos.z),
-                &v,
-                &i,
-            ));
+            let entry = self
+                .meshes
+                .entry(out.pos)
+                .or_insert_with(|| Box::new(ColumnMeshes::default()));
+            let slot = &mut entry[out.section];
+            let label = format!("col_{}_{}_sec_{}", out.pos.x, out.pos.z, out.section);
+            slot.opaque = if out.opaque.0.is_empty() {
+                None
+            } else {
+                Some(Mesh::new(
+                    &self.device,
+                    &label,
+                    &out.opaque.0,
+                    &out.opaque.1,
+                ))
+            };
+            slot.water = if out.water.0.is_empty() {
+                None
+            } else {
+                Some(Mesh::new(
+                    &self.device,
+                    &format!("{label}_water"),
+                    &out.water.0,
+                    &out.water.1,
+                ))
+            };
         }
-        let (wv, wi) =
-            crate::world::fluid_mesher::fluid_section(&level, &query, &light, section, origin);
-        if !wv.is_empty() {
-            slot.water = Some(Mesh::new(
-                &self.device,
-                &format!("col_{}_{}_sec_{section}_water", pos.x, pos.z),
-                &wv,
-                &wi,
-            ));
-        }
-        slot
     }
 
     /// Encola las secciones afectadas por una **edicion** en `voxel` (y las
@@ -742,9 +745,10 @@ impl Renderer {
 
     /// Dibuja y presenta un frame.
     pub fn render(&mut self, view_projection: &Mat4, camera_pos: Vec3, ui_quads: &[UiQuad]) {
-        // Antes de dibujar, avanzamos el meshing pendiente con un presupuesto de
-        // tiempo para no dar tirones al descubrir chunks.
+        // Manda a los workers el meshing pendiente (con presupuesto) y recoge lo
+        // terminado, subiendolo a la GPU (validando revisiones).
         self.pump_meshing(MESH_BUDGET_MS);
+        self.poll_meshing();
 
         // Prepara la interfaz (pixels -> NDC, subida al buffer) antes del pase.
         self.ui.prepare(

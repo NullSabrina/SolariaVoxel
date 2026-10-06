@@ -16,6 +16,7 @@ pub mod caves;
 pub mod chunk;
 pub mod fluid_mesher;
 pub mod greedy;
+pub mod mesh_snapshot;
 pub mod mesher;
 pub mod raycast;
 pub mod recipe;

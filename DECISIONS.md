@@ -1744,6 +1744,36 @@ escena (parcela + antorcha) se ve correcta. **Limites**: el meshing CPU sigue en
 el hilo principal (amortizado por el presupuesto del pump); los buffers GPU se
 recrean por seccion (sin pool/reuso aun).
 
+### 2026-10-05 (v0.8.17) — Meshing CPU asincrono con revisiones (auditoria FASE 6)
+
+**Decision.** El greedy/fluido deja de correr en el hilo principal:
+
+1. **`world::mesh_snapshot`**: `SectionSnapshot` copia el volumen `18x18x18`
+   (seccion + anillo de 1 bloque) de bloques, luz y nivel de agua. Es `Send` y
+   solo usa metodos **publicos** de `World` (`get_block`, `sky_light_at`,
+   `block_light_at`, `water_level`). `mesh_snapshot()` genera la geometria con
+   `greedy_section_query` + `fluid_section` sobre el snapshot (puro, sin `wgpu`).
+2. **`render::mesh_worker::MeshScheduler`**: pool de 2 hilos que meshea snapshots
+   y devuelve `(vertices, indices)` de opaco y agua.
+3. **`Renderer`**: `pump_meshing` construye el snapshot (barato, lecturas
+   directas) y manda el trabajo; `poll_meshing` (cada frame) valida la
+   **revision** por `(columna, seccion)` y sube a GPU, descartando resultados
+   obsoletos. Las secciones vacias se saltan sin snapshot (y limpian su malla).
+
+**Motivo.** El audit (§9) pide separar **CPU mesh** (workers) de **GPU upload**
+(hilo principal) con revisiones y sin re-meshear trabajo viejo.
+
+**Alternativas descartadas.** Pasar closures/`&World` a los workers: no es `Send`
+y acoplaria el renderer. El snapshot de una seccion (~23 KB) es barato de copiar
+y desacopla por completo.
+
+**Consecuencia.** `world/mesh_snapshot.rs` y `render/mesh_worker.rs` nuevos;
+`renderer.rs` (scheduler + revisiones + `poll_meshing`; fuera `build_section_meshes`).
+174 tests; clippy `-D warnings` limpio. Verificado en runtime: demo (561 edits) se
+ve correcta, sin stderr; meshing repartido entre frames. **Limites**: los buffers
+GPU se siguen creando por re-mesheo (sin pool/reuso aun); el snapshot se construye
+en el hilo principal (5832 lecturas/job, barato pero no cero); sin LOD/batching.
+
 ---
 
 ## Plantilla para futuras entradas

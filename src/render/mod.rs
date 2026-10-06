@@ -17,6 +17,7 @@ mod highlight;
 // `mesh` es pub(crate) porque el mesher del mundo (`crate::world::mesh_chunk`)
 // construye `Vertex`, el tipo de vertice que la GPU entiende.
 pub(crate) mod mesh;
+mod mesh_worker;
 mod pipeline;
 mod renderer;
 mod ui;
