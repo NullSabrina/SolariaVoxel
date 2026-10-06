@@ -10,18 +10,16 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.15.2 - Luz de bloque regional
+//! ## Estado actual: v0.15.3 - Hardening de tests (raycast y streaming)
 //!
-//! La luz de bloque al cruzar de chunk ya no recorre todo el mundo cargado:
-//! `recompute_block_light_region` limpia y reconstruye solo la **region** (las
-//! columnas que entran/salen mas su anillo de 1), y siembra la **frontera** desde
-//! la luz preservada de fuera (sin bordes oscuros). El BFS de propagacion queda
-//! acotado por los emisores de la region. Un test comprueba que coincide
-//! **exactamente** con el recalculo global en un escenario de altas/bajas/frontera.
+//! Bateria de tests de robustez que pedia la auditoria (§21 y §41):
+//! * Raycast: origen dentro de un bloque, rayos negativos, direccion nula y casi
+//!   cero, `max_distance = 0`, borde de chunk (x=15 -> 16), predicado que
+//!   atraviesa liquidos, rayo sobre un borde de celda y diagonal en coordenadas
+//!   negativas.
+//! * Streaming: carga y edicion en **chunks negativos**.
 //!
-//! Medido: cruce de chunk ~10.7 ms (era ~12 ms con solo la cache y ~19 ms antes).
-//!
-//! Hereda de v0.15.1 (cache de emisores). Fases 7/9/10/11/12/13 completadas.
+//! Hereda de v0.15.2 (luz de bloque regional). Fases 7/9/10/11/12/13 completadas.
 //! Pendiente: batching/LOD, interpolacion de render y overlay de texto con fuente.
 //!
 //! ## Organizacion del codigo

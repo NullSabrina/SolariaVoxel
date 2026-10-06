@@ -212,4 +212,127 @@ mod tests {
         assert_eq!(hit.block, [4, 0, 0]);
         assert_eq!(hit.face, Face::NegX);
     }
+
+    #[test]
+    fn origen_dentro_de_un_bloque_lo_devuelve() {
+        // Si el ojo esta dentro de un bloque golpeable, no hay cara de entrada
+        // clara; se devuelve el propio bloque.
+        let hit = raycast(
+            Vec3::new(2.5, 0.5, 3.5),
+            Vec3::new(1.0, 0.0, 0.0),
+            10.0,
+            |x, y, z| (x, y, z) == (2, 0, 3),
+        )
+        .expect("golpe");
+        assert_eq!(hit.block, [2, 0, 3]);
+    }
+
+    #[test]
+    fn rayo_en_negativo_golpea_la_cara_opuesta_al_avance() {
+        // Bloque en x=-3; el rayo va hacia -X y entra por su cara +X.
+        let hit = raycast(
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(-1.0, 0.0, 0.0),
+            10.0,
+            |x, _, _| x == -3,
+        )
+        .expect("golpe");
+        assert_eq!(hit.block, [-3, 0, 0]);
+        assert_eq!(hit.face, Face::PosX);
+    }
+
+    #[test]
+    fn direccion_nula_no_golpea() {
+        assert!(
+            raycast(Vec3::new(0.5, 0.5, 0.5), Vec3::ZERO, 10.0, |_, _, _| true).is_none(),
+            "un rayo sin direccion no debe golpear"
+        );
+    }
+
+    #[test]
+    fn direccion_casi_cero_se_normaliza_y_avanza() {
+        let hit = raycast(
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(1e-6, 0.0, 0.0),
+            10.0,
+            |x, _, _| x == 3,
+        )
+        .expect("golpe");
+        assert_eq!(hit.block[0], 3);
+    }
+
+    #[test]
+    fn max_distancia_cero_solo_golpea_la_celda_de_origen() {
+        // Bloque en la celda de origen: se golpea aunque `max_distance` sea 0.
+        let hit = raycast(
+            Vec3::new(2.5, 0.5, 3.5),
+            Vec3::new(1.0, 0.0, 0.0),
+            0.0,
+            |x, y, z| (x, y, z) == (2, 0, 3),
+        );
+        assert_eq!(hit.unwrap().block, [2, 0, 3]);
+        // Bloque a media celda de distancia: con max 0 no llega.
+        assert!(
+            raycast(
+                Vec3::new(2.5, 0.5, 3.5),
+                Vec3::new(1.0, 0.0, 0.0),
+                0.0,
+                |x, _, _| x == 5
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn cruza_el_borde_de_chunk_sin_perder_el_bloque() {
+        // Bloque justo en la primera celda del chunk 1 (x=16).
+        let hit = raycast(
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(1.0, 0.0, 0.0),
+            30.0,
+            |x, _, _| x == 16,
+        )
+        .expect("golpe");
+        assert_eq!(hit.block, [16, 0, 0]);
+        assert_eq!(hit.face, Face::NegX);
+    }
+
+    #[test]
+    fn atraviesa_lo_que_el_predicado_no_marca_como_golpeable() {
+        // "Agua/aire" en x=2 que NO es golpeable; piedra en x=4. Debe parar en x=4.
+        let hit = raycast(
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(1.0, 0.0, 0.0),
+            10.0,
+            |x, _, _| x == 4,
+        )
+        .expect("golpe");
+        assert_eq!(hit.block, [4, 0, 0]);
+    }
+
+    #[test]
+    fn rayo_sobre_un_borde_de_celda_es_determinista() {
+        // Origen exactamente en el borde x=1.0 (empate de cruces): debe golpear
+        // el suelo de forma determinista, sin bucle ni panic.
+        let hit = raycast(
+            Vec3::new(1.0, 5.0, 1.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            20.0,
+            |_, y, _| y < 0,
+        )
+        .expect("golpe");
+        assert!(hit.block[1] < 0);
+    }
+
+    #[test]
+    fn diagonal_en_coordenadas_negativas() {
+        let hit = raycast(
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(-1.0, -1.0, -1.0),
+            30.0,
+            |x, y, z| (x, y, z) == (-2, -2, -2),
+        )
+        .expect("golpe");
+        assert_eq!(hit.block, [-2, -2, -2]);
+    }
 }

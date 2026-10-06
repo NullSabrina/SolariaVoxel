@@ -8,18 +8,15 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.15.2` — Luz de bloque regional
+## Estado actual: `v0.15.3` — Hardening de tests (raycast y streaming)
 
-La luz de bloque al cruzar de chunk ya no recorre todo el mundo cargado:
-`recompute_block_light_region` limpia y reconstruye solo la **región** (las
-columnas que entran/salen más su anillo de 1) y siembra la **frontera** desde la
-luz preservada de fuera (sin bordes oscuros). Un test comprueba que coincide
-**exactamente** con el recálculo global en un escenario de altas/bajas/frontera.
+Batería de tests de robustez que pedía la auditoría (§21 y §41):
 
-- Medido: cruce de chunk ~**10.7 ms** (era ~12 ms con solo la caché de emisores,
-  ~19 ms antes). Mejora pequeña con lava densa pero **escala con el radio**
-  (O(perímetro) vs O(área)).
-- Hereda de **v0.15.1**: caché de emisores de luz.
+- Raycast: origen dentro de un bloque, rayos negativos, dirección nula y casi
+  cero, `max_distance = 0`, borde de chunk (x=15 → 16), predicado que atraviesa
+  líquidos, rayo sobre un borde de celda y diagonal en coordenadas negativas.
+- Streaming: carga y edición en **chunks negativos**.
+- Hereda de **v0.15.2**: luz de bloque regional.
 - Fases 7, 9, 10, 11, 12 y 13 de la auditoría completadas. Pendiente:
   batching/LOD, interpolación de render y overlay de texto con fuente.
 

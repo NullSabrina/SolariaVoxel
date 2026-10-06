@@ -2260,6 +2260,29 @@ de render.
 
 ---
 
+### 2026-10-05 (v0.15.3) — Hardening de tests (raycast y streaming)
+
+**Decision.** Se anaden los casos de prueba de robustez que pedia la auditoria:
+`raycast` (origen dentro de un bloque, rayos negativos, direccion nula, direccion
+casi cero, `max_distance = 0`, borde de chunk x=15->16, predicado que atraviesa
+liquidos, rayo sobre un borde de celda, diagonal en coordenadas negativas) y
+streaming (carga y edicion en **chunks negativos**).
+
+**Motivo.** El audit (§21 "Raycast robusto" y §41 "tests obligatorios") listaba
+estos casos; solo habia 4 tests de raycast, todos de casos "comodos". La logica
+del DDA (empates de `t_max`, signos, coordenadas negativas) es justo donde
+aparecen bugs sutiles.
+
+**Resultado.** Los 10 casos nuevos (mas el de chunks negativos) pasan **sin
+cambios de codigo**: el raycast ya era correcto en bordes, negativos y empates.
+El valor es de **red de seguridad** (regresion) mas que de bugfix.
+
+**Consecuencia.** `world/raycast.rs` (10 tests), `world/store.rs` (1 test).
+218 tests; clippy `-D warnings` limpio. Sin cambio visible en runtime.
+Siguiente cuello: batching/LOD, interpolacion de render o overlay de texto.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

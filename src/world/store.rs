@@ -1255,6 +1255,19 @@ mod tests {
     }
 
     #[test]
+    fn el_streaming_carga_y_edita_chunks_negativos() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([-20.0, 64.0, -20.0]); // centro de chunk (-2, -2)
+        assert!(world.is_loaded(ChunkPos::new(-2, -2)));
+        assert_eq!(world.loaded_positions().count(), 9);
+        // Editar en coordenadas negativas funciona y marca el chunk correcto.
+        assert!(world.set_block([-20, 70, -20], Block::Stone));
+        assert!(world.is_modified(ChunkPos::new(-2, -2)));
+        assert!(world.is_solid([-20, 70, -20]));
+    }
+
+    #[test]
     fn descarga_las_columnas_lejanas() {
         let mut world = World::new(7, 1, vec![]);
         world.update_streaming([0.0, 64.0, 0.0]);
