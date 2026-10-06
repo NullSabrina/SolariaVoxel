@@ -32,7 +32,8 @@ Benchmarks heredados (`world::store::tests`):
 | carga de 81 columnas (`warm_streaming`) | 291.9 ms | una vez al arrancar |
 | `recompute_skylight` (81 col) | 20.7 ms | recalculo **regional** de luz de cielo |
 | `recompute_skylight` (3x3) | 3.9 ms | región tras una edición |
-| `recompute_block_light` (global) | 20.1 ms | **cuello pendiente**: se usa en cada cambio de streaming |
+| `recompute_block_light` (frio) | 21.2 ms | primera vez (construye la cache de emisores) |
+| `recompute_block_light` (cruce, cache caliente) | **11.95 ms** | era 19.03 ms antes de cachear los emisores (−37 %) |
 | `update_streaming` (cruce, +9/-9) | 22.6 ms | generación síncrona en el benchmark |
 | greedy 27 columnas (125 secciones) | 37.7 ms | meshing CPU de una región |
 
@@ -72,9 +73,11 @@ draw calls ~56 %. El frustum ya descartaba 178 secciones. A 663 fps de render.
 
 ## Cuellos pendientes
 
-1. **Luz de bloque en cambios de streaming** (~19–20 ms/cruce): sigue siendo un
-   recálculo global al entrar/salir columnas. Candidato a incrementar como la de
-   cielo (regional por fronteras).
+1. **Luz de bloque en cambios de streaming** (~12 ms/cruce tras cachear los
+   emisores; 21 ms en frío): sigue siendo un recálculo **global** al entrar/salir
+   columnas. La cache de emisores (v0.15.1) quita el barrido de secciones; el
+   siguiente paso es un recalculo **regional** alrededor de las columnas que
+   cambian (como la luz de cielo) para no recorrer todo el mundo cargado.
 2. **Luz de cielo** (~3.9 ms por edición regional): funcional, pero no es
    incremental puro.
 3. **Generación de terreno** (~3.9 ms/columna, ~292 ms para 81 columnas): es

@@ -500,27 +500,17 @@ impl World {
     pub fn recompute_block_light(&mut self) {
         use std::collections::VecDeque;
 
-        // 1. Recolectar los emisores de las secciones no vacias (la mayoria de
-        //    las 24 de una columna no tienen nada que emitir).
+        // 1. Recolectar los emisores usando la **cache por columna** (evita
+        //    escanear las 24 secciones de cada columna en cada cruce de chunk).
         let mut sources: Vec<(i32, i32, i32, u8)> = Vec::new();
-        for (pos, column) in &self.columns {
+        for (pos, column) in self.columns.iter_mut() {
             let bx = pos.x * CHUNK_SIZE as i32;
             let bz = pos.z * CHUNK_SIZE as i32;
-            for section in 0..SECTION_COUNT {
-                if column.section_is_empty(section) {
-                    continue;
-                }
-                let y0 = section * CHUNK_SIZE;
-                for y in y0..(y0 + CHUNK_SIZE).min(WORLD_HEIGHT) {
-                    for z in 0..CHUNK_SIZE {
-                        for x in 0..CHUNK_SIZE {
-                            let e = column.get(x, y, z).light_emission();
-                            if e > 0 {
-                                sources.push((bx + x as i32, y as i32, bz + z as i32, e));
-                            }
-                        }
-                    }
-                }
+            for &(idx, e) in column.emitters() {
+                let x = (idx & 0x0F) as i32;
+                let z = ((idx >> 4) & 0x0F) as i32;
+                let y = (idx >> 8) as i32;
+                sources.push((bx + x, y, bz + z, e));
             }
         }
 

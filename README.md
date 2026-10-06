@@ -8,19 +8,18 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.15.0` — Migración v1 y determinismo
+## Estado actual: `v0.15.1` — Caché de emisores de luz
 
-Dos pendientes de la auditoría:
+Optimización del cuello medido en `docs/performance.md`: `recompute_block_light`
+re-escaneaba las 24 secciones de cada columna cargada en cada cambio de
+streaming. `Column` guarda ahora una **caché perezosa de emisores** (índice local
++ nivel) que se invalida al editar un bloque. El recálculo de luz de bloque al
+cruzar de chunk baja de ~19 ms a ~12 ms (**−37 %**); en frío sigue ~21 ms.
 
-- **Migración v1 real**: `ChunkRecordV1`/`WorldSaveV1` (bloques sin comprimir, sin
-  `compressed` ni `player_pos`). `load_from` ya no adivina el layout de un archivo
-  v1 con el de v2; una versión desconocida da un error claro en lugar de leer
-  bytes mal interpretados.
-- **Test de determinismo**: generar el mundo secuencialmente o con el pool de
-  workers da exactamente el mismo hash de columna.
-- Hereda de **v0.14.0**: diagnósticos y benchmarks (FASE 13).
-
-Con esto se completan las fases 7, 9, 10, 11, 12 y 13 de la auditoría.
+- Hereda de **v0.15.0**: migración v1 real + test de determinismo.
+- Fases 7, 9, 10, 11, 12 y 13 de la auditoría completadas. Pendiente: luz de
+  bloque **regional** (no global), batching/LOD, interpolación de render y
+  overlay de texto con fuente.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, `F` = volar, **`F3` =
 diagnóstico**, click izq = romper, click der = colocar. Variables: `SOLARIA_DEMO`,

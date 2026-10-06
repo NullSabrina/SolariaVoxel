@@ -10,20 +10,17 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.15.0 - Migracion v1 y determinismo
+//! ## Estado actual: v0.15.1 - Cache de emisores de luz
 //!
-//! Dos pendientes de la auditoria:
-//! * **Migracion v1 real**: `ChunkRecordV1`/`WorldSaveV1` (bloques sin comprimir,
-//!   sin `compressed` ni `player_pos`). `load_from` ya no adivina el layout de un
-//!   archivo v1 con el de v2; una version desconocida da error claro en vez de
-//!   leer bytes mal interpretados.
-//! * **Test de determinismo**: generar el mundo secuencialmente o con el pool de
-//!   workers da exactamente el mismo hash de columna (orden de resultados
-//!   irrelevante).
+//! Optimizacion del cuello medido: `World::recompute_block_light` re-escaneaba
+//! las 24 secciones de cada columna cargada en cada cambio de streaming.
+//! `Column` guarda ahora una **cache perezosa de emisores** (indice local +
+//! nivel) que se invalida al editar un bloque. El recalculo de luz de bloque al
+//! cruzar de chunk baja de ~19 ms a ~12 ms (−37 %); en frio sigue ~21 ms.
 //!
-//! Hereda de v0.14.0 (diagnosticos, FASE 13). Fases 7/9/10/11/12/13 completadas.
-//! Pendiente: batching/LOD, interpolacion de render, luz de bloque incremental
-//! en cambios de streaming, y overlay de texto con fuente.
+//! Hereda de v0.15.0 (migracion v1 + determinismo). Fases 7/9/10/11/12/13
+//! completadas. Pendiente: luz de bloque **regional** (no global), batching/LOD,
+//! interpolacion de render y overlay de texto con fuente.
 //!
 //! ## Organizacion del codigo
 //!

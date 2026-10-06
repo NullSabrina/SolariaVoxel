@@ -2176,6 +2176,43 @@ binaria v1 en disco (se sintetiza en el test); la migracion de v0 no existe
 
 ---
 
+### 2026-10-05 (v0.15.1) — Cache de emisores de luz por columna
+
+**Decision.** `Column` guarda una **cache perezosa de emisores** de luz
+(`Vec<(indice local, nivel)>`), construida al primer acceso y **invalidada en
+`Column::set`**. `World::recompute_block_light` recoge los emisores de esa cache
+en vez de escanear las 24 secciones de cada columna.
+
+**Motivo.** La medicion (`docs/performance.md`) situo el recalculo de luz de
+bloque al cruzar de chunk en ~19 ms. El grueso era el barrido de emisores: por
+cada cambio de streaming se recorrian las secciones no vacias de las 81 columnas
+buscando `light_emission() > 0`, aunque solo cambiasen 9 columnas.
+
+**Medicion (dev, opt-level 1).**
+```
+recompute_block_light (cruce de chunk):  19.03 ms -> 11.95 ms  (-37%)
+recompute_block_light (frio, 1a llamada): ~21 ms (igual: construye la cache)
+```
+Solo las columnas que cambian tienen la cache fria; las demas se reutilizan.
+
+**Alternativas descartadas.**
+- **Luz de bloque regional** (como la de cielo): es el objetivo final, pero
+  requiere resolver correctamente la **remocion** de la luz de columnas que se
+  descargan (un chunk con lava/torch que se va deja luz obsoleta en los vecinos).
+  Es mas invasivo y arriesgado; se pospone con la cache como paso intermedio
+  seguro.
+- Mantener un `HashSet` de emisores en el `World` actualizado en `set_block`:
+  duplicaria el estado y complicaria la carga de columnas generadas/restauradas;
+  la cache por columna se invalida sola y viaja con la columna.
+
+**Consecuencia.** `world/chunk.rs` (`emitters`, `emitters()`), `world/store.rs`
+(`recompute_block_light`). 207 tests; clippy `-D warnings` limpio. **Limite**: el
+recalculo sigue siendo global (recorre todo el mundo cargado); la cache solo
+elimina el barrido. Siguiente cuello: luz de bloque regional + remocion al
+descargar columnas.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

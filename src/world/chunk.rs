@@ -102,6 +102,11 @@ pub struct Column {
     /// condicion "fuente" no se guarda: se infiere (`Block::Water` con flujo 0).
     /// Indice `(y * CHUNK_SIZE + z) * CHUNK_SIZE + x`, como la luz.
     fluid: Option<Box<[u8]>>,
+    /// **Cache perezosa de emisores** de luz: `(indice local, nivel)`. Evita
+    /// re-escanear las 24 secciones en cada `World::recompute_block_light` (el
+    /// barrido de emisores era el grueso del coste al cruzar de chunk). Se
+    /// invalida en [`Column::set`] (cambia un bloque).
+    emitters: Option<Vec<(u32, u8)>>,
 }
 
 impl Column {
@@ -113,6 +118,7 @@ impl Column {
             block_light: None,
             surface: [0; CHUNK_SIZE * CHUNK_SIZE],
             fluid: None,
+            emitters: None,
         }
     }
 
@@ -120,6 +126,32 @@ impl Column {
     #[inline]
     fn light_index(x: usize, y: usize, z: usize) -> usize {
         (y * CHUNK_SIZE + z) * CHUNK_SIZE + x
+    }
+
+    /// Emisores de luz de la columna: `(indice local, nivel)`. Cache perezosa
+    /// (se construye al primer acceso y se invalida en `set`).
+    pub fn emitters(&mut self) -> &[(u32, u8)] {
+        if self.emitters.is_none() {
+            let mut list = Vec::new();
+            for section in 0..SECTION_COUNT {
+                if self.sections[section].is_empty() {
+                    continue;
+                }
+                let y0 = section * CHUNK_SIZE;
+                for y in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            let e = self.sections[section].get(x, y, z).light_emission();
+                            if e > 0 {
+                                list.push((Self::light_index(x, y0 + y, z) as u32, e));
+                            }
+                        }
+                    }
+                }
+            }
+            self.emitters = Some(list);
+        }
+        self.emitters.as_deref().unwrap_or(&[])
     }
 
     /// Luz de cielo en una posicion (0..15).
@@ -420,6 +452,8 @@ impl Column {
     #[inline]
     pub fn set(&mut self, x: usize, y: usize, z: usize, block: Block) {
         self.sections[y / CHUNK_SIZE].set(x, y % CHUNK_SIZE, z, block);
+        // Un cambio de bloque puede cambiar los emisores de luz.
+        self.emitters = None;
     }
 
     /// Lee un bloque en coordenadas que pueden salirse de la columna. Fuera
@@ -640,6 +674,31 @@ mod tests {
         column.set_flow(2, 5, 7, 0);
         assert_eq!(column.flow_at(2, 5, 7), 0);
         assert_eq!(column.flow_at(3, 5, 7), MAX_LEVEL);
+    }
+
+    #[test]
+    fn los_emisores_se_cachean_y_se_invalidan_al_editar() {
+        let mut column = Column::empty();
+        assert!(column.emitters().is_empty(), "sin emisores al principio");
+        column.set(1, 2, 3, Block::Torch);
+        assert_eq!(
+            column.emitters(),
+            &[(Column::light_index(1, 2, 3) as u32, 14)]
+        );
+        column.set(4, 5, 6, Block::Lava);
+        assert_eq!(
+            column.emitters(),
+            &[
+                (Column::light_index(1, 2, 3) as u32, 14),
+                (Column::light_index(4, 5, 6) as u32, 15),
+            ]
+        );
+        // Editar invalida: quitar la antorcha deja solo la lava.
+        column.set(1, 2, 3, Block::Stone);
+        assert_eq!(
+            column.emitters(),
+            &[(Column::light_index(4, 5, 6) as u32, 15)]
+        );
     }
 
     #[test]
