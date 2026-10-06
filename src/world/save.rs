@@ -726,6 +726,8 @@ pub fn load_and_migrate(path: &Path) -> Result<WorldSave, SaveError> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::store::World;
+    use super::super::water::Fluid;
     use super::*;
 
     fn temp_path(name: &str) -> std::path::PathBuf {
@@ -1070,6 +1072,66 @@ mod tests {
         crate::world::store::apply_record(&mut col, record);
         assert_eq!(col.get(3, 70, 4), Block::Water);
         assert_eq!(col.flow_at(3, 70, 4), 0, "el agua v4 es fuente");
+    }
+
+    #[test]
+    fn roundtrip_completo_del_mundo_guardado_y_recargado() {
+        // Flujo real: editar un mundo, volcarlo, guardarlo, cargarlo y
+        // reconstruirlo. Comprueba ediciones en varias alturas y el agua.
+        let mut world = World::new(7, 1, vec![]);
+        world.warm_streaming([0.0, 100.0, 0.0]);
+        world.set_block([2, 5, 3], Block::Stone);
+        world.set_block([2, 200, 3], Block::Planks);
+        world.set_block([2, 100, 3], Block::Water); // fuente
+        world.sync_modified();
+
+        let mut save = WorldSave::new(7, 0);
+        for (pos, record) in world.modified_records() {
+            save.set_chunk(*pos, record.clone());
+        }
+        let path = temp_path("world_roundtrip");
+        cleanup(&path);
+        save.save_to(&path).unwrap();
+
+        let loaded = load_and_migrate(&path).unwrap();
+        cleanup(&path);
+        let restored: Vec<(ChunkPos, ChunkRecord)> =
+            loaded.chunks.iter().map(|(p, r)| (*p, r.clone())).collect();
+        let mut world2 = World::new(7, 1, restored);
+        world2.warm_streaming([0.0, 100.0, 0.0]);
+
+        assert_eq!(world2.get_block([2, 5, 3]), Block::Stone, "y=5");
+        assert_eq!(world2.get_block([2, 200, 3]), Block::Planks, "y=200");
+        assert_eq!(world2.water_at([2, 100, 3]), Fluid::Source, "agua fuente");
+    }
+
+    #[test]
+    fn un_archivo_principal_corrupto_no_pierde_el_bak() {
+        // Simula un crash a mitad de escritura: el principal queda truncado y
+        // debe poder recuperarse el `.bak` (guardado anterior).
+        let path = temp_path("crash");
+        cleanup(&path);
+        let mut column = Column::empty();
+        column.set(1, 2, 3, Block::Stone);
+        let mut save = WorldSave::new(7, 0);
+        save.set_chunk(ChunkPos::new(0, 0), ChunkRecord::from_column(&column));
+        save.save_to(&path).unwrap();
+        // Segundo guardado: rota el primero a `.bak`.
+        save.player_pos = [1.0, 2.0, 3.0];
+        save.save_to(&path).unwrap();
+        let bak = with_suffix(&path, ".bak");
+        assert!(bak.exists(), "deberia existir el .bak");
+
+        // Crash: el archivo principal queda corrupto/truncado.
+        std::fs::write(&path, b"\x00\x01\x02").unwrap();
+        assert!(
+            WorldSave::load_from(&path).is_err(),
+            "el principal corrupto no debe cargar"
+        );
+        // El `.bak` sigue siendo cargable.
+        let recovered = WorldSave::load_from(&bak).expect("el .bak debe recuperarse");
+        assert!(recovered.chunks.contains_key(&ChunkPos::new(0, 0)));
+        cleanup(&path);
     }
 
     #[test]

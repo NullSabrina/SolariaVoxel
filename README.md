@@ -8,25 +8,21 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.16.0` — Radio de vista configurable
+## Estado actual: `v0.16.1` — Persistencia end-to-end (tests)
 
-`SOLARIA_VIEW_RADIUS` (1..=12, por defecto 4) fija el radio de carga y, con él,
-la **niebla** (`fog_end = radio * 16`) y el **culling por distancia**.
+Tests de integración de guardado (auditoría §41):
 
-Medido (ver `docs/performance.md`):
+- **Roundtrip completo**: editar un mundo (varias alturas + agua), volcarlo,
+  guardarlo, cargarlo y reconstruirlo.
+- **Recuperación tras crash**: si el archivo principal queda corrupto, el `.bak`
+  (guardado atómico anterior) sigue siendo cargable.
 
-| radio | columnas | memoria mundo | draw calls | render |
-|---|---|---|---|---|
-| 4 (def.) | 81 | ~22 MB | 128 | ~2 ms |
-| 8 | 289 | ~76 MB | 530 | ~2.4 ms |
+- Hereda de **v0.16.0**: radio de vista configurable (`SOLARIA_VIEW_RADIUS`, 1..=12;
+  niebla y culling atados a él). El escalado está medido en `docs/performance.md`.
+- Fases 7, 9, 10, 11, 12 y 13 de la auditoría completadas. Pendiente: interpolación
+  de render y overlay de texto con fuente.
 
-El culling por distancia mantiene el coste de render casi plano, así que **no** se
-implementó batching/LOD (sería optimización prematura sin un cuello medido).
-
-- Hereda de **v0.15.3**: hardening de tests. Fases 7, 9, 10, 11, 12 y 13 de la
-  auditoría completadas. Pendiente: interpolación de render y overlay de texto.
-
-Variables: `SOLARIA_DEMO`, `SOLARIA_OCEAN`, `SOLARIA_STATS`, **`SOLARIA_VIEW_RADIUS`**,
+Variables: `SOLARIA_DEMO`, `SOLARIA_OCEAN`, `SOLARIA_STATS`, `SOLARIA_VIEW_RADIUS`,
 `SOLARIA_FLUID_BUDGET_CELLS/_MS`.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, `F` = volar, **`F3` =

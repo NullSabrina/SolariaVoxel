@@ -2322,6 +2322,28 @@ lento. Siguiente: interpolacion de render y overlay de texto.
 
 ---
 
+### 2026-10-05 (v0.16.1) — Persistencia end-to-end (tests de integracion)
+
+**Decision.** Dos tests de integracion de guardado: (1) **roundtrip completo** de
+un mundo editado (bloques a y=5 y y=200 mas una fuente de agua) via
+`WorldSave::save_to` -> `load_and_migrate` -> `World::new(seed, r, restaurado)` ->
+`warm_streaming`; (2) **recuperacion tras crash**: se corrompe el archivo
+principal y se comprueba que el `.bak` (guardado atomico anterior) sigue cargando.
+
+**Motivo.** El audit (§41) pide tests de "crash simulation durante save" y de
+guardado/carga integrados. Hasta ahora habia tests de registro (una columna) pero
+ninguno ejercitaba el flujo **mundo completo**: volcar -> guardar -> cargar ->
+reconstruir, ni la recuperacion del `.bak`.
+
+**Alternativas descartadas.** Test puramente de unidad de `ChunkRecord`: ya
+existe y no cubre la integracion (volcado, restore, agua). No hacia falta mas.
+
+**Consecuencia.** `world/save.rs` (2 tests). 220 tests; clippy `-D warnings`
+limpio. Sin cambio de runtime. Con esto la persistencia queda cubierta a nivel
+registro, migracion (v1/v3/v4/v5) y mundo completo, incluida la recuperacion.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

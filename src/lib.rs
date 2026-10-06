@@ -10,16 +10,15 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.16.0 - Radio de vista configurable
+//! ## Estado actual: v0.16.1 - Persistencia end-to-end (tests)
 //!
-//! `SOLARIA_VIEW_RADIUS` (1..=12, por defecto 4) fija el radio de carga y, con el,
-//! la **niebla** (`fog_end = radio * 16`) y el **culling por distancia**. Permite
-//! escalar la vista y medir: radio 8 = 289 columnas, ~76 MB de mundo, 530 draw
-//! calls, render ~2.4 ms (medido en `docs/performance.md`). El culling por
-//! distancia mantiene el coste de render casi plano, asi que no se implemento
-//! batching/LOD (optimizacion prematura sin un cuello medido).
+//! Tests de integracion de guardado que pedia la auditoria (§41):
+//! * **Roundtrip completo**: editar un mundo (varias alturas + agua), volcarlo,
+//!   guardarlo, cargarlo y reconstruirlo con `World::new(seed, r, restaurado)`.
+//! * **Recuperacion tras crash**: si el archivo principal queda corrupto, el
+//!   `.bak` (guardado atomico anterior) sigue siendo cargable.
 //!
-//! Hereda de v0.15.3 (hardening de tests). Fases 7/9/10/11/12/13 completadas.
+//! Hereda de v0.16.0 (radio configurable). Fases 7/9/10/11/12/13 completadas.
 //! Pendiente: interpolacion de render y overlay de texto con fuente.
 //!
 //! ## Organizacion del codigo
