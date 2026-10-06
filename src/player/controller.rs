@@ -17,13 +17,13 @@
 //! en una partida normal.
 
 use crate::math::Vec3;
+use crate::physics::box_hits_solid;
 use crate::scene::Camera;
 
-/// Aceleracion de la gravedad, en bloques/s^2.
-pub const GRAVITY: f32 = 28.0;
-
-/// Velocidad vertical maxima de caida, en bloques/s (evita atravesar el suelo).
-pub const MAX_FALL_SPEED: f32 = 50.0;
+// Gravedad, tope de caida y escala de gravedad en el agua son **los mismos** que
+// usa `physics` para las entidades: una sola fuente de verdad. Antes estaban
+// duplicados y podian divergir (el jugador se comportaria distinto a los mobs).
+pub use crate::physics::{GRAVITY, MAX_FALL_SPEED, WATER_GRAVITY_SCALE};
 
 /// Velocidad de salto al despegar.
 pub const JUMP_SPEED: f32 = 9.0;
@@ -44,9 +44,6 @@ pub const STEP_HEIGHT: f32 = 1.0;
 
 /// Velocidad de ascenso al **nadar** (Espacio dentro del agua), en bloques/s.
 pub const SWIM_UP_SPEED: f32 = 3.5;
-
-/// Factor que reduce la gravedad dentro del agua (flotabilidad).
-const WATER_GRAVITY_SCALE: f32 = 0.30;
 
 /// Factor que reduce la velocidad maxima de caida dentro del agua.
 const WATER_FALL_SCALE: f32 = 0.40;
@@ -239,29 +236,22 @@ impl PlayerController {
 
     /// ¿La caja del jugador (radio `PLAYER_RADIUS`, alto `PLAYER_HEIGHT`, pies en
     /// `pos.y - EYE_HEIGHT`) solapa algun bloque solido en `pos`?
+    ///
+    /// Usa la **consulta de colision comun** (`physics::box_hits_solid`): la
+    /// misma que resolvera la colision de las entidades. La caja no llega
+    /// exactamente a los pies ni a la cabeza (`SKIN`) para no chocar con el suelo
+    /// ni con el techo por rozarlos.
     fn collides(pos: Vec3, is_solid: &impl Fn(Vec3) -> bool) -> bool {
         let feet = pos.y - EYE_HEIGHT;
-        let (x0, x1) = (pos.x - PLAYER_RADIUS, pos.x + PLAYER_RADIUS);
-        let (z0, z1) = (pos.z - PLAYER_RADIUS, pos.z + PLAYER_RADIUS);
-        // La caja no llega exactamente a los pies ni a la cabeza (`SKIN`), para
-        // no colisionar con el bloque del suelo ni con el techo por rozarlos.
-        let (y0, y1) = (feet + SKIN, feet + PLAYER_HEIGHT - SKIN);
-
-        let (ix0, ix1) = (x0.floor() as i32, x1.floor() as i32);
-        let (iy0, iy1) = (y0.floor() as i32, y1.floor() as i32);
-        let (iz0, iz1) = (z0.floor() as i32, z1.floor() as i32);
-
-        for x in ix0..=ix1 {
-            for y in iy0..=iy1 {
-                for z in iz0..=iz1 {
-                    // Centro del voxel, como espera la consulta del mundo.
-                    if is_solid(Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)) {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
+        let min = Vec3::new(pos.x - PLAYER_RADIUS, feet + SKIN, pos.z - PLAYER_RADIUS);
+        let max = Vec3::new(
+            pos.x + PLAYER_RADIUS,
+            feet + PLAYER_HEIGHT - SKIN,
+            pos.z + PLAYER_RADIUS,
+        );
+        box_hits_solid(min, max, |x, y, z| {
+            is_solid(Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5))
+        })
     }
 
     /// Columnas (x0, x1, z0, z1) que cubre la huella del jugador en `(x, z)`.

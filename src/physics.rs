@@ -73,6 +73,26 @@ impl Aabb {
     }
 }
 
+/// ¿La caja `[min, max]` (mundo) solapa algun bloque solido? Recorre las celdas
+/// que cubre con `floor`. Es la **consulta de colision comun** que comparten el
+/// jugador (`player::controller`) y las entidades AABB: ambas preguntan al mundo
+/// lo mismo, solo cambia como resuelven el movimiento.
+pub fn box_hits_solid(min: Vec3, max: Vec3, is_solid: impl Fn(i32, i32, i32) -> bool) -> bool {
+    let (ix0, ix1) = (min.x.floor() as i32, max.x.floor() as i32);
+    let (iy0, iy1) = (min.y.floor() as i32, max.y.floor() as i32);
+    let (iz0, iz1) = (min.z.floor() as i32, max.z.floor() as i32);
+    for x in ix0..=ix1 {
+        for y in iy0..=iy1 {
+            for z in iz0..=iz1 {
+                if is_solid(x, y, z) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Resultado de mover una entidad un tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MoveResult {
@@ -376,6 +396,24 @@ mod tests {
         }
         assert!(vel.y > 0.0, "deberia flotar, vel.y={}", vel.y);
         assert!(pos.y > 10.0, "deberia haber subido, y={}", pos.y);
+    }
+
+    #[test]
+    fn box_hits_solid_detecta_la_celda_correcta() {
+        // Solido solo en la celda (2, 0, 0).
+        let solid = |x: i32, y: i32, z: i32| (x, y, z) == (2, 0, 0);
+        // Caja en x/z 0.5..0.9, y 0..1.8: no toca x=2.
+        assert!(!box_hits_solid(
+            Vec3::new(0.2, 0.0, 0.2),
+            Vec3::new(0.8, 1.8, 0.8),
+            solid
+        ));
+        // Desplazada a x 1.5..2.2: solapa la celda 2.
+        assert!(box_hits_solid(
+            Vec3::new(1.5, 0.0, 0.2),
+            Vec3::new(2.2, 1.8, 0.8),
+            solid
+        ));
     }
 
     #[test]

@@ -86,6 +86,8 @@ pub struct App {
     day_cycle: DayCycle,
     /// Acumulador para el tick de agua (10 Hz), separado de la fisica y el render.
     water_timer: f32,
+    /// Acumulador del **timestep fijo** de la fisica del jugador (segundos).
+    accumulator: f32,
     /// Presupuesto del tick de fluidos (celdas y ms). Configurable por entorno.
     fluid_budget: crate::world::FluidBudget,
     /// Modo demo (`SOLARIA_DEMO`): congela la camara y elige la escena de la
@@ -123,6 +125,33 @@ const WATER_PERIOD: f32 = 0.1;
 /// Periodo del **autoguardado** en segundo plano (segundos). El mundo se guarda
 /// sin bloquear el render.
 const AUTOSAVE_PERIOD: f32 = 300.0;
+
+/// Paso fijo de la simulacion del jugador (segundos). 120 Hz da margen a
+/// velocidades altas; el render puede ir a otro ritmo.
+const FIXED_DT: f32 = 1.0 / 120.0;
+
+/// Maximo de pasos fijos por frame (evita la "espiral de la muerte": cada paso
+/// cuesta CPU y un frame lento no debe generar infinitos pasos).
+const MAX_FIXED_STEPS: u32 = 8;
+
+/// Tope del acumulador de tiempo de simulacion (segundos).
+const MAX_ACCUMULATOR: f32 = 0.25;
+
+/// Avanza el acumulador de simulacion y devuelve cuantos **pasos fijos** hay que
+/// dar este frame. Acota a `MAX_FIXED_STEPS` (descarta la deuda si el frame fue
+/// demasiado largo). Es puro: se testea sin ventana ni GPU.
+fn fixed_steps(accumulator: &mut f32, frame_dt: f32) -> u32 {
+    *accumulator = (*accumulator + frame_dt).min(MAX_ACCUMULATOR);
+    let mut steps = 0;
+    while *accumulator >= FIXED_DT && steps < MAX_FIXED_STEPS {
+        *accumulator -= FIXED_DT;
+        steps += 1;
+    }
+    if steps == MAX_FIXED_STEPS {
+        *accumulator = 0.0;
+    }
+    steps
+}
 
 /// Indice de ranura para las teclas `1`..`9`.
 fn digit_slot(code: KeyCode) -> Option<usize> {
@@ -183,15 +212,16 @@ impl App {
         self.mouse_locked = false;
     }
 
-    /// Un tick de simulacion: giro del raton, desplazamiento horizontal y
-    /// fisica vertical (gravedad/suelo) del jugador.
-    fn update(&mut self, dt: f32) {
+    /// Un frame: avanza el tiempo del mundo (dia, agua a 10 Hz, autosave), aplica
+    /// el giro de camara (por frame) y corre la fisica del jugador a **timestep
+    /// fijo** (acumulador).
+    fn update(&mut self, frame_dt: f32) {
         // El tiempo del mundo avanza siempre (salvo en demo, que lo congela).
         if !self.demo {
-            self.day_cycle.advance(dt);
+            self.day_cycle.advance(frame_dt);
 
             // Tick de agua a 10 Hz, independiente del framerate.
-            self.water_timer += dt;
+            self.water_timer += frame_dt;
             if self.water_timer >= WATER_PERIOD {
                 self.water_timer -= WATER_PERIOD;
                 if let Some(renderer) = self.renderer.as_mut() {
@@ -200,7 +230,7 @@ impl App {
             }
 
             // Autoguardado en segundo plano (no bloquea el render).
-            self.autosave_timer += dt;
+            self.autosave_timer += frame_dt;
             if self.autosave_timer >= AUTOSAVE_PERIOD {
                 self.autosave_timer = 0.0;
                 self.save_world();
@@ -209,35 +239,46 @@ impl App {
             self.poll_save();
         }
 
-        // Leemos TODO el input primero, para no mezclar prestamos.
+        // El giro es **por frame**: el delta del raton es de este frame, no de un
+        // paso de simulacion. Se consume una sola vez.
         let (dx, dy) = self.input.take_mouse_delta();
+        if self.mouse_locked && (dx != 0.0 || dy != 0.0) {
+            if let Some(camera) = self.camera.as_mut() {
+                camera.add_look(dx, dy);
+            }
+        }
+
+        // En demo la camara queda fija: no aplicamos la fisica, para que la vista
+        // de la captura no se desplace antes de la foto.
+        if self.demo {
+            return;
+        }
+
+        // Fisica a **timestep fijo**: se acumula el tiempo real y se ejecutan
+        // pasos de duracion constante. Desacopla el movimiento del framerate
+        // (determinismo y base para entidades/multijugador).
+        let steps = fixed_steps(&mut self.accumulator, frame_dt);
+        for _ in 0..steps {
+            self.simulate_player(FIXED_DT);
+        }
+    }
+
+    /// Un paso de fisica del jugador de duracion `dt` (fija).
+    fn simulate_player(&mut self, dt: f32) {
         let forward = self.input.forward_axis();
         let right = self.input.right_axis();
         let jump = self.input.jump_axis();
         let jump_held = self.input.jump_held();
         let flying = self.flying;
 
-        // Necesitamos el renderer (para consultar bloques) y la camara a la vez.
+        // La consulta de solido mira el mundo (incluye `Unloaded` = muro, para no
+        // caer al vacio mientras llega la generacion).
         let Some(renderer) = self.renderer.as_ref() else {
             return;
         };
         let Some(camera) = self.camera.as_mut() else {
             return;
         };
-
-        // Giro.
-        if self.mouse_locked && (dx != 0.0 || dy != 0.0) {
-            camera.add_look(dx, dy);
-        }
-
-        // En modo demo la camara queda fija: no aplicamos la fisica, para que la
-        // vista de la captura no se desplace antes de la foto.
-        if self.demo {
-            return;
-        }
-
-        // Fisica. La consulta de solido mira el mundo en coordenadas de bloque
-        // (cualquier columna cargada).
         let world = renderer;
         let is_solid = move |point: Vec3| -> bool { world.is_solid_at(point) };
 
@@ -249,8 +290,8 @@ impl App {
         }
 
         // En modo vuelo, Espacio/Shift suben/bajan; en modo normal Space salta.
-        let shift = self.input.is_pressed(winit::keyboard::KeyCode::ShiftLeft)
-            || self.input.is_pressed(winit::keyboard::KeyCode::ShiftRight);
+        let shift =
+            self.input.is_pressed(KeyCode::ShiftLeft) || self.input.is_pressed(KeyCode::ShiftRight);
         let fly_up = if flying {
             (jump_held as i32 - shift as i32) as f32
         } else {
@@ -1110,6 +1151,27 @@ impl ApplicationHandler for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn el_timestep_fijo_da_pasos_constantes() {
+        let mut acc = 0.0;
+        // Un frame de 1/60 = 2 pasos de 1/120 y el acumulador vuelve a ~0.
+        assert_eq!(fixed_steps(&mut acc, 1.0 / 60.0), 2);
+        assert!(acc.abs() < 1e-5, "acc={acc}");
+        // Un frame vacio no da pasos.
+        assert_eq!(fixed_steps(&mut acc, 0.0), 0);
+        // Dos medios pasos acumulan un paso.
+        assert_eq!(fixed_steps(&mut acc, FIXED_DT / 2.0), 0);
+        assert_eq!(fixed_steps(&mut acc, FIXED_DT / 2.0), 1);
+    }
+
+    #[test]
+    fn el_timestep_fijo_acota_los_pasos_y_descarta_la_deuda() {
+        let mut acc = 0.0;
+        // Un frame gigante no dispara infinitos pasos; ademas la deuda se anula.
+        assert_eq!(fixed_steps(&mut acc, 5.0), MAX_FIXED_STEPS);
+        assert_eq!(acc, 0.0, "la deuda acumulada deberia descartarse");
+    }
 
     #[test]
     fn la_mesa_abierta_atenua_el_fondo_y_dibuja_la_rejilla() {

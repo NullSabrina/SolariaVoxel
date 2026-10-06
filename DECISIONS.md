@@ -2066,6 +2066,50 @@ todavia un timestep fijo (FASE 12).
 
 ---
 
+### 2026-10-05 (v0.13.0) — Fisica a timestep fijo y colisiones unificadas (auditoria FASE 12)
+
+**Decision.** (1) La fisica del jugador corre a **timestep fijo**
+(`FIXED_DT = 1/120`) con un acumulador acotado (`MAX_FIXED_STEPS = 8`,
+`MAX_ACCUMULATOR = 0.25`): cada frame acumula el tiempo real y ejecuta `N` pasos
+de duracion constante. El giro de camara sigue siendo por frame. (2)
+`physics::box_hits_solid` es la **consulta de colision comun** (AABB vs voxeles)
+que usa el jugador; gravedad, tope de caida y escala de gravedad en agua pasan a
+ser una unica constante en `physics`, reexportada por `player::controller`. (3)
+Nuevo `VoxelAvailability::{Loaded(Block), Unloaded, OutOfBounds}`: modelo
+explicito que la fisica usa para no tratar un chunk sin cargar como aire.
+
+**Motivo.** El audit (FASE 12) pide timestep fijo para no atar fisica/IA al
+framerate (determinismo, base de mobs/proyectiles/multijugador), y una base comun
+de colision para que jugador y entidades no diverjan. La gravedad estaba
+duplicada literalmente en dos modulos (28.0 / 50.0 / 0.30): un cambio en uno
+dejaba al jugador comportandose distinto a los mobs.
+
+**Alternativas descartadas.**
+- Timestep variable suavizado: sigue dependiendo del framerate; no da
+  determinismo.
+- **Render interpolado**: el audit lo sugiere, pero el `Camera` actual guarda
+  una sola `position` que usan raycast/colocar/highlight; interpolar requiere una
+  transformacion de render separada. Se pospone como mejora (no afecta a la
+  correccion del timestep fijo).
+- Tercio/redondeo de pasos: el acumulador con tope es mas simple y suficiente;
+  el tope evita la "espiral de la muerte".
+- Unificar toda la resolucion de movimiento (sweep) entre jugador y entidades:
+  el jugador necesita auto-step y huella (cilindro), las entidades un sweep X/Z/Y;
+  se comparte la **consulta** (que es lo que puede divergir), no el algoritmo de
+  resolucion (el audit lo permite explicitamente).
+
+**Consecuencia.** `physics.rs` (`box_hits_solid`, unica fuente de constantes),
+`player/controller.rs` (reexporta constantes + usa `box_hits_solid`),
+`world/store.rs` (`VoxelAvailability` + `availability`, `is_solid_or_unloaded`
+reescrito), `engine/app.rs` (`FIXED_DT`, acumulador, `simulate_player`,
+`fixed_steps`). 199 tests (nuevos: consulta de caja, disponibilidad, pasos fijos
+y tope); clippy `-D warnings` limpio. Verificado en runtime (jugador posado sin
+panic). **Limites**: sin interpolacion de render; no hay aun pruebas de
+determinismo secuencial vs paralelo (pendiente). Siguiente cuello de botella:
+faltan diagnosticos/overlay y benchmarks (FASE 13).
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

@@ -10,20 +10,21 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.12.0 - Renderer scale: culling y metricas
+//! ## Estado actual: v0.13.0 - Fisica a timestep fijo
 //!
-//! FASE 11 de la auditoria (parte 1):
-//! * `FrameStats`: columnas, secciones dibujadas, draw calls, triangulos y
-//!   secciones descartadas por frustum/distancia. Se muestra en el titulo de la
-//!   ventana y (con `SOLARIA_STATS=1`) se traza por consola para medir.
-//! * **Culling jerarquico por distancia** ademas del frustum: una seccion cuya
-//!   AABB entera queda mas alla de `FOG_END` esta totalmente cubierta por la
-//!   niebla y no se dibuja. Medido en la vista de oceano: **128 draw calls**
-//!   frente a 292 sin el culling por distancia (~56% menos).
-//! * Hereda de v0.11.0 (memoria por categorias, FASE 10).
+//! FASE 12 de la auditoria:
+//! * El jugador simula a **timestep fijo** (`FIXED_DT = 1/120`) con un
+//!   acumulador acotado (`MAX_FIXED_STEPS`): el movimiento deja de depender del
+//!   framerate (determinismo y base para entidades/multijugador). El giro de
+//!   camara sigue siendo por frame.
+//! * **Colisiones unificadas**: `physics::box_hits_solid` es la consulta comun
+//!   que usa el jugador; gravedad/tope de caida/escala de agua son la misma
+//!   constante en `player` y `physics` (antes duplicadas).
+//! * Modelo explicito `VoxelAvailability::{Loaded, Unloaded, OutOfBounds}`: la
+//!   fisica no confunde "sin cargar" con aire.
 //!
-//! Pendiente de FASE 11: batching por columna/material y LOD. Siguiente
-//! (auditoria): fisica a timestep fijo (FASE 12).
+//! Hereda de v0.12.0 (culling por distancia, FASE 11). Siguiente (auditoria):
+//! diagnosticos/overlay (FASE 13).
 //!
 //! ## Organizacion del codigo
 //!

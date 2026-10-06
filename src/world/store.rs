@@ -157,20 +157,28 @@ impl World {
         self.columns.contains_key(&pos)
     }
 
-    /// Consulta para **fisica**: a diferencia de [`World::is_solid`], una columna
-    /// aun no cargada se trata como **solida** (muro), para que el jugador no
-    /// caiga al vacio mientras llega la generacion asincrona.
-    pub fn is_solid_or_unloaded(&self, world: [i32; 3]) -> bool {
-        if world[1] < 0 {
-            return true;
-        }
-        if world[1] >= WORLD_HEIGHT as i32 {
-            return false;
+    /// Estado explicito de una celda: cargada (con su bloque), no cargada o
+    /// fuera del mundo. Es la consulta base del modelo `Loaded`/`Unloaded`.
+    pub fn availability(&self, world: [i32; 3]) -> VoxelAvailability {
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return VoxelAvailability::OutOfBounds;
         }
         let (pos, local) = Self::world_to_local(world);
         match self.columns.get(&pos) {
-            Some(column) => column.get(local[0], local[1], local[2]).is_solid(),
-            None => true,
+            Some(column) => VoxelAvailability::Loaded(column.get(local[0], local[1], local[2])),
+            None => VoxelAvailability::Unloaded,
+        }
+    }
+
+    /// Consulta para **fisica**: a diferencia de [`World::is_solid`], una columna
+    /// aun no cargada se trata como **solida** (muro), para que el jugador no
+    /// caiga al vacio mientras llega la generacion asincrona. Por debajo del
+    /// mundo tambien es muro; por encima, aire.
+    pub fn is_solid_or_unloaded(&self, world: [i32; 3]) -> bool {
+        match self.availability(world) {
+            VoxelAvailability::Loaded(block) => block.is_solid(),
+            VoxelAvailability::Unloaded => true,
+            VoxelAvailability::OutOfBounds => world[1] < 0,
         }
     }
 
@@ -1011,6 +1019,17 @@ pub fn apply_record(column: &mut Column, record: &ChunkRecord) {
     }
 }
 
+/// Estado de una celda consultada: **cargada** (con su bloque), **no cargada**, o
+/// **fuera** de los limites verticales del mundo. Sustituye al ambiguo "no
+/// cargado = aire": la fisica puede decidir (un chunk sin cargar es un muro
+/// temporal) sin confundirlo con vacio real.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoxelAvailability {
+    Loaded(Block),
+    Unloaded,
+    OutOfBounds,
+}
+
 /// Una **seccion** cuyo fluido cambio en un tick, con marcas de borde para
 /// re-meshear la columna vecina solo cuando hace falta (remeshing incremental).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1458,6 +1477,32 @@ mod tests {
         });
         assert!(dirty.is_empty());
         assert_eq!(world.pending_water_cells(), before, "no se consumio nada");
+    }
+
+    #[test]
+    fn la_disponibilidad_distingue_cargado_no_cargado_y_fuera() {
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([0.0, 64.0, 0.0]);
+        assert!(matches!(
+            world.availability([0, 60, 0]),
+            VoxelAvailability::Loaded(_)
+        ));
+        assert_eq!(
+            world.availability([9999, 60, 9999]),
+            VoxelAvailability::Unloaded
+        );
+        assert_eq!(
+            world.availability([0, -1, 0]),
+            VoxelAvailability::OutOfBounds
+        );
+        assert_eq!(
+            world.availability([0, WORLD_HEIGHT as i32, 0]),
+            VoxelAvailability::OutOfBounds
+        );
+        // Fisica: no cargado y debajo del mundo son muro; por encima, aire.
+        assert!(world.is_solid_or_unloaded([9999, 60, 9999]));
+        assert!(world.is_solid_or_unloaded([0, -1, 0]));
+        assert!(!world.is_solid_or_unloaded([0, WORLD_HEIGHT as i32, 0]));
     }
 
     #[test]

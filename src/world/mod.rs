@@ -39,6 +39,6 @@ pub use save::{
     ChunkPos, ChunkRecord, FORMAT_VERSION, GENERATOR_VERSION, MigrationChain, SaveError,
     WorldHeader, WorldMigrator, WorldSave, load_and_migrate,
 };
-pub use store::{FluidDirty, StreamChange, World};
+pub use store::{FluidDirty, StreamChange, VoxelAvailability, World};
 pub use terrain::{Biome, SEA_LEVEL, TerrainGenerator};
 pub use water::{Fluid, FluidBudget, MAX_LEVEL};

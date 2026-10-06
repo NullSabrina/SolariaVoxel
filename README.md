@@ -8,24 +8,26 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.12.0` — Renderer scale: culling y métricas
+## Estado actual: `v0.13.0` — Física a timestep fijo
 
-FASE 11 de la auditoría (parte 1):
+FASE 12 de la auditoría:
 
-- `FrameStats`: columnas, secciones dibujadas, draw calls, triángulos y secciones
-  descartadas por frustum/distancia. Aparece en el título de la ventana y, con
-  `SOLARIA_STATS=1`, se traza por consola para medir.
-- **Culling jerárquico por distancia** además del frustum: una sección cuya AABB
-  entera queda más allá de `FOG_END` está totalmente cubierta por la niebla y no
-  se dibuja. Medido en la vista de océano: **128 draw calls** frente a 292 sin
-  el culling por distancia (~56 % menos).
-- Hereda de **v0.11.0**: memoria por categorías (FASE 10).
+- El jugador simula a **timestep fijo** (`FIXED_DT = 1/120`) con un acumulador
+  acotado (`MAX_FIXED_STEPS`): el movimiento deja de depender del framerate
+  (determinismo y base para entidades/multijugador). El giro de cámara sigue
+  siendo por frame.
+- **Colisiones unificadas**: `physics::box_hits_solid` es la consulta común que
+  usa el jugador; gravedad, tope de caída y escala de agua son la misma constante
+  en `player` y `physics` (antes duplicadas y podían divergir).
+- Modelo explícito `VoxelAvailability::{Loaded, Unloaded, OutOfBounds}`: la física
+  no confunde "sin cargar" con aire.
+- Hereda de **v0.12.0**: culling por distancia y métricas (FASE 11).
 
 Pendiente de FASE 11: batching por columna/material y LOD.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
 der = colocar (sobre una mesa, la abre). Variables: `SOLARIA_DEMO`, `SOLARIA_OCEAN`,
-`SOLARIA_STATS`. Siguiente (auditoría): física a timestep fijo (FASE 12).
+`SOLARIA_STATS`. Siguiente (auditoría): diagnósticos/overlay F3 (FASE 13).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
