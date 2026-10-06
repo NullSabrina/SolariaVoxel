@@ -20,6 +20,7 @@ pub mod mesh_snapshot;
 pub mod mesher;
 pub mod raycast;
 pub mod recipe;
+pub mod registry;
 pub mod save;
 pub mod store;
 pub mod streaming;
@@ -31,6 +32,7 @@ pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HE
 pub use mesher::{SectionMesh, mesh_column, mesh_section};
 pub use raycast::{RayHit, raycast};
 pub use recipe::{RECIPES, Recipe, match_recipe};
+pub use registry::{BlockDefinition, BlockRegistry, FluidKind, RenderKind};
 pub use save::{
     ChunkPos, ChunkRecord, FORMAT_VERSION, GENERATOR_VERSION, MigrationChain, SaveError,
     WorldHeader, WorldMigrator, WorldSave, load_and_migrate,

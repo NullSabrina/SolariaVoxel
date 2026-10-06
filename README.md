@@ -8,19 +8,22 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.9.3` — Transparencia ordenada
+## Estado actual: `v0.10.0` — Registro central de bloques
 
-FASE 7 (fluidos, parte 4, cierra la fase) de la auditoría: el agua se dibuja en
-un pase translúcido **ordenado de lejos a cerca** por distancia a la cámara
-(`water_order`, reutilizado cada frame), en lugar de iterar el `HashMap` de
-mallas sin orden. Decisión explícita: **z-test ON, z-write OFF**.
+FASE 9 de la auditoría: se elimina la duplicación de la metadata de bloques, que
+vivía en `block.rs`, en `ITEMS` de `app.rs` y en los tiles de `atlas.rs`.
 
-- Hereda de **v0.9.2**: remeshing incremental de fluidos. **v0.9.1**:
-  persistencia (FORMAT v5, migrador v4->v5). **v0.9.0**: fluido local por columna.
+- Nuevo `world/registry.rs` con `BlockDefinition` + tabla `BLOCKS`: nombre, tiles
+  por cara, solidez, visibilidad, `RenderKind`, `FluidKind`, emisión de luz, si
+  es item y dureza (reservada para minado).
+- `Block` sigue siendo un `u8` y **delega** sus consultas en la tabla.
+- `atlas::TILES` se **deriva** del registro y `app.rs` consume
+  `BlockRegistry::items()` (sin lista propia). Los tests garantizan coherencia.
+- Hereda de **v0.9.3**: transparencia ordenada (cierre de FASE 7).
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (auditoría): registry de
-bloques, memoria, renderer scale.
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): memoria (FASE 10),
+renderer scale (FASE 11).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -79,7 +82,8 @@ src/
 │   ├── camera.rs    Camara FPS (posicion, yaw/pitch, matrices).
 │   └── daynight.rs  Hora del mundo, luz del sol y color del cielo.
 ├── world/
-│   ├── block.rs     Tipos de bloque y su tile del atlas.
+│   ├── block.rs     Tipos de bloque (id) que delegan en el registro.
+│   ├── registry.rs  Registro central de bloques (metadata unica).
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas (carga assets/atlas.png; fallback).
 │   ├── terrain.rs   Generacion: clima/biomas, relieve, superficie y acuiferos.

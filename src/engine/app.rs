@@ -30,6 +30,7 @@ use crate::math::Vec3;
 use crate::player::PlayerController;
 use crate::render::Renderer;
 use crate::scene::{Camera, DayCycle};
+use crate::world::registry;
 
 /// Estado global de la aplicacion.
 ///
@@ -105,30 +106,6 @@ fn now_unix() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
-
-/// Todos los **bloques colocables**, en el orden del inventario.
-///
-/// El inventario los muestra todos (rejilla de `inventory_cells`); la barra
-/// rapida usa los 9 primeros. Antes solo habia 9 y faltaban tablones, agua,
-/// lava, obsidiana, tierra gruesa, grava y podzol.
-const ITEMS: &[crate::world::Block] = &[
-    crate::world::Block::Grass,
-    crate::world::Block::Dirt,
-    crate::world::Block::CoarseDirt,
-    crate::world::Block::Podzol,
-    crate::world::Block::Sand,
-    crate::world::Block::Gravel,
-    crate::world::Block::Stone,
-    crate::world::Block::Obsidian,
-    crate::world::Block::Snow,
-    crate::world::Block::Wood,
-    crate::world::Block::Planks,
-    crate::world::Block::Leaves,
-    crate::world::Block::CraftingTable,
-    crate::world::Block::Torch,
-    crate::world::Block::Water,
-    crate::world::Block::Lava,
-];
 
 /// Cuantas ranuras tiene la barra rapida (teclas `1`-`9`).
 const HOTBAR_SLOTS: usize = 9;
@@ -426,13 +403,13 @@ impl App {
     }
 
     /// Celdas (rectangulos) del inventario: una rejilla que contiene **todos**
-    /// los bloques de `ITEMS` (8 columnas), centrada en la ventana.
+    /// los bloques de `BlockRegistry::items()` (8 columnas), centrada.
     fn inventory_cells(&self, win_w: f32, win_h: f32) -> Vec<[f32; 4]> {
         use crate::render::gui;
         let slot = gui::SLOT as f32 * UI_SCALE;
         let gap = 6.0;
         let cols = 8usize;
-        let rows = ITEMS.len().div_ceil(cols).max(1);
+        let rows = registry::BlockRegistry::items().len().div_ceil(cols).max(1);
         let grid_w = cols as f32 * slot + (cols as f32 - 1.0) * gap;
         let grid_h = rows as f32 * slot + (rows as f32 - 1.0) * gap;
         let x0 = (win_w - grid_w) * 0.5;
@@ -547,7 +524,11 @@ impl App {
 
         // Inventario: rejilla con TODOS los bloques disponibles (ICONOS).
         if self.inventory_open {
-            for (cell, item) in self.inventory_cells(win_w, win_h).iter().zip(ITEMS.iter()) {
+            for (cell, item) in self
+                .inventory_cells(win_w, win_h)
+                .iter()
+                .zip(registry::BlockRegistry::items().iter())
+            {
                 let [cx, cy, cw, ch] = *cell;
                 quads.push(UiQuad {
                     rect: [cx, cy, cw, ch],
@@ -568,7 +549,11 @@ impl App {
     fn inventory_click(&mut self) {
         let (win_w, win_h) = self.window_size_f();
         let (mx, my) = self.cursor;
-        for (cell, item) in self.inventory_cells(win_w, win_h).iter().zip(ITEMS.iter()) {
+        for (cell, item) in self
+            .inventory_cells(win_w, win_h)
+            .iter()
+            .zip(registry::BlockRegistry::items().iter())
+        {
             let [x, y, w, h] = *cell;
             if mx >= x && mx < x + w && my >= y && my < y + h {
                 self.hotbar[self.hotbar_sel] = *item;
@@ -669,7 +654,11 @@ impl App {
             }
         }
         // 3. Inventario: pone el bloque en la primera celda libre.
-        for (cell, item) in self.inventory_cells(win_w, win_h).iter().zip(ITEMS.iter()) {
+        for (cell, item) in self
+            .inventory_cells(win_w, win_h)
+            .iter()
+            .zip(registry::BlockRegistry::items().iter())
+        {
             if inside(cell) {
                 if let Some(j) = self.craft_grid.iter().position(|c| c.is_none()) {
                     self.craft_grid[j] = Some(*item);
@@ -766,7 +755,7 @@ impl ApplicationHandler for App {
         );
         // Barra rapida por defecto.
         // Barra rapida por defecto: los primeros `HOTBAR_SLOTS` items.
-        self.hotbar = std::array::from_fn(|i| ITEMS[i]);
+        self.hotbar = std::array::from_fn(|i| registry::BlockRegistry::items()[i]);
 
         // Carga **sincrona** del area inicial antes de posar al jugador (o
         // montar la demo): con streaming async el suelo aun no estaria cargado y

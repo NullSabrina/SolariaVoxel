@@ -14,8 +14,10 @@
 /// Lado de cada tile, en pixels.
 pub const TILE: u32 = 16;
 
-/// Numero de tiles en el atlas (0..TILES).
-pub const TILES: u32 = 19;
+/// Numero de tiles en el atlas (0..TILES). Se **deriva del registro de bloques**
+/// (el tile mas alto usado + 1): asi anadir un bloque con tile nuevo amplia el
+/// atlas solo, sin tocar esta constante a mano.
+pub const TILES: u32 = super::registry::TILE_COUNT as u32;
 
 /// Tiles por fila.
 pub const COLS: u32 = 4;

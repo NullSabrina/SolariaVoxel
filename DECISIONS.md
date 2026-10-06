@@ -1941,6 +1941,45 @@ cuello de botella: la duplicacion de definiciones de bloque (FASE 9, registry).
 
 ---
 
+### 2026-10-05 (v0.10.0) — Registro central de bloques (auditoria FASE 9)
+
+**Decision.** La metadata de los bloques se centraliza en `world/registry.rs`
+(`BlockDefinition` + tabla `BLOCKS` + fachada `BlockRegistry`). `Block` sigue
+siendo un `u8` y delega sus consultas (`is_solid`, `is_visible`, `is_liquid`,
+`blocks_fluid`, `light_emission`, `face_tile`, `name`, `render_kind`,
+`hardness`) en la tabla. `atlas::TILES` se deriva del tile mas alto del registro
+(`TILE_COUNT`); `app.rs` usa `BlockRegistry::items()` en vez de su propio `ITEMS`;
+`Block::from_u8`/`is_known_id` se derivan de `ALL_BLOCKS`.
+
+**Motivo.** El audit (FASE 9, §13) pide una definicion central para eliminar la
+duplicacion entre `block.rs`, `ITEMS` de `app.rs` y los tiles de `atlas.rs`. Esa
+duplicacion es una fuente real de bugs: anadir un bloque obligaba a tocar el
+`match` de `face_tile`, la lista del inventario y `TILES` por separado, y nada
+detectaba un olvido.
+
+**Alternativas descartadas.**
+- Meter el estado en el propio bloque (struct por voxel): rompe el objetivo de
+  1 byte/voxel; el registro es externo y de solo lectura.
+- Un `HashMap<u8, BlockDefinition>` cargado en runtime: indireccion y memoria de
+  mas para un conjunto fijo; una tabla `const` indexada por id es O(1) y sin
+  asignaciones.
+- `Box<dyn>`/trait objects para el registro: sobre-ingenieria para una tabla
+  estatica; se descarta segun la regla del proyecto de no abstraer por estetica.
+- Reordenar el inventario al orden de id: cambiaria el UX visible; se conserva
+  el orden de `PLACEABLE_ITEMS` y un test garantiza que cubre exactamente los
+  bloques marcados `item`.
+
+**Consecuencia.** Nuevos `world/registry.rs` + `pub mod registry` y re-exports.
+`block.rs` (delega), `atlas.rs` (`TILES` derivado), `app.rs` (sin `ITEMS`).
+192 tests (nuevos: ids contiguos, tiles en rango, colocables == items, flags
+historicos, coherencia de `RenderKind`); clippy `-D warnings` limpio. **Limite**:
+`hardness` queda como dato reservado (aun no hay tiempos de minado) y el
+`RenderKind` documenta la intencion pero el greedy todavia clasifica por flags
+(migracion futura). Siguiente cuello de botella: medir memoria por categoria
+(FASE 10).
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

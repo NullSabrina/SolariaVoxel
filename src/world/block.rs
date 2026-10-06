@@ -3,6 +3,13 @@
 //! Un bloque es un `enum` pequenito. Guardar bloques como `u8` (en lugar de un
 //! struct grande por voxel) es clave para el objetivo de memoria: un chunk de
 //! 16^3 ocupa 4096 bytes, 1 byte por bloque.
+//!
+//! Toda la **metadata** (solidez, liquido, emision, tiles, si es item...) no
+//! vive aqui, sino en el **registro central** [`super::registry`]. `Block` solo
+//! aporta el `id` y delega. Asi la definicion de un bloque esta en un unico
+//! sitio y no puede desincronizarse del inventario o del atlas.
+
+use super::registry::{self, FluidKind, RenderKind};
 
 /// Las 6 caras de un cubo, en coordenadas del mundo.
 ///
@@ -37,6 +44,20 @@ impl Face {
             Face::NegY => (0, -1, 0),
             Face::PosZ => (0, 0, 1),
             Face::NegZ => (0, 0, -1),
+        }
+    }
+
+    /// Indice de la cara en las tablas del registro (`[PosX, NegX, PosY, NegY,
+    /// PosZ, NegZ]`). Es el orden de `BlockDefinition::face_tiles`.
+    #[inline]
+    pub fn index(self) -> usize {
+        match self {
+            Face::PosX => 0,
+            Face::NegX => 1,
+            Face::PosY => 2,
+            Face::NegY => 3,
+            Face::PosZ => 4,
+            Face::NegZ => 5,
         }
     }
 }
@@ -85,27 +106,10 @@ impl Default for Block {
 
 impl Block {
     /// Reconstruye un bloque a partir del `u8` guardado. Cualquier valor
-    /// desconocido se interpreta como aire (tolerancia hacia adelante).
+    /// desconocido se interpreta como aire (tolerancia hacia adelante). El
+    /// mapeo vive en el registro ([`registry::block_from_id`]).
     pub fn from_u8(value: u8) -> Self {
-        match value {
-            1 => Block::Grass,
-            2 => Block::Dirt,
-            3 => Block::Stone,
-            4 => Block::Sand,
-            5 => Block::Wood,
-            6 => Block::Leaves,
-            7 => Block::Torch,
-            8 => Block::Snow,
-            9 => Block::Water,
-            10 => Block::Planks,
-            11 => Block::CraftingTable,
-            12 => Block::CoarseDirt,
-            13 => Block::Gravel,
-            14 => Block::Podzol,
-            15 => Block::Lava,
-            16 => Block::Obsidian,
-            _ => Block::Air,
-        }
+        registry::block_from_id(value)
     }
 
     /// El `u8` que se guarda en el chunk.
@@ -114,40 +118,39 @@ impl Block {
         self as u8
     }
 
+    /// Nombre legible del bloque (diagnostico/UI).
+    #[inline]
+    pub fn name(self) -> &'static str {
+        registry::definition(self).name
+    }
+
     /// ¿El id corresponde a un bloque conocido por esta version del motor?
     ///
-    /// Los ids son contiguos `0..=Obsidian`; un id mayor es de una version
-    /// futura/mod. Sirve para **no cargar en silencio** un mundo con bloques
-    /// desconocidos (se rechaza con error en vez de convertirlos a aire y
-    /// destruir datos).
+    /// Los ids son contiguos; un id mayor es de una version futura/mod. Sirve
+    /// para **no cargar en silencio** un mundo con bloques desconocidos (se
+    /// rechaza con error en vez de convertirlos a aire y destruir datos).
     #[inline]
     pub fn is_known_id(value: u8) -> bool {
-        value <= Block::Obsidian.id()
+        registry::is_known_id(value)
     }
 
     /// ¿Ocupa espacio? (no bloquean: aire, antorcha, liquidos y **hojas**, que
     /// son transparentes y se atraviesan).
     #[inline]
     pub fn is_solid(self) -> bool {
-        !matches!(
-            self,
-            Block::Air | Block::Torch | Block::Water | Block::Lava | Block::Leaves
-        )
+        registry::definition(self).solid
     }
 
     /// ¿Es un bloque que se dibuja pero no bloquea? (antorcha, liquidos y hojas).
     #[inline]
     pub fn is_visible(self) -> bool {
-        matches!(
-            self,
-            Block::Torch | Block::Water | Block::Lava | Block::Leaves
-        )
+        registry::definition(self).visible
     }
 
     /// ¿Es un liquido? (para la fisica de nado y el render translucido).
     #[inline]
     pub fn is_liquid(self) -> bool {
-        matches!(self, Block::Water | Block::Lava)
+        registry::definition(self).fluid.is_liquid()
     }
 
     /// ¿Bloquea el paso del **agua** en la simulacion? Los solidos y la lava
@@ -155,66 +158,36 @@ impl Block {
     /// mas adelante).
     #[inline]
     pub fn blocks_fluid(self) -> bool {
-        self.is_solid() || matches!(self, Block::Lava)
+        let def = registry::definition(self);
+        def.solid || def.fluid == FluidKind::Lava
     }
 
     /// Luz que **emite** el bloque (0..15). La antorcha emite 14, la lava 15.
     #[inline]
     pub fn light_emission(self) -> u8 {
-        match self {
-            Block::Torch => 14,
-            Block::Lava => 15,
-            _ => 0,
-        }
+        registry::definition(self).light_emission
+    }
+
+    /// Pipeline de dibujo que le corresponde (opaco / cutout / liquido).
+    #[inline]
+    pub fn render_kind(self) -> RenderKind {
+        registry::definition(self).render
+    }
+
+    /// Dureza relativa. **Reservado** para los tiempos de minado (aun no usada).
+    #[inline]
+    pub fn hardness(self) -> f32 {
+        registry::definition(self).hardness
     }
 
     /// Que tile del atlas usa cada cara de este bloque.
     ///
-    /// El atlas se describe en [`crate::world::atlas`]. El pasto, por ejemplo,
-    /// usa verde arriba, tierra abajo y una cara lateral mixta.
+    /// El atlas se describe en [`crate::world::atlas`]; los tiles concretos, en
+    /// el registro. El pasto, por ejemplo, usa verde arriba, tierra abajo y una
+    /// cara lateral mixta.
+    #[inline]
     pub fn face_tile(self, face: Face) -> u16 {
-        match self {
-            Block::Air => 0,
-            Block::Grass => match face {
-                Face::PosY => 0, // hierba
-                Face::NegY => 2, // tierra
-                _ => 1,          // lateral
-            },
-            Block::Dirt => 2,
-            Block::Stone => 3,
-            Block::Sand => 4,
-            Block::Wood => match face {
-                Face::PosY | Face::NegY => 6, // anillos
-                _ => 5,                       // corteza
-            },
-            Block::Leaves => 7,
-            // La antorcha usa un tile propio. Desde v0.6.2 no se dibuja como
-            // cubo, sino como dos quads cruzados (ver `emit_torch_cross`).
-            Block::Torch => 8,
-            // Nieve (biomas frios).
-            Block::Snow => 9,
-            // Agua (translucida; tile con alfa).
-            Block::Water => 10,
-            // Tablones.
-            Block::Planks => 11,
-            // Mesa de crafteo: tapa distinta (13) del lateral (12).
-            Block::CraftingTable => match face {
-                Face::PosY => 13, // tapa
-                Face::NegY => 11, // base de tablones
-                _ => 12,          // lateral
-            },
-            Block::CoarseDirt => 14,
-            Block::Gravel => 15,
-            // Podzol: capa superior propia (16); debajo, como la tierra.
-            Block::Podzol => match face {
-                Face::PosY => 16,
-                _ => 2,
-            },
-            // Lava brillante (tile con rojos/naranjas).
-            Block::Lava => 17,
-            // Obsidiana oscura con motas violaceas.
-            Block::Obsidian => 18,
-        }
+        registry::definition(self).face_tiles[face.index()]
     }
 }
 
@@ -294,7 +267,7 @@ mod tests {
             Block::Obsidian,
         ] {
             for face in Face::ALL {
-                assert!(b.face_tile(face) < 19, "{b:?} {face:?}");
+                assert!(b.face_tile(face) < registry::TILE_COUNT, "{b:?} {face:?}");
             }
         }
         // Hierba: verde arriba, tierra abajo, lateral distinto.

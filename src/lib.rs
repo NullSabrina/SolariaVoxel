@@ -10,16 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.9.3 - Transparencia ordenada
+//! ## Estado actual: v0.10.0 - Registro central de bloques
 //!
-//! FASE 7 (fluidos, parte 4) de la auditoria: el agua se dibuja en un pase
-//! translucido **ordenado de lejos a cerca** por distancia a la camara
-//! (`water_order`, reutilizado cada frame), en lugar de iterando el `HashMap` de
-//! meshes sin orden. Decision explicita: **z-test ON, z-write OFF**.
+//! FASE 9 de la auditoria: se elimina la duplicacion de la metadata de bloques.
+//! Antes vivia en tres sitios (`block.rs`, `ITEMS` de `app.rs`, tiles de
+//! `atlas.rs`) que podian desincronizarse.
+//! * Nuevo `world::registry` con `BlockDefinition` + tabla `BLOCKS`: nombre,
+//!   tiles por cara, solidez, visibilidad, `RenderKind`, `FluidKind`, emision,
+//!   si es item y dureza (reservada).
+//! * `Block` sigue siendo un `u8` y delega sus consultas en la tabla.
+//! * `atlas::TILES` se **deriva** del registro y `app.rs` consume
+//!   `BlockRegistry::items()` (sin lista propia). Tests garantizan coherencia.
 //!
-//! Hereda de v0.9.2 (remeshing incremental de fluidos), v0.9.1 (persistencia),
-//! v0.9.0 (fluido local). Con esto se cierra la **FASE 7**. Siguiente
-//! (auditoria): registry de bloques, memoria, renderer scale.
+//! Hereda de v0.9.3 (transparencia ordenada), cerrando la FASE 7. Siguiente
+//! (auditoria): memoria (FASE 10), renderer scale (FASE 11).
 //!
 //! ## Organizacion del codigo
 //!
