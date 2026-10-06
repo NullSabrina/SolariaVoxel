@@ -10,21 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.13.0 - Fisica a timestep fijo
+//! ## Estado actual: v0.14.0 - Diagnosticos y benchmarks
 //!
-//! FASE 12 de la auditoria:
-//! * El jugador simula a **timestep fijo** (`FIXED_DT = 1/120`) con un
-//!   acumulador acotado (`MAX_FIXED_STEPS`): el movimiento deja de depender del
-//!   framerate (determinismo y base para entidades/multijugador). El giro de
-//!   camara sigue siendo por frame.
-//! * **Colisiones unificadas**: `physics::box_hits_solid` es la consulta comun
-//!   que usa el jugador; gravedad/tope de caida/escala de agua son la misma
-//!   constante en `player` y `physics` (antes duplicadas).
-//! * Modelo explicito `VoxelAvailability::{Loaded, Unloaded, OutOfBounds}`: la
-//!   fisica no confunde "sin cargar" con aire.
+//! FASE 13 de la auditoria:
+//! * Overlay **F3** (o `SOLARIA_STATS=1`): el titulo muestra fps, tiempos de
+//!   `update`/`render`, draw calls, triangulos, columnas, cola de meshing,
+//!   memoria del mundo y de GPU, y estado de guardado; ademas traza `[stats]`.
+//!   (Sin fuente de texto aun, el "overlay" usa el titulo de la ventana.)
+//! * `world::bench` (solo tests): benchmarks reproducibles de generacion,
+//!   meshing, luz incremental, fluidos y guardado; informe en
+//!   [`docs/performance.md`](../docs/performance.md).
 //!
-//! Hereda de v0.12.0 (culling por distancia, FASE 11). Siguiente (auditoria):
-//! diagnosticos/overlay (FASE 13).
+//! Con esto se cierra la lista de fases de la auditoria (7, 9, 10, 11, 12, 13).
+//! Pendiente: batching/LOD (FASE 11), interpolacion de render (FASE 12), luz de
+//! bloque incremental en streaming, y un overlay de texto con fuente.
 //!
 //! ## Organizacion del codigo
 //!

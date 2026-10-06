@@ -94,9 +94,15 @@ pub struct App {
     /// captura. La fisica y el resaltado se desactivan para que la vista no se
     /// desplace antes de la foto.
     demo: bool,
-    /// Traza de metricas de render (`SOLARIA_STATS`), para medir culling y draw
-    /// calls. Va aparte del overlay F3 (FASE 13).
-    stats_trace: bool,
+    /// Overlay de diagnostico (**F3** o `SOLARIA_STATS=1`): el titulo pasa a
+    /// mostrar tiempos, draw calls, colas, memoria y estado de guardado, y se
+    /// traza una linea `[stats]` por consola. No hay render de texto (no hay
+    /// fuente aun), asi que el "overlay" usa el titulo de la ventana.
+    show_stats: bool,
+    /// Duracion del ultimo `update` (ms).
+    update_ms: f32,
+    /// Duracion del ultimo `render` (ms).
+    render_ms: f32,
 }
 
 /// Ruta del archivo de mundo por defecto (junto al ejecutable de trabajo).
@@ -444,6 +450,45 @@ impl App {
                 (s.width as f32, s.height as f32)
             })
             .unwrap_or((1.0, 1.0))
+    }
+
+    /// Texto de la barra de titulo. Con el overlay **F3** (`show_stats`) incluye
+    /// tiempos, draw calls, columna/cola y memoria; si no, solo fps y draw calls.
+    fn title_line(
+        &self,
+        fps: f32,
+        stats: Option<crate::render::FrameStats>,
+        memory: Option<crate::world::WorldMemory>,
+        gpu_bytes: u64,
+        queued: usize,
+    ) -> String {
+        if self.show_stats
+            && let (Some(s), Some(m)) = (stats, memory)
+        {
+            use crate::world::memory::mib;
+            return format!(
+                "{} | {fps:.0}fps up{:.1} rnd{:.1}ms | {}dc {}tri | {}col q{} | mundo {:.1}MB gpu {:.1}MB | guardado {}",
+                window::TITLE,
+                self.update_ms,
+                self.render_ms,
+                s.draw_calls,
+                s.triangles,
+                m.columns,
+                queued,
+                mib(m.total_bytes()),
+                mib(gpu_bytes as usize),
+                if self.save_requested { "pend" } else { "ok" },
+            );
+        }
+        match stats {
+            Some(s) => format!(
+                "{}  |  {fps:.0} fps  |  {} dc  |  {} tri",
+                window::TITLE,
+                s.draw_calls,
+                s.triangles
+            ),
+            None => format!("{}  |  {fps:.0} fps", window::TITLE),
+        }
     }
 
     /// Celdas (rectangulos) del inventario: una rejilla que contiene **todos**
@@ -851,7 +896,7 @@ impl ApplicationHandler for App {
         // Modo demo (SOLARIA_DEMO=1): escena fija para las capturas. La camara
         // queda congelada (ver `Self::demo`), asi la vista no se mueve antes de
         // la foto. El montaje vive en `engine::demo`.
-        self.stats_trace = std::env::var("SOLARIA_STATS").is_ok();
+        self.show_stats = std::env::var("SOLARIA_STATS").is_ok();
         self.demo = demo::is_active();
         if self.demo {
             self.day_cycle = DayCycle::new(demo::time_of_day());
@@ -947,6 +992,14 @@ impl ApplicationHandler for App {
                             println!(
                                 "[engine] modo vuelo: {}",
                                 if self.flying { "ON" } else { "OFF" }
+                            );
+                        }
+                        // F3: overlay de diagnostico (metricas de frame).
+                        KeyCode::F3 if event.state == ElementState::Pressed => {
+                            self.show_stats = !self.show_stats;
+                            println!(
+                                "[engine] overlay F3: {}",
+                                if self.show_stats { "ON" } else { "OFF" }
                             );
                         }
                         // 1..9: selecciona la ranura de la hotbar.
@@ -1053,6 +1106,7 @@ impl ApplicationHandler for App {
                 // la ventana, breakpoint...) no queremos "teletransportarnos".
                 let dt = raw_dt.clamp(0.0, 0.1);
 
+                let t_update = Instant::now();
                 self.update(dt);
                 // En modo demo no resaltamos (queremos ver el modelo limpio).
                 if !self.demo {
@@ -1066,6 +1120,8 @@ impl ApplicationHandler for App {
                 // renderer para no mezclar prestamos.
                 let (win_w, win_h) = self.window_size_f();
                 let ui = self.build_ui(win_w, win_h);
+                self.update_ms = t_update.elapsed().as_secs_f32() * 1000.0;
+                let t_render = Instant::now();
                 if let (Some(renderer), Some(camera)) =
                     (self.renderer.as_mut(), self.camera.as_ref())
                 {
@@ -1075,6 +1131,7 @@ impl ApplicationHandler for App {
                     renderer.sync_streaming(position);
                     renderer.render(&view_projection, position, &ui);
                 }
+                self.render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
 
                 // FPS en el titulo: se actualiza cada ~0.5 s con el tiempo real.
                 self.fps_frames += 1;
@@ -1082,29 +1139,31 @@ impl ApplicationHandler for App {
                 if self.fps_accum >= 0.5 {
                     let fps = self.fps_frames as f32 / self.fps_accum;
                     let stats = self.renderer.as_ref().map(|r| r.frame_stats());
+                    let memory = self.renderer.as_ref().map(|r| r.world_memory());
+                    let gpu = self.renderer.as_ref().map_or(0, |r| r.gpu_mesh_bytes());
+                    let queued = self
+                        .renderer
+                        .as_ref()
+                        .map_or(0, |r| r.pending_mesh_sections());
+                    let title = self.title_line(fps, stats, memory, gpu, queued);
                     if let Some(window) = self.window.as_ref() {
-                        let title = match stats {
-                            Some(s) => format!(
-                                "{}  |  {fps:.0} fps  |  {} dc  |  {} tri",
-                                window::TITLE,
-                                s.draw_calls,
-                                s.triangles
-                            ),
-                            None => format!("{}  |  {fps:.0} fps", window::TITLE),
-                        };
                         window.set_title(&title);
                     }
-                    if self.stats_trace
+                    if self.show_stats
                         && let Some(s) = stats
                     {
                         println!(
-                            "[stats] dc={} tri={} dibujadas={} cull_frustum={} cull_dist={} cols={}",
+                            "[stats] up={:.1}ms rnd={:.1}ms dc={} tri={} dib={} cull_f={} cull_d={} col={} cola={} save={}",
+                            self.update_ms,
+                            self.render_ms,
                             s.draw_calls,
                             s.triangles,
                             s.sections_drawn,
                             s.culled_frustum,
                             s.culled_distance,
                             s.columns,
+                            queued,
+                            if self.save_requested { "pend" } else { "ok" },
                         );
                     }
                     self.fps_frames = 0;

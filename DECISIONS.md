@@ -2110,6 +2110,40 @@ faltan diagnosticos/overlay y benchmarks (FASE 13).
 
 ---
 
+### 2026-10-05 (v0.14.0) — Diagnosticos y benchmarks (auditoria FASE 13)
+
+**Decision.** (1) Overlay **F3** (o `SOLARIA_STATS=1`) que muestra en el titulo de
+la ventana fps, tiempos de `update`/`render`, draw calls, triangulos, columnas,
+cola de meshing, memoria del mundo/GPU y estado de guardado; ademas traza una
+linea `[stats]` cada ~0.5 s. (2) `world::bench` (solo `#[cfg(test)]`): benchmarks
+reproducibles de generacion, meshing, luz incremental, fluidos y guardado. (3)
+`docs/performance.md` con la metodologia y las mediciones.
+
+**Motivo.** El audit (FASE 13) pide un overlay de diagnostico, un `FrameStats`
+ligero y benchmarks reproducibles con informe. Las optimizaciones previas
+(culling, memoria, fluidos) necesitaban una forma de **medirse** de forma estable.
+
+**Alternativas descartadas.**
+- Overlay de **texto en pantalla**: requiere una fuente bitmap (no la hay; el
+  `gui.png` son marcos y ranuras). Implementar un renderer de texto es una fase
+  propia; por ahora el titulo de la ventana cumple la funcion sin "features de
+  lujo" antes de la base. Se documenta como pendiente.
+- Framework de profiling externo (tracy, puffin): una dependencia pesada para
+  algo que el propio motor puede medir con `Instant`.
+- `criterion`: anade dependencias y un runner aparte; los `#[test]` que imprimen
+  tiempos ya son reproducibles con `--nocapture` y no rompen `cargo test`.
+- Toggles de wireframe/bordes/luz/fluido (F4-F7): necesitan un pase de debug
+  (lineas/billboards) que no existe; se posponen junto con el overlay de texto.
+
+**Consecuencia.** `engine/app.rs` (`show_stats`, `update_ms`/`render_ms`,
+`title_line`, tecla F3), `world/bench.rs`, `docs/performance.md`. 204 tests;
+clippy `-D warnings` limpio. **Cuello pendiente medido**: la luz de bloque en
+cambios de streaming sigue siendo global (~19-20 ms/cruce, ver
+`docs/performance.md`). **Fases de la auditoria completadas: 7, 9, 10, 11, 12 y
+13.**
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

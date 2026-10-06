@@ -8,26 +8,24 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.13.0` — Física a timestep fijo
+## Estado actual: `v0.14.0` — Diagnósticos y benchmarks
 
-FASE 12 de la auditoría:
+FASE 13 de la auditoría:
 
-- El jugador simula a **timestep fijo** (`FIXED_DT = 1/120`) con un acumulador
-  acotado (`MAX_FIXED_STEPS`): el movimiento deja de depender del framerate
-  (determinismo y base para entidades/multijugador). El giro de cámara sigue
-  siendo por frame.
-- **Colisiones unificadas**: `physics::box_hits_solid` es la consulta común que
-  usa el jugador; gravedad, tope de caída y escala de agua son la misma constante
-  en `player` y `physics` (antes duplicadas y podían divergir).
-- Modelo explícito `VoxelAvailability::{Loaded, Unloaded, OutOfBounds}`: la física
-  no confunde "sin cargar" con aire.
-- Hereda de **v0.12.0**: culling por distancia y métricas (FASE 11).
+- Overlay **F3** (o `SOLARIA_STATS=1`): el título muestra fps, tiempos de
+  `update`/`render`, draw calls, triángulos, columnas, cola de meshing, memoria
+  del mundo y de GPU, y estado de guardado; además traza `[stats]` por consola.
+  (Aún no hay fuente de texto para dibujar en pantalla, así que el "overlay" usa
+  el título de la ventana.)
+- `world/bench.rs` (solo tests): benchmarks reproducibles de generación, meshing,
+  luz incremental, fluidos y guardado. Informe en **`docs/performance.md`**.
+- Hereda de **v0.13.0**: física a timestep fijo y colisiones unificadas (FASE 12).
 
-Pendiente de FASE 11: batching por columna/material y LOD.
+Con esto se completan las fases 7, 9, 10, 11, 12 y 13 de la auditoría.
 
-Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Variables: `SOLARIA_DEMO`, `SOLARIA_OCEAN`,
-`SOLARIA_STATS`. Siguiente (auditoría): diagnósticos/overlay F3 (FASE 13).
+Controles: `1`-`9`/rueda = ranura, `E` = inventario, `F` = volar, **`F3` =
+diagnóstico**, click izq = romper, click der = colocar. Variables: `SOLARIA_DEMO`,
+`SOLARIA_OCEAN`, `SOLARIA_STATS`, `SOLARIA_FLUID_BUDGET_CELLS/_MS`.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -89,6 +87,7 @@ src/
 │   ├── block.rs     Tipos de bloque (id) que delegan en el registro.
 │   ├── registry.rs  Registro central de bloques (metadata unica).
 │   ├── memory.rs    Contabilidad de memoria del mundo por categorias.
+│   ├── bench.rs     Benchmarks reproducibles (solo tests).
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas (carga assets/atlas.png; fallback).
 │   ├── terrain.rs   Generacion: clima/biomas, relieve, superficie y acuiferos.

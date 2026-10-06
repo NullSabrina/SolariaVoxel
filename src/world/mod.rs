@@ -11,6 +11,8 @@
 //! de varios chunks y la generacion procedural de verdad.
 
 pub mod atlas;
+#[cfg(test)]
+pub mod bench;
 pub mod block;
 pub mod caves;
 pub mod chunk;
