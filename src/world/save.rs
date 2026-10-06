@@ -139,6 +139,16 @@ pub struct ChunkRecord {
     pub fluid: Vec<u8>,
 }
 
+/// Layout de `ChunkRecord` en el formato **v1**: una seccion de 4096 bytes
+/// **sin comprimir** y sin el flag `compressed`. Bincode es posicional: leer un
+/// v1 con el layout v2 (que espera `compressed`) desalinearia todo el archivo.
+#[derive(Clone, Debug, Encode, Decode)]
+struct ChunkRecordV1 {
+    format_version: u32,
+    generator_version: u32,
+    blocks: Vec<u8>,
+}
+
 /// Layout de `ChunkRecord` en los formatos v2/v3 (sin `y0`/`height`). Bincode es
 /// posicional: sin este espejo no se puede deserializar un archivo viejo.
 #[derive(Clone, Debug, Encode, Decode)]
@@ -307,6 +317,14 @@ struct WorldSaveV2 {
     chunks: HashMap<ChunkPos, ChunkRecordV3>,
 }
 
+/// Espejo del `WorldSave` **v1**: sin `player_pos` y con bloques sin comprimir
+/// (sin el flag `compressed`).
+#[derive(Encode, Decode)]
+struct WorldSaveV1 {
+    header: WorldHeader,
+    chunks: HashMap<ChunkPos, ChunkRecordV1>,
+}
+
 /// Convierte un registro antiguo (una seccion) al formato de columna completo.
 /// La seccion vivia en `y = LEGACY_TERRAIN_Y0`. Sin datos de fluido (vacio).
 fn upgrade_v3_record(old: ChunkRecordV3) -> ChunkRecord {
@@ -314,6 +332,20 @@ fn upgrade_v3_record(old: ChunkRecordV3) -> ChunkRecord {
         format_version: 3,
         generator_version: old.generator_version,
         compressed: old.compressed,
+        y0: LEGACY_TERRAIN_Y0,
+        height: CHUNK_SIZE as u32,
+        blocks: old.blocks,
+        fluid: Vec::new(),
+    }
+}
+
+/// Convierte un registro v1 (bloques sin comprimir, una seccion en `y=64`) al
+/// tipo actual. `compressed = false` deja que el migrador `V1ToV2` comprima.
+fn upgrade_v1_record(old: ChunkRecordV1) -> ChunkRecord {
+    ChunkRecord {
+        format_version: 1,
+        generator_version: old.generator_version,
+        compressed: false,
         y0: LEGACY_TERRAIN_Y0,
         height: CHUNK_SIZE as u32,
         blocks: old.blocks,
@@ -421,12 +453,10 @@ impl WorldSave {
                     player_pos: v3.player_pos,
                 })
             }
-            // v1/v2 comparten el layout de `ChunkRecordV3` (aunque v1 sin el flag
-            // `compressed` no se soporta de verdad; se documenta).
-            _ => {
+            2 => {
                 let (v2, _): (WorldSaveV2, usize) = bincode::decode_from_slice(&bytes, standard())?;
                 let mut header = v2.header;
-                header.format_version = header.format_version.min(2);
+                header.format_version = 2;
                 Ok(WorldSave {
                     header,
                     chunks: v2
@@ -437,6 +467,25 @@ impl WorldSave {
                     player_pos: DEFAULT_PLAYER_POS,
                 })
             }
+            // v1: bloques sin comprimir, sin flag `compressed` ni `player_pos`.
+            1 => {
+                let (v1, _): (WorldSaveV1, usize) = bincode::decode_from_slice(&bytes, standard())?;
+                let mut header = v1.header;
+                header.format_version = 1;
+                Ok(WorldSave {
+                    header,
+                    chunks: v1
+                        .chunks
+                        .into_iter()
+                        .map(|(p, r)| (p, upgrade_v1_record(r)))
+                        .collect(),
+                    player_pos: DEFAULT_PLAYER_POS,
+                })
+            }
+            from => Err(SaveError::NoMigration {
+                from,
+                to: FORMAT_VERSION,
+            }),
         }
     }
 }
@@ -950,6 +999,41 @@ mod tests {
     }
 
     #[test]
+    fn un_mundo_v1_sin_comprimir_se_migra() {
+        // v1: una seccion de 4096 bytes sin comprimir, sin `compressed` ni pos.
+        let mut raw = vec![Block::Air.id(); CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+        let local = (5 * CHUNK_SIZE + 3) * CHUNK_SIZE + 2; // capa local 5 -> y=69
+        raw[local] = Block::Stone.id();
+        let old = ChunkRecordV1 {
+            format_version: 1,
+            generator_version: GENERATOR_VERSION,
+            blocks: raw,
+        };
+        let mut chunks = HashMap::new();
+        chunks.insert(ChunkPos::new(1, 2), old);
+        let mut header = WorldHeader::new(3, 1);
+        header.format_version = 1;
+        let v1 = WorldSaveV1 { header, chunks };
+        let bytes = bincode::encode_to_vec(&v1, standard()).unwrap();
+        let path = temp_path("v1_migrate");
+        std::fs::write(&path, &bytes).unwrap();
+        let loaded = load_and_migrate(&path).unwrap();
+        cleanup(&path);
+
+        assert_eq!(loaded.header.format_version, FORMAT_VERSION);
+        let record = loaded.chunks.get(&ChunkPos::new(1, 2)).unwrap();
+        assert!(
+            record.compressed,
+            "v1 sin comprimir debe migrar a comprimido"
+        );
+        assert_eq!(record.y0, LEGACY_TERRAIN_Y0);
+        assert_eq!(record.height, CHUNK_SIZE as u32);
+        let mut col = Column::empty();
+        crate::world::store::apply_record(&mut col, record);
+        assert_eq!(col.get(2, 69, 3), Block::Stone);
+    }
+
+    #[test]
     fn un_mundo_v4_se_migra_con_todo_el_agua_como_fuente() {
         // Emulamos un archivo v4: columna completa sin campo `fluid`.
         let mut raw = vec![Block::Air.id(); COLUMN_VOLUME];
@@ -1071,29 +1155,27 @@ mod tests {
 
     #[test]
     fn un_mundo_viejo_se_puede_guardar_y_recargar_tras_migrar() {
-        let mut save = WorldSave::new(5, 1);
-        save.header.format_version = 0;
-        let mut column = Column::empty();
-        column.set(8, 8, 8, Block::Wood);
-        save.set_chunk(ChunkPos::new(0, 0), ChunkRecord::from_column(&column));
-
+        // Ciclo completo: archivo v1 real -> migrar -> volver a guardar (ya v5)
+        // -> recargar. El chunk no se pierde.
+        let mut raw = vec![Block::Air.id(); CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+        raw[0] = Block::Wood.id();
+        let old = ChunkRecordV1 {
+            format_version: 1,
+            generator_version: GENERATOR_VERSION,
+            blocks: raw,
+        };
+        let mut chunks = HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), old);
+        let mut header = WorldHeader::new(5, 1);
+        header.format_version = 1;
+        let v1 = WorldSaveV1 { header, chunks };
+        let bytes = bincode::encode_to_vec(&v1, standard()).unwrap();
         let path = temp_path("migrate_roundtrip");
-        save.save_to(&path).unwrap();
-        let loaded = WorldSave::load_from(&path).unwrap();
-        cleanup(&path);
+        std::fs::write(&path, &bytes).unwrap();
 
-        struct V0ToV1;
-        impl WorldMigrator for V0ToV1 {
-            fn from_version(&self) -> u32 {
-                0
-            }
-            fn to_version(&self) -> u32 {
-                1
-            }
-        }
-        let mut chain = MigrationChain::with_builtins();
-        chain.push(Box::new(V0ToV1));
-        let migrated = chain.migrate(loaded).unwrap();
+        let migrated = load_and_migrate(&path).unwrap();
+        cleanup(&path);
+        assert_eq!(migrated.header.format_version, FORMAT_VERSION);
 
         let path2 = temp_path("migrate_roundtrip2");
         migrated.save_to(&path2).unwrap();

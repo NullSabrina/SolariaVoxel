@@ -123,6 +123,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn la_generacion_es_determinista_secuencial_vs_paralela() {
+        use std::collections::HashMap;
+        let seed = 13_371u32;
+        let positions: Vec<ChunkPos> = {
+            let mut v = Vec::new();
+            for z in -3..=3 {
+                for x in -3..=3 {
+                    v.push(ChunkPos::new(x, z));
+                }
+            }
+            v
+        };
+
+        // Secuencial: un solo generador, en orden.
+        let generator = TerrainGenerator::new(seed);
+        let sequential: HashMap<ChunkPos, u64> = positions
+            .iter()
+            .map(|&p| {
+                let col =
+                    generator.generate_column(p.x * CHUNK_SIZE as i32, p.z * CHUNK_SIZE as i32);
+                (p, hash_column(&col))
+            })
+            .collect();
+
+        // Paralelo: pool de 4 workers (el orden de los resultados no importa).
+        let shared = Arc::new(TerrainGenerator::new(seed));
+        let mut scheduler = TerrainScheduler::new(shared, 4);
+        for (i, &p) in positions.iter().enumerate() {
+            assert!(scheduler.request(i as u64, p));
+        }
+        scheduler.join();
+        let mut parallel: HashMap<ChunkPos, u64> = HashMap::new();
+        while let Some(result) = scheduler.try_recv() {
+            parallel.insert(result.pos, hash_column(&result.column));
+        }
+
+        assert_eq!(parallel.len(), positions.len());
+        for p in &positions {
+            assert_eq!(
+                sequential[p], parallel[p],
+                "la columna {p:?} difiere entre generacion secuencial y paralela"
+            );
+        }
+    }
+
+    /// Hash determinista (FNV-1a) de los ids de bloque de una columna.
+    fn hash_column(column: &Column) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for y in 0..crate::world::WORLD_HEIGHT {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    h ^= column.get(x, y, z).id() as u64;
+                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+        }
+        h
+    }
+
+    #[test]
     fn el_scheduler_genera_y_etiqueta_los_resultados() {
         let generator = Arc::new(TerrainGenerator::new(13371));
         let mut scheduler = TerrainScheduler::new(generator, 2);

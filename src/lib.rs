@@ -10,20 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.14.0 - Diagnosticos y benchmarks
+//! ## Estado actual: v0.15.0 - Migracion v1 y determinismo
 //!
-//! FASE 13 de la auditoria:
-//! * Overlay **F3** (o `SOLARIA_STATS=1`): el titulo muestra fps, tiempos de
-//!   `update`/`render`, draw calls, triangulos, columnas, cola de meshing,
-//!   memoria del mundo y de GPU, y estado de guardado; ademas traza `[stats]`.
-//!   (Sin fuente de texto aun, el "overlay" usa el titulo de la ventana.)
-//! * `world::bench` (solo tests): benchmarks reproducibles de generacion,
-//!   meshing, luz incremental, fluidos y guardado; informe en
-//!   [`docs/performance.md`](../docs/performance.md).
+//! Dos pendientes de la auditoria:
+//! * **Migracion v1 real**: `ChunkRecordV1`/`WorldSaveV1` (bloques sin comprimir,
+//!   sin `compressed` ni `player_pos`). `load_from` ya no adivina el layout de un
+//!   archivo v1 con el de v2; una version desconocida da error claro en vez de
+//!   leer bytes mal interpretados.
+//! * **Test de determinismo**: generar el mundo secuencialmente o con el pool de
+//!   workers da exactamente el mismo hash de columna (orden de resultados
+//!   irrelevante).
 //!
-//! Con esto se cierra la lista de fases de la auditoria (7, 9, 10, 11, 12, 13).
-//! Pendiente: batching/LOD (FASE 11), interpolacion de render (FASE 12), luz de
-//! bloque incremental en streaming, y un overlay de texto con fuente.
+//! Hereda de v0.14.0 (diagnosticos, FASE 13). Fases 7/9/10/11/12/13 completadas.
+//! Pendiente: batching/LOD, interpolacion de render, luz de bloque incremental
+//! en cambios de streaming, y overlay de texto con fuente.
 //!
 //! ## Organizacion del codigo
 //!

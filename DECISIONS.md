@@ -2144,6 +2144,38 @@ cambios de streaming sigue siendo global (~19-20 ms/cruce, ver
 
 ---
 
+### 2026-10-05 (v0.15.0) — Migracion v1 real y test de determinismo
+
+**Decision.** (1) Se anaden `ChunkRecordV1`/`WorldSaveV1` (formato v1: una
+seccion de 4096 bytes **sin comprimir**, sin el flag `compressed` ni
+`player_pos`). `WorldSave::load_from` elige el layout por la version de la
+cabecera y, para una version desconocida, devuelve `SaveError::NoMigration` en
+vez de decodificar con el layout equivocado. (2) Test de determinismo:
+`TerrainScheduler` (4 workers) y la generacion secuencial producen el **mismo
+hash FNV-1a de columna** para 49 posiciones.
+
+**Motivo.** El handoff anotaba "migracion real probada con archivos v1/v2/v3
+(hoy v2/v3 con espejos; v1 sin compressed no soportado de verdad)" y "test de
+determinismo secuencial vs paralelo". El arm `_` de `load_from` decodificaba
+v1/v2 con el layout de v2 (que espera `compressed`), lo que **desalineaba** los
+bytes de un v1 real; un test sintetico con cabecera 0 lo ocultaba.
+
+**Alternativas descartadas.**
+- Seguir usando el layout v2 para v1: incorrecto (bincode es posicional); daba
+  falsas garantias.
+- Version 0: no existio nunca; ahora es un error claro.
+- Cambiar `FORMAT_VERSION` por esto: no cambia el layout de escritura, solo se
+  **anade lectura** de un formato antiguo; `FORMAT_VERSION` se queda en 5.
+
+**Consecuencia.** `world/save.rs` (`ChunkRecordV1`, `WorldSaveV1`,
+`upgrade_v1_record`, `load_from`), `world/streaming.rs` (test de determinismo +
+`hash_column`). 206 tests; clippy `-D warnings` limpio. **Limite**: no hay fixture
+binaria v1 en disco (se sintetiza en el test); la migracion de v0 no existe
+(nunca hubo). Siguiente cuello de botella: luz de bloque en cambios de streaming
+(global, ~19-20 ms/cruce).
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

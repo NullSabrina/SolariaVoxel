@@ -8,18 +8,17 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.14.0` — Diagnósticos y benchmarks
+## Estado actual: `v0.15.0` — Migración v1 y determinismo
 
-FASE 13 de la auditoría:
+Dos pendientes de la auditoría:
 
-- Overlay **F3** (o `SOLARIA_STATS=1`): el título muestra fps, tiempos de
-  `update`/`render`, draw calls, triángulos, columnas, cola de meshing, memoria
-  del mundo y de GPU, y estado de guardado; además traza `[stats]` por consola.
-  (Aún no hay fuente de texto para dibujar en pantalla, así que el "overlay" usa
-  el título de la ventana.)
-- `world/bench.rs` (solo tests): benchmarks reproducibles de generación, meshing,
-  luz incremental, fluidos y guardado. Informe en **`docs/performance.md`**.
-- Hereda de **v0.13.0**: física a timestep fijo y colisiones unificadas (FASE 12).
+- **Migración v1 real**: `ChunkRecordV1`/`WorldSaveV1` (bloques sin comprimir, sin
+  `compressed` ni `player_pos`). `load_from` ya no adivina el layout de un archivo
+  v1 con el de v2; una versión desconocida da un error claro en lugar de leer
+  bytes mal interpretados.
+- **Test de determinismo**: generar el mundo secuencialmente o con el pool de
+  workers da exactamente el mismo hash de columna.
+- Hereda de **v0.14.0**: diagnósticos y benchmarks (FASE 13).
 
 Con esto se completan las fases 7, 9, 10, 11, 12 y 13 de la auditoría.
 
