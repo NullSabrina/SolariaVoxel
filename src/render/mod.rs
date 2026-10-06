@@ -22,5 +22,5 @@ mod pipeline;
 mod renderer;
 mod ui;
 
-pub use renderer::{Renderer, RendererError};
+pub use renderer::{FrameStats, Renderer, RendererError};
 pub use ui::{UiQuad, region_uv};

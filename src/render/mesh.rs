@@ -158,6 +158,11 @@ impl Mesh {
         self.vertex_capacity + self.index_capacity
     }
 
+    /// Numero de indices (0 si la malla esta vacia). `indices / 3` = triangulos.
+    pub fn index_count(&self) -> u32 {
+        self.index_count
+    }
+
     /// Emite los comandos de dibujo de esta malla en un render pass.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if self.index_count == 0 {

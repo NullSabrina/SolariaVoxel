@@ -10,22 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.11.0 - Medida de memoria por categorias
+//! ## Estado actual: v0.12.0 - Renderer scale: culling y metricas
 //!
-//! FASE 10 de la auditoria: **medir antes de cambiar la representacion**.
-//! * Nuevo `world::memory` (`WorldMemory`) + `World::memory_report()`: bloques,
-//!   luz de cielo, luz de bloque, fluido, cabeceras, registros editados y cola
-//!   de agua. Se imprime al arrancar; alimentara el overlay F3 (FASE 13).
-//! * `Column.block_light` pasa a ser **disperso** (`Option<Box<[u8]>>`): sin
-//!   emisores no reserva 98 KB y `clear_block_light` libera en vez de hacer un
-//!   `memset` de 98 KB por columna en cada cambio de streaming. Es la
-//!   optimizacion justificada por la medicion.
-//! * Decision documentada: el bit-packing (paleta 1/2/4/8 bits) de bloques/luz
-//!   **no** se hace aun: la medicion (radio 4: ~7.6 MB bloques + ~7.6 MB cielo
-//!   + ~6.2 MB luz de bloque) no compensa el riesgo/CPU sin benchmarks.
+//! FASE 11 de la auditoria (parte 1):
+//! * `FrameStats`: columnas, secciones dibujadas, draw calls, triangulos y
+//!   secciones descartadas por frustum/distancia. Se muestra en el titulo de la
+//!   ventana y (con `SOLARIA_STATS=1`) se traza por consola para medir.
+//! * **Culling jerarquico por distancia** ademas del frustum: una seccion cuya
+//!   AABB entera queda mas alla de `FOG_END` esta totalmente cubierta por la
+//!   niebla y no se dibuja. Medido en la vista de oceano: **128 draw calls**
+//!   frente a 292 sin el culling por distancia (~56% menos).
+//! * Hereda de v0.11.0 (memoria por categorias, FASE 10).
 //!
-//! Hereda de v0.10.0 (registro de bloques, FASE 9). Siguiente (auditoria):
-//! renderer scale (FASE 11).
+//! Pendiente de FASE 11: batching por columna/material y LOD. Siguiente
+//! (auditoria): fisica a timestep fijo (FASE 12).
 //!
 //! ## Organizacion del codigo
 //!

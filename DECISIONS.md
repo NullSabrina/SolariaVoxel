@@ -2024,6 +2024,48 @@ calls y culling con mundo grande (FASE 11).
 
 ---
 
+### 2026-10-05 (v0.12.0) — Culling por distancia y metricas de frame (auditoria FASE 11, parte 1)
+
+**Decision.** Se anade `FrameStats` (columnas, secciones dibujadas, draw calls,
+triangulos, culls por frustum/distancia) al renderer, y un **culling jerarquico
+por distancia** sobre el frustum: una seccion cuya AABB entera queda mas alla de
+`FOG_END` (64) se descarta porque la niebla la cubre por completo (su color es el
+del cielo). La distancia se mide punto-AABB (`nearest_dist2`). Los stats se
+muestran en el titulo y, con `SOLARIA_STATS=1`, se trazan por consola.
+
+**Motivo.** El audit (FASE 11, §17) pide culling jerarquico (frustum -> distancia
+-> seccion -> chunk) y **medir antes/despues**. Hasta ahora todo lo que pasaba el
+frustum se dibujaba aunque estuviera totalmente en la niebla.
+
+**Medicion (vista de oceano, radio 4, 81 columnas).**
+```
+con culling por distancia:  dc=128  tri=36986  cull_frustum=178  cull_dist=164
+sin culling por distancia:  dc≈292  (128 + 164)
+```
+~56% menos draw calls. Los triangulos bajan en la misma proporcion en las
+secciones cullidas.
+
+**Alternativas descartadas.**
+- Batching por columna (fusionar las 24 secciones en una malla): reduce draw
+  calls pero **sube** el coste de re-meshing en cada edicion (habria que
+  reconstruir la columna entera) y complica las revisiones por seccion; se
+  pospone hasta medir el cuello real con mundos mayores.
+- Indice indirecto / GPU-driven: sobre-ingenieria sin medir que ayude (regla del
+  audit: solo si el benchmark lo justifica).
+- LOD (near/mid/far): gran cambio de calidad; se pospone a una fase posterior.
+- Culling por umbral menor que `FOG_END`: cortaria geometria visible; `FOG_END`
+  es el limite exacto en el que la niebla es total.
+
+**Consecuencia.** `render/renderer.rs` (`FrameStats`, `nearest_dist2`,
+`axis_distance`, culling + contadores, `frame_stats`), `render/mesh.rs`
+(`index_count`), `engine/app.rs` (titulo con dc/tri + traza `SOLARIA_STATS`).
+195 tests (nuevo: distancia punto-AABB); clippy `-D warnings` limpio. **Limites**:
+el culling por distancia usa la AABB de seccion, no un octree/region; no hay
+batching ni LOD todavia. Siguiente cuello de botella: la fisica/`player` no usan
+todavia un timestep fijo (FASE 12).
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

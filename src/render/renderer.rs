@@ -172,6 +172,48 @@ fn sort_water_back_to_front(order: &mut [(f32, ChunkPos, usize)]) {
     order.sort_by(|a, b| b.0.total_cmp(&a.0));
 }
 
+/// Distancia (0 si esta dentro) de `p` al intervalo `[lo, hi]` en un eje.
+#[inline]
+fn axis_distance(p: f32, lo: f32, hi: f32) -> f32 {
+    if p < lo {
+        lo - p
+    } else if p > hi {
+        p - hi
+    } else {
+        0.0
+    }
+}
+
+/// Distancia al cuadrado del punto `cam` a la AABB `[min, max]` (0 si dentro).
+/// Base del **culling por distancia**: una seccion cuya AABB entera queda mas
+/// alla de `FOG_END` esta totalmente cubierta por la niebla (color de cielo) y
+/// no hace falta dibujarla.
+#[inline]
+fn nearest_dist2(cam: Vec3, min: [f32; 3], max: [f32; 3]) -> f32 {
+    let dx = axis_distance(cam.x, min[0], max[0]);
+    let dy = axis_distance(cam.y, min[1], max[1]);
+    let dz = axis_distance(cam.z, min[2], max[2]);
+    dx * dx + dy * dy + dz * dz
+}
+
+/// Metricas del ultimo frame dibujado (sin la interfaz). Sirve para **medir** el
+/// efecto del culling y alimentara el overlay de diagnostico (FASE 13).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FrameStats {
+    /// Columnas con mallas registradas.
+    pub columns: u32,
+    /// Secciones efectivamente dibujadas.
+    pub sections_drawn: u32,
+    /// Draw calls emitidos (opaco + agua).
+    pub draw_calls: u32,
+    /// Triangulos enviados (opaco + agua).
+    pub triangles: u64,
+    /// Secciones descartadas por el frustum.
+    pub culled_frustum: u32,
+    /// Secciones descartadas por distancia (totalmente en la niebla).
+    pub culled_distance: u32,
+}
+
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
@@ -208,6 +250,8 @@ pub struct Renderer {
     /// seccion)`. Se reutiliza entre frames (sin allocar por frame) y se ordena
     /// de **lejos a cerca** para que el blending alfa componga bien.
     water_order: Vec<(f32, ChunkPos, usize)>,
+    /// Metricas del ultimo frame (culling, draw calls, triangulos).
+    stats: FrameStats,
 
     clear_color: wgpu::Color,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
@@ -307,6 +351,7 @@ impl Renderer {
             mesh_scheduler: MeshScheduler::new(2),
             mesh_rev: HashMap::new(),
             water_order: Vec::new(),
+            stats: FrameStats::default(),
             clear_color: sky_color(),
             day_factor: 1.0,
             start: Instant::now(),
@@ -829,6 +874,11 @@ impl Renderer {
         self.mesh_queue.len()
     }
 
+    /// Metricas del ultimo frame (culling, draw calls, triangulos).
+    pub fn frame_stats(&self) -> FrameStats {
+        self.stats
+    }
+
     /// Actualiza el entorno visual del frame: factor dia/noche y color de cielo
     /// (sRGB, canales 0..1). El color se convierte a lineal para el clear.
     pub fn set_environment(&mut self, day_factor: f32, sky_color: [f32; 3]) {
@@ -894,6 +944,12 @@ impl Renderer {
                 label: Some("solaria.encoder"),
             });
 
+        let mut stats = FrameStats {
+            columns: self.meshes.len() as u32,
+            ..Default::default()
+        };
+        let cull_dist2 = FOG_END * FOG_END;
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("solaria.scene_pass"),
@@ -922,7 +978,8 @@ impl Renderer {
             pass.set_pipeline(self.pipeline.pipeline());
             pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
             let section = CHUNK_SIZE as f32;
-            // Pase opaco.
+            // Pase opaco. Culling jerarquico: 1) frustum, 2) distancia (una
+            // seccion entera en la niebla no se dibuja: no se veria).
             for (pos, column) in &self.meshes {
                 let (wx, wz) = (
                     (pos.x * CHUNK_SIZE as i32) as f32,
@@ -933,11 +990,20 @@ impl Renderer {
                         continue;
                     };
                     let y0 = index as f32 * section;
-                    if frustum
-                        .intersects_aabb([wx, y0, wz], [wx + section, y0 + section, wz + section])
-                    {
-                        mesh.draw(&mut pass);
+                    let aabb_min = [wx, y0, wz];
+                    let aabb_max = [wx + section, y0 + section, wz + section];
+                    if !frustum.intersects_aabb(aabb_min, aabb_max) {
+                        stats.culled_frustum += 1;
+                        continue;
                     }
+                    if nearest_dist2(camera_pos, aabb_min, aabb_max) > cull_dist2 {
+                        stats.culled_distance += 1;
+                        continue;
+                    }
+                    mesh.draw(&mut pass);
+                    stats.sections_drawn += 1;
+                    stats.draw_calls += 1;
+                    stats.triangles += (mesh.index_count() / 3) as u64;
                 }
             }
             // Pase de agua (translucido): mismo bind group, otro pipeline con
@@ -959,9 +1025,13 @@ impl Renderer {
                         continue;
                     }
                     let y0 = index as f32 * section;
-                    if !frustum
-                        .intersects_aabb([wx, y0, wz], [wx + section, y0 + section, wz + section])
-                    {
+                    let aabb_min = [wx, y0, wz];
+                    let aabb_max = [wx + section, y0 + section, wz + section];
+                    if !frustum.intersects_aabb(aabb_min, aabb_max) {
+                        continue;
+                    }
+                    if nearest_dist2(camera_pos, aabb_min, aabb_max) > cull_dist2 {
+                        stats.culled_distance += 1;
                         continue;
                     }
                     // Distancia al centro de la seccion (basta para ordenar).
@@ -980,6 +1050,8 @@ impl Renderer {
                     .and_then(|column| column[index].water.as_ref())
                 {
                     mesh.draw(&mut pass);
+                    stats.draw_calls += 1;
+                    stats.triangles += (mesh.index_count() / 3) as u64;
                 }
             }
 
@@ -991,6 +1063,7 @@ impl Renderer {
             // Interfaz 2D (hotbar/inventario) al final, siempre encima.
             self.ui.draw(&mut pass);
         }
+        self.stats = stats;
 
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(frame);
@@ -1010,6 +1083,19 @@ mod tests {
             vertical_neighbor_sections(SECTION_COUNT - 1),
             vec![SECTION_COUNT - 2, SECTION_COUNT - 1]
         );
+    }
+
+    #[test]
+    fn la_distancia_a_la_aabb_es_cero_dentro_y_positiva_fuera() {
+        let cam = Vec3::new(0.0, 0.0, 0.0);
+        // Dentro de la caja: 0.
+        assert_eq!(nearest_dist2(cam, [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]), 0.0);
+        // A 3 bloques en +X: distancia^2 = 9.
+        let d = nearest_dist2(cam, [3.0, -1.0, -1.0], [5.0, 1.0, 1.0]);
+        assert!((d - 9.0).abs() < 1e-4, "d={d}");
+        // Diagonal (3, 4): 3^2 + 4^2 = 25.
+        let d = nearest_dist2(cam, [3.0, 4.0, -1.0], [5.0, 6.0, 1.0]);
+        assert!((d - 25.0).abs() < 1e-4, "d={d}");
     }
 
     #[test]

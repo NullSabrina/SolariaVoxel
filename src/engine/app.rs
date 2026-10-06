@@ -92,6 +92,9 @@ pub struct App {
     /// captura. La fisica y el resaltado se desactivan para que la vista no se
     /// desplace antes de la foto.
     demo: bool,
+    /// Traza de metricas de render (`SOLARIA_STATS`), para medir culling y draw
+    /// calls. Va aparte del overlay F3 (FASE 13).
+    stats_trace: bool,
 }
 
 /// Ruta del archivo de mundo por defecto (junto al ejecutable de trabajo).
@@ -807,6 +810,7 @@ impl ApplicationHandler for App {
         // Modo demo (SOLARIA_DEMO=1): escena fija para las capturas. La camara
         // queda congelada (ver `Self::demo`), asi la vista no se mueve antes de
         // la foto. El montaje vive en `engine::demo`.
+        self.stats_trace = std::env::var("SOLARIA_STATS").is_ok();
         self.demo = demo::is_active();
         if self.demo {
             self.day_cycle = DayCycle::new(demo::time_of_day());
@@ -1036,8 +1040,31 @@ impl ApplicationHandler for App {
                 self.fps_accum += raw_dt;
                 if self.fps_accum >= 0.5 {
                     let fps = self.fps_frames as f32 / self.fps_accum;
+                    let stats = self.renderer.as_ref().map(|r| r.frame_stats());
                     if let Some(window) = self.window.as_ref() {
-                        window.set_title(&format!("{}  |  {fps:.0} fps", window::TITLE));
+                        let title = match stats {
+                            Some(s) => format!(
+                                "{}  |  {fps:.0} fps  |  {} dc  |  {} tri",
+                                window::TITLE,
+                                s.draw_calls,
+                                s.triangles
+                            ),
+                            None => format!("{}  |  {fps:.0} fps", window::TITLE),
+                        };
+                        window.set_title(&title);
+                    }
+                    if self.stats_trace
+                        && let Some(s) = stats
+                    {
+                        println!(
+                            "[stats] dc={} tri={} dibujadas={} cull_frustum={} cull_dist={} cols={}",
+                            s.draw_calls,
+                            s.triangles,
+                            s.sections_drawn,
+                            s.culled_frustum,
+                            s.culled_distance,
+                            s.columns,
+                        );
                     }
                     self.fps_frames = 0;
                     self.fps_accum = 0.0;
