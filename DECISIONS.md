@@ -1800,6 +1800,44 @@ capacidad holgada ya elimina el churn.
 
 ---
 
+### 2026-10-05 (v0.9.0) — Fluido local por columna (auditoria FASE 7, parte 1)
+
+**Decision.** El estado del agua deja de ser un `HashMap<[i32; 3], Fluid>`
+global. Los niveles de flujo pasan a la `Column`, empaquetados en **nibbles**
+(4 bits; `MAX_LEVEL = 8`) y con asignacion **dispersa** (`Column.fluid:
+Option<Box<[u8]>>` se reserva solo al escribir el primer flujo != 0). El flag
+"fuente" no se almacena: se **infiere** de `Block::Water` con flujo 0. El
+**active set** sigue siendo una cola deduplicada de celdas (`water_queue`); una
+celda en equilibrio (oceano quieto) sale al procesarse y no se re-encola.
+
+**Motivo.** El audit (P1 agua) pide estado de fluido local por seccion/columna,
+niveles empaquetados y una simulacion de solo celdas activas. La version previa
+guardaba un `HashMap<[i32; 3], Fluid>` global: hash costoso por consulta (el
+mesher lee 18^3 celdas por seccion) y memoria proporcional a *todas* las celdas
+de agua registradas, no a las que fluyen. "Fuente" es exactamente "agua sin
+nivel de flujo", asi que inferirlo elimina el flag y no puede desincronizarse.
+
+**Alternativas descartadas.**
+- Mantener el `HashMap` y solo anadir persistencia: no arregla localidad ni el
+  coste de hash en el mesher.
+- Un `Vec<u8>` de nivel por celda (1 byte) en la columna: el doble de memoria;
+  el nibble basta porque `MAX_LEVEL = 8`.
+- Listas de celdas activas *por seccion*: la simulacion ya usa coordenadas de
+  mundo (el agua cruza chunks) y la cola global deduplicada es el active set; una
+  lista por seccion duplicaria el estado sin reducir el trabajo.
+- Reservar siempre los 48 KB de nibbles por columna: dispararia la memoria de
+  columnas sin agua que fluye; se reserva de forma perezosa.
+
+**Consecuencia.** `world/chunk.rs` (almacen de flujo + `flow_at`/`set_flow`),
+`world/store.rs` (se elimina `water: HashMap`; `water_at`/`set_water_raw` leen y
+escriben la columna; nuevo `pending_water_cells`). 177 tests; clippy
+`-D warnings` limpio. **Limites**: los niveles de flujo aun **no se persisten**
+(van en v0.9.1) y el remesheo de agua sigue siendo por anillo 3x3 de columnas
+(va en v0.9.2). Siguiente cuello de botella: que el flujo sobreviva a cerrar y
+reabrir.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

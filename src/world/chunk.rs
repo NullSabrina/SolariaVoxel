@@ -12,6 +12,7 @@
 use std::array;
 
 use super::block::Block;
+use super::water::MAX_LEVEL;
 
 /// Lado de una seccion, en bloques.
 pub const CHUNK_SIZE: usize = 16;
@@ -24,6 +25,10 @@ pub const WORLD_HEIGHT: usize = 384;
 
 /// Cuantas secciones tiene una columna (384 / 16 = 24).
 pub const SECTION_COUNT: usize = WORLD_HEIGHT / CHUNK_SIZE;
+
+/// Bytes del almacen de **niveles de flujo** de una columna: un nibble (4 bits)
+/// por celda (`MAX_LEVEL = 8` cabe de sobra). `16x16x384 / 2`.
+pub const FLUID_NIBBLE_BYTES: usize = CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT / 2;
 
 /// Una seccion de 16x16x16 bloques.
 pub struct Chunk {
@@ -81,6 +86,14 @@ pub struct Column {
     /// localizar rapido el aire en sombra (cuevas/voladizos) al propagar la luz
     /// de cielo lateralmente. Indice `z * CHUNK_SIZE + x`.
     surface: [u16; CHUNK_SIZE * CHUNK_SIZE],
+    /// Nivel de flujo del agua por celda (`0` = sin flujo; `1..=MAX_LEVEL`),
+    /// empaquetado en **nibbles**. Sustituye al antiguo `HashMap<[i32;3], Fluid>`
+    /// global: el estado del fluido vive con la columna (localidad de cache) y
+    /// va **disperso**: solo se reserva cuando hay agua que fluye. Un oceano
+    /// (todo `Block::Water` a nivel de fuente) no reserva ni un byte. La
+    /// condicion "fuente" no se guarda: se infiere (`Block::Water` con flujo 0).
+    /// Indice `(y * CHUNK_SIZE + z) * CHUNK_SIZE + x`, como la luz.
+    fluid: Option<Box<[u8]>>,
 }
 
 impl Column {
@@ -91,6 +104,7 @@ impl Column {
             light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
             block_light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
             surface: [0; CHUNK_SIZE * CHUNK_SIZE],
+            fluid: None,
         }
     }
 
@@ -156,6 +170,59 @@ impl Column {
     #[inline]
     pub fn surface_y(&self, x: usize, z: usize) -> usize {
         self.surface[z * CHUNK_SIZE + x] as usize
+    }
+
+    /// Escribe el nibble bajo/alto correspondiente al indice plano `idx`.
+    #[inline]
+    fn write_nibble(buf: &mut [u8], idx: usize, level: u8) {
+        let byte = &mut buf[idx >> 1];
+        let level = level & 0x0F;
+        if idx & 1 == 0 {
+            *byte = (*byte & 0xF0) | level;
+        } else {
+            *byte = (*byte & 0x0F) | (level << 4);
+        }
+    }
+
+    /// Nivel de **flujo** de agua en una celda (0 = sin flujo). No distingue si
+    /// el bloque es agua: eso lo decide quien consulta (`World::water_at`).
+    #[inline]
+    pub fn flow_at(&self, x: usize, y: usize, z: usize) -> u8 {
+        let Some(buf) = self.fluid.as_deref() else {
+            return 0;
+        };
+        let idx = Self::light_index(x, y, z);
+        let byte = buf[idx >> 1];
+        if idx & 1 == 0 {
+            byte & 0x0F
+        } else {
+            (byte >> 4) & 0x0F
+        }
+    }
+
+    /// Fija el nivel de flujo de una celda (`0` lo borra). Reserva el almacen de
+    /// nibbles **solo** si se escribe un nivel distinto de cero: un oceano de
+    /// fuentes no reserva nada (su "fuente" se infiere del bloque).
+    #[inline]
+    pub fn set_flow(&mut self, x: usize, y: usize, z: usize, level: u8) {
+        let level = level.min(MAX_LEVEL);
+        let idx = Self::light_index(x, y, z);
+        match &mut self.fluid {
+            Some(buf) => Self::write_nibble(buf, idx, level),
+            None if level != 0 => {
+                let mut buf = vec![0u8; FLUID_NIBBLE_BYTES].into_boxed_slice();
+                Self::write_nibble(&mut buf, idx, level);
+                self.fluid = Some(buf);
+            }
+            None => {}
+        }
+    }
+
+    /// ¿La columna reservo ya su almacen de flujo? Sirve para saber si merece la
+    /// pena iterarlo al persistir/limpiar.
+    #[inline]
+    pub fn has_flow_storage(&self) -> bool {
+        self.fluid.is_some()
     }
 
     /// Luz de bloque (antorchas) en una posicion (0..15).
@@ -502,5 +569,31 @@ mod tests {
         let column = Column::generate_demo();
         assert!(column.get(0, 0, 0).is_solid());
         assert_eq!(column.get(0, WORLD_HEIGHT - 1, 0), Block::Air);
+    }
+
+    #[test]
+    fn el_flujo_se_empaqueta_en_nibbles_sin_pisar_al_vecino() {
+        let mut column = Column::empty();
+        // Sin agua que fluya no se reserva nada (un oceano no ocupa memoria).
+        assert!(!column.has_flow_storage());
+        assert_eq!(column.flow_at(0, 0, 0), 0);
+
+        // Dos celdas que comparten byte (x par e impar): nibble bajo y alto.
+        column.set_flow(2, 5, 7, 5);
+        assert!(column.has_flow_storage());
+        column.set_flow(3, 5, 7, MAX_LEVEL);
+        assert_eq!(column.flow_at(2, 5, 7), 5, "nibble bajo");
+        assert_eq!(column.flow_at(3, 5, 7), MAX_LEVEL, "nibble alto");
+        // Borrar uno no toca al otro.
+        column.set_flow(2, 5, 7, 0);
+        assert_eq!(column.flow_at(2, 5, 7), 0);
+        assert_eq!(column.flow_at(3, 5, 7), MAX_LEVEL);
+    }
+
+    #[test]
+    fn el_nivel_de_flujo_se_recorta_al_maximo() {
+        let mut column = Column::empty();
+        column.set_flow(1, 1, 1, 200);
+        assert_eq!(column.flow_at(1, 1, 1), MAX_LEVEL);
     }
 }

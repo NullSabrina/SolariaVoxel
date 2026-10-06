@@ -8,21 +8,23 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.18` — Reuso de buffers GPU
+## Estado actual: `v0.9.0` — Fluido local por columna
 
-FASE 6 (buffers) de la auditoría: re-meshear una sección ya no crea/destruye
-buffers GPU.
+FASE 7 (fluidos, parte 1) de la auditoría: el estado del agua deja de ser un
+`HashMap<[i32; 3], Fluid>` global.
 
-- `Mesh` reserva cada buffer con holgura (`next_power_of_two`) y expone
-  `update(device, queue, vertices, indices)`: reescribe con `write_buffer`
-  mientras quepa, y sólo recrea si el nuevo tamaño no cabe.
-- `poll_meshing` usa `update` si la sección ya tenía malla; `draw` salta si no
-  hay índices.
-- Hereda de **v0.8.17**: meshing CPU asíncrono. **v0.8.16**: meshing por secciones.
+- Los **niveles de flujo** viven en la `Column`, empaquetados en **nibbles**
+  (4 bits, `MAX_LEVEL = 8`) y asignados de forma **dispersa**: un océano (todo
+  fuentes) no reserva ni un byte. El flag "fuente" no se guarda: se infiere de
+  `Block::Water` con flujo 0.
+- El **active set** es la cola deduplicada de celdas: una celda en equilibrio
+  (océano quieto) sale al procesarse y no se re-encola, así que no cuesta CPU.
+  `World::pending_water_cells()` lo expone para diagnóstico y tests.
+- Hereda de **v0.8.18**: reuso de buffers GPU. **v0.8.17**: meshing CPU asíncrono.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (auditoría): fluids (active
-set + persistencia), registry, memoria.
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): persistencia de
+fluidos, remeshing incremental, transparencia ordenada, registry, memoria.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

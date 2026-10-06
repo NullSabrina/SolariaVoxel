@@ -10,19 +10,22 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.18 - Reuso de buffers GPU
+//! ## Estado actual: v0.9.0 - Fluido local por columna
 //!
-//! FASE 6 (buffers) de la auditoria: re-meshear una seccion ya no crea/destruye
-//! buffers GPU.
-//! * `Mesh` reserva cada buffer con holgura (`next_power_of_two`) y expone
-//!   `update(device, queue, vertices, indices)`: reescribe con `write_buffer`
-//!   mientras quepa, y solo recrea si el nuevo tamano no cabe.
-//! * `poll_meshing` usa `update` (via `update_mesh`) si la seccion ya tenia
-//!   malla; `draw` salta si no hay indices.
+//! FASE 7 (fluidos, parte 1) de la auditoria: el estado del agua deja de ser un
+//! `HashMap<[i32; 3], Fluid>` global.
+//! * Los **niveles de flujo** viven en la `Column`, empaquetados en **nibbles**
+//!   (4 bits, `MAX_LEVEL = 8`) y asignados de forma **dispersa**: un oceano (todo
+//!   fuentes) no reserva ni un byte. El flag "fuente" no se guarda: se infiere de
+//!   `Block::Water` con flujo 0.
+//! * El **active set** es la cola deduplicada de celdas: una celda en equilibrio
+//!   (oceano quieto) sale al procesarse y no se re-encola, asi que no cuesta CPU.
+//!   `World::pending_water_cells()` lo expone para diagnostico y tests.
 //!
-//! Hereda de v0.8.17 (meshing CPU asincrono), v0.8.16 (meshing por secciones).
+//! Hereda de v0.8.18 (reuso de buffers GPU), v0.8.17 (meshing CPU asincrono).
 //!
-//! Siguiente (auditoria): fluids (active set + persistencia), registry, memoria.
+//! Siguiente (auditoria): persistencia de fluidos, remeshing incremental,
+//! transparencia ordenada, registry, memoria.
 //!
 //! ## Organizacion del codigo
 //!

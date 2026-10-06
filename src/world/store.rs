@@ -46,11 +46,12 @@ pub struct World {
     view_radius: i32,
     /// Ultimo centro de carga (para no recalcular si no cambio).
     last_center: Option<ChunkPos>,
-    /// Niveles de agua **que fluyen** (desbordes sobre el estado por defecto).
-    /// Un bloque `Water` **sin** entrada aqui es una fuente (el oceano o el agua
-    /// colocada por el jugador); con entrada, es agua que fluye.
-    water: HashMap<[i32; 3], Fluid>,
-    /// Celdas de agua pendientes de simular (cola con deduplicacion).
+    /// **Active set** del agua: celdas pendientes de simular, con deduplicacion.
+    /// Solo entran celdas no cargadas no; y una celda en equilibrio (un oceano
+    /// quieto) sale al procesarse, asi que no vuelve a encolarse. Los *niveles*
+    /// de flujo ya no viven aqui: van por columna (`Column::flow_at`/`set_flow`),
+    /// empaquetados en nibbles, lo que elimina el `HashMap<[i32;3], Fluid>`
+    /// global (localidad de cache y memoria proporcional al agua que fluye).
     water_queue: water::DirtyQueue,
     /// Pool de generacion en hilos (se crea al primer streaming asincrono).
     scheduler: Option<TerrainScheduler>,
@@ -71,7 +72,6 @@ impl World {
             dirty: HashSet::new(),
             view_radius,
             last_center: None,
-            water: HashMap::new(),
             water_queue: water::DirtyQueue::new(),
             scheduler: None,
             pending: HashMap::new(),
@@ -194,10 +194,12 @@ impl World {
         // carisimo). Asi el guardado captura tambien las ediciones por encima y
         // por debajo de la antigua seccion fija.
         self.dirty.insert(pos);
-        // El agua: un bloque `Water` nuevo es fuente (sin desborde); cualquier
-        // otro bloque borra el desborde previo. Ademas, los vecinos pueden
+        // El agua: un bloque `Water` nuevo es fuente (flujo 0); cualquier otro
+        // bloque borra el flujo previo de la celda. Ademas, los vecinos pueden
         // reaccionar (agua que cae a un hueco, etc.).
-        self.water.remove(&world);
+        if let Some(column) = self.columns.get_mut(&pos) {
+            column.set_flow(local[0], local[1], local[2], 0);
+        }
         self.enqueue_water(world);
         for d in NEIGHBORS6 {
             self.enqueue_water([world[0] + d[0], world[1] + d[1], world[2] + d[2]]);
@@ -738,11 +740,26 @@ impl World {
     }
 
     /// Estado de agua de una celda del mundo (fuente, flujo con nivel, o nada).
+    ///
+    /// El nivel de flujo se lee de la columna (nibble empaquetado). Un bloque
+    /// `Water` con flujo 0 es una **fuente**: no hay que almacenar el flag, la
+    /// condicion "fuente" es exactamente "agua sin flujo".
     pub fn water_at(&self, world: [i32; 3]) -> Fluid {
-        if self.get_block(world) == Block::Water {
-            self.water.get(&world).copied().unwrap_or(Fluid::Source)
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return Fluid::None;
+        }
+        let (pos, local) = Self::world_to_local(world);
+        let Some(column) = self.columns.get(&pos) else {
+            return Fluid::None;
+        };
+        if column.get(local[0], local[1], local[2]) != Block::Water {
+            return Fluid::None;
+        }
+        let level = column.flow_at(local[0], local[1], local[2]);
+        if level == 0 {
+            Fluid::Source
         } else {
-            Fluid::None
+            Fluid::Flow(level)
         }
     }
 
@@ -789,34 +806,44 @@ impl World {
     }
 
     /// Escribe el estado de agua de una celda **sin** marcarla como editada
-    /// (la simulacion reescribe el bloque `Water`/`Air` a su gusto). Mantiene el
-    /// desborde `water` coherente con el bloque.
+    /// (la simulacion reescribe el bloque `Water`/`Air` a su gusto). El bloque y
+    /// el nibble de flujo de la columna quedan coherentes: `Source` es flujo 0.
     fn set_water_raw(&mut self, world: [i32; 3], f: Fluid) {
+        if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
+            return;
+        }
         let (pos, local) = Self::world_to_local(world);
         let Some(column) = self.columns.get_mut(&pos) else {
             return;
         };
-        let current = column.get(local[0], local[1], local[2]);
+        let (x, y, z) = (local[0], local[1], local[2]);
         match f {
             Fluid::None => {
-                self.water.remove(&world);
-                if current == Block::Water {
-                    column.set(local[0], local[1], local[2], Block::Air);
+                column.set_flow(x, y, z, 0);
+                if column.get(x, y, z) == Block::Water {
+                    column.set(x, y, z, Block::Air);
                 }
             }
             Fluid::Source => {
-                self.water.remove(&world);
-                if current != Block::Water {
-                    column.set(local[0], local[1], local[2], Block::Water);
+                column.set_flow(x, y, z, 0);
+                if column.get(x, y, z) != Block::Water {
+                    column.set(x, y, z, Block::Water);
                 }
             }
             Fluid::Flow(level) => {
-                self.water.insert(world, Fluid::Flow(level));
-                if current != Block::Water {
-                    column.set(local[0], local[1], local[2], Block::Water);
+                column.set_flow(x, y, z, level);
+                if column.get(x, y, z) != Block::Water {
+                    column.set(x, y, z, Block::Water);
                 }
             }
         }
+    }
+
+    /// Cuantas celdas de agua hay pendientes en el **active set**. Es 0 cuando
+    /// todo el agua esta en equilibrio (un oceano quieto): ese es el objetivo de
+    /// coste cero por frame.
+    pub fn pending_water_cells(&self) -> usize {
+        self.water_queue.len()
     }
 
     /// Avanza la simulacion de agua hasta `budget` celdas. Devuelve las columnas
@@ -1216,6 +1243,35 @@ mod tests {
         assert!(world.water_at([8, 101, 8]).is_source(), "la fuente sigue");
         // El nivel decrece al alejarse de la fuente.
         assert!(world.water_level([8, 101, 8]) > world.water_level([9, 101, 8]));
+    }
+
+    #[test]
+    fn un_oceano_quieto_no_consume_cpu() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 0, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        // Oceano: suelo solido en y=100 y una capa de agua-fuente en y=101.
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                world.set_block([x, 100, z], Block::Stone);
+                world.set_block([x, 101, z], Block::Water);
+            }
+        }
+        // Dejamos que el active set se vacie (las celdas en equilibrio salen al
+        // procesarse y no se re-encolan).
+        let mut ticks = 0;
+        while world.pending_water_cells() > 0 && ticks < 500 {
+            world.tick_water(100_000);
+            ticks += 1;
+        }
+        assert_eq!(
+            world.pending_water_cells(),
+            0,
+            "un oceano quieto no deberia tener celdas activas"
+        );
+        // Un tick mas no reporta ningun chunk sucio ni procesa nada visible.
+        assert!(world.tick_water(100_000).is_empty());
+        assert!(world.water_at([8, 101, 8]).is_source());
     }
 
     #[test]
