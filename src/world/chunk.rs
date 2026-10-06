@@ -77,11 +77,19 @@ pub const MAX_LIGHT: u8 = 15;
 pub struct Column {
     sections: [Chunk; SECTION_COUNT],
     /// Luz de cielo por bloque (0..15), en el mismo orden que los bloques.
-    /// Guardamos `u8` por celda: 16x16x384 = ~98 KB por columna. En v0.12.x
-    /// pasaremos a un buffer de 4 bits por celda (mitad de memoria).
+    /// `u8` por celda: 16x16x384 = ~98 KB por columna. La FASE 10 midio el mundo
+    /// (~7.6 MB de cielo a radio 4) y **no** justifico aun empaquetarla a 4 bits:
+    /// el ahorro no compensa el coste de shifts/masks en el meshing y la
+    /// iluminacion (hot paths) sin benchmarks que lo respalden.
     light: Vec<u8>,
-    /// Luz de bloque (antorchas, 0..15), propagada con un flood-fill.
-    block_light: Vec<u8>,
+    /// Luz de bloque (antorchas, 0..15), propagada con un flood-fill. Va
+    /// **dispersa** (`None` = toda a 0): la mayoria de columnas no tienen
+    /// emisores, asi que no reservan sus ~98 KB. Se asigna al primer valor
+    /// distinto de cero y `clear_block_light` la libera. Es la optimizacion
+    /// justificada por la medicion de [`super::memory`] (era ~1/3 de la memoria
+    /// del mundo y ademas cada cambio de streaming hacia un `memset` de 98 KB
+    /// por columna).
+    block_light: Option<Box<[u8]>>,
     /// Altura del primer bloque solido de cada columna vertical `(x, z)`, para
     /// localizar rapido el aire en sombra (cuevas/voladizos) al propagar la luz
     /// de cielo lateralmente. Indice `z * CHUNK_SIZE + x`.
@@ -102,7 +110,7 @@ impl Column {
         Self {
             sections: array::from_fn(|_| Chunk::empty()),
             light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
-            block_light: vec![0; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT],
+            block_light: None,
             surface: [0; CHUNK_SIZE * CHUNK_SIZE],
             fluid: None,
         }
@@ -225,21 +233,66 @@ impl Column {
         self.fluid.is_some()
     }
 
-    /// Luz de bloque (antorchas) en una posicion (0..15).
+    /// Almacen de luz de bloque, reservandolo perezosamente si hace falta.
+    #[inline]
+    fn block_light_mut(&mut self) -> &mut [u8] {
+        self.block_light.get_or_insert_with(|| {
+            vec![0u8; CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT].into_boxed_slice()
+        })
+    }
+
+    /// Luz de bloque (antorchas) en una posicion (0..15). Sin almacen => 0.
     #[inline]
     pub fn block_light_at(&self, x: usize, y: usize, z: usize) -> u8 {
-        self.block_light[Self::light_index(x, y, z)]
+        match &self.block_light {
+            Some(buf) => buf[Self::light_index(x, y, z)],
+            None => 0,
+        }
     }
 
     /// Ajusta la luz de bloque en una posicion (la usa el BFS del mundo).
+    ///
+    /// Escribir `0` **no reserva** el almacen (y sin almacen es un no-op): asi
+    /// apagar luz no reasigna 98 KB por escribir ceros.
     #[inline]
     pub fn set_block_light(&mut self, x: usize, y: usize, z: usize, level: u8) {
-        self.block_light[Self::light_index(x, y, z)] = level.min(MAX_LIGHT);
+        let level = level.min(MAX_LIGHT);
+        if level == 0 && self.block_light.is_none() {
+            return;
+        }
+        let idx = Self::light_index(x, y, z);
+        self.block_light_mut()[idx] = level;
     }
 
     /// Pone a cero la luz de bloque de toda la columna (antes de recomputarla).
+    /// Es un simple `None`: libera los 98 KB y evita el `memset` que se hacia por
+    /// cada columna en cada cambio de streaming.
     pub fn clear_block_light(&mut self) {
-        self.block_light.fill(0);
+        self.block_light = None;
+    }
+
+    /// Bytes del almacen de luz de bloque (0 si la columna no tiene emisores).
+    #[inline]
+    pub fn blocklight_bytes(&self) -> usize {
+        self.block_light.as_ref().map_or(0, |b| b.len())
+    }
+
+    /// Bytes del almacen de luz de cielo (siempre reservado).
+    #[inline]
+    pub fn skylight_bytes(&self) -> usize {
+        self.light.len()
+    }
+
+    /// Bytes del almacen de flujo de agua (0 si no hay agua que fluya).
+    #[inline]
+    pub fn fluid_bytes(&self) -> usize {
+        self.fluid.as_ref().map_or(0, |b| b.len())
+    }
+
+    /// Bytes de los bloques: `SECTION_COUNT` secciones de `16^3`.
+    #[inline]
+    pub fn block_bytes(&self) -> usize {
+        SECTION_COUNT * CHUNK_VOLUME
     }
 
     /// Luz total que recibe una celda: el **maximo** de cielo y de bloque. Es lo
@@ -254,11 +307,12 @@ impl Column {
     /// solidos.
     ///
     /// Usamos BFS (cola) en lugar de DFS para que la propagacion sea uniforme:
-    /// cada celda se visita una sola vez con su nivel mas alto.
+    /// cada celda se visita una sola vez con su nivel mas alto. Sin emisores no
+    /// reserva nada (`block_light = None`).
     pub fn compute_block_light(&mut self) {
         use std::collections::VecDeque;
 
-        self.block_light.fill(0);
+        self.block_light = None;
         let mut queue: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
 
         // Fuentes.
@@ -267,8 +321,7 @@ impl Column {
                 for x in 0..CHUNK_SIZE {
                     let emission = self.get(x, y, z).light_emission();
                     if emission > 0 {
-                        let idx = Self::light_index(x, y, z);
-                        self.block_light[idx] = emission;
+                        self.set_block_light(x, y, z, emission);
                         queue.push_back((x, y, z, emission));
                     }
                 }
@@ -302,9 +355,8 @@ impl Column {
                 if self.get(nx, ny, nz).is_solid() {
                     continue;
                 }
-                let idx = Self::light_index(nx, ny, nz);
-                if self.block_light[idx] < next {
-                    self.block_light[idx] = next;
+                if self.block_light_at(nx, ny, nz) < next {
+                    self.set_block_light(nx, ny, nz, next);
                     queue.push_back((nx, ny, nz, next));
                 }
             }
@@ -588,6 +640,29 @@ mod tests {
         column.set_flow(2, 5, 7, 0);
         assert_eq!(column.flow_at(2, 5, 7), 0);
         assert_eq!(column.flow_at(3, 5, 7), MAX_LEVEL);
+    }
+
+    #[test]
+    fn la_luz_de_bloque_no_reserva_memoria_sin_emisores() {
+        let mut column = Column::empty();
+        assert_eq!(column.blocklight_bytes(), 0, "vacia: sin almacen");
+        column.set(3, 5, 7, Block::Stone);
+        column.compute_skylight();
+        column.compute_block_light(); // no hay emisores
+        assert_eq!(
+            column.blocklight_bytes(),
+            0,
+            "sin fuentes no debe reservar 98 KB"
+        );
+        // Con una antorcha, si reserva y propaga.
+        column.set(6, 6, 6, Block::Torch);
+        column.compute_block_light();
+        assert!(column.blocklight_bytes() > 0);
+        assert_eq!(column.block_light_at(6, 6, 6), 14);
+        assert_eq!(column.block_light_at(7, 6, 6), 13);
+        // Limpiar libera el almacen.
+        column.clear_block_light();
+        assert_eq!(column.blocklight_bytes(), 0);
     }
 
     #[test]

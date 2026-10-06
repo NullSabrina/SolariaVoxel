@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::block::Block;
-use super::chunk::{CHUNK_SIZE, Column, SECTION_COUNT, WORLD_HEIGHT};
+use super::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Column, SECTION_COUNT, WORLD_HEIGHT};
 use super::save::{ChunkPos, ChunkRecord};
 use super::streaming::{GenResult, TerrainScheduler};
 use super::terrain::TerrainGenerator;
@@ -739,6 +739,34 @@ impl World {
         &self.modified
     }
 
+    /// Informe de **memoria** del mundo por categorias (FASE 10). Recorre las
+    /// columnas cargadas una vez. Sirve para decidir con datos si merece la pena
+    /// bit-packing/cache en frio, y alimentara el overlay de diagnostico.
+    pub fn memory_report(&self) -> super::memory::WorldMemory {
+        let columns = self.columns.len();
+        let block_per_column = SECTION_COUNT * CHUNK_VOLUME;
+        let struct_per_column = std::mem::size_of::<Column>();
+        let mut memory = super::memory::WorldMemory {
+            columns,
+            blocks_bytes: columns * block_per_column,
+            struct_overhead_bytes: columns * struct_per_column.saturating_sub(block_per_column),
+            ..Default::default()
+        };
+        for column in self.columns.values() {
+            memory.skylight_bytes += column.skylight_bytes();
+            memory.blocklight_bytes += column.blocklight_bytes();
+            memory.fluid_bytes += column.fluid_bytes();
+        }
+        memory.modified_chunks = self.modified.len();
+        memory.modified_bytes = self
+            .modified
+            .values()
+            .map(super::memory::record_bytes)
+            .sum();
+        memory.water_queue_cells = self.water_queue.len();
+        memory
+    }
+
     /// Estado de agua de una celda del mundo (fuente, flujo con nivel, o nada).
     ///
     /// El nivel de flujo se lee de la columna (nibble empaquetado). Un bloque
@@ -1430,6 +1458,31 @@ mod tests {
         });
         assert!(dirty.is_empty());
         assert_eq!(world.pending_water_cells(), before, "no se consumio nada");
+    }
+
+    #[test]
+    fn el_reporte_de_memoria_cuadra_por_categorias() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 1, vec![]);
+        world.warm_streaming([0.0, 100.0, 0.0]);
+        let r = world.memory_report();
+        assert_eq!(r.columns, world.loaded_positions().count());
+        assert_eq!(
+            r.blocks_bytes,
+            r.columns * SECTION_COUNT * crate::world::CHUNK_VOLUME
+        );
+        assert!(r.total_bytes() >= r.blocks_bytes);
+        // La luz de cielo siempre esta reservada para las columnas cargadas.
+        assert_eq!(
+            r.skylight_bytes,
+            r.columns * CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT
+        );
+        // Editar crea un registro modificado con payload.
+        world.set_block([1, 100, 1], Block::Stone);
+        world.sync_modified();
+        let r2 = world.memory_report();
+        assert_eq!(r2.modified_chunks, 1);
+        assert!(r2.modified_bytes > 0);
     }
 
     #[test]

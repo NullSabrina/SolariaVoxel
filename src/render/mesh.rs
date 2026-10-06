@@ -152,6 +152,12 @@ impl Mesh {
         self.index_count = indices.len() as u32;
     }
 
+    /// Bytes reservados en GPU (vertices + indices) de esta malla. Es la
+    /// capacidad reservada (con holgura), no el uso exacto; sirve de cota.
+    pub fn gpu_bytes(&self) -> u64 {
+        self.vertex_capacity + self.index_capacity
+    }
+
     /// Emite los comandos de dibujo de esta malla en un render pass.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if self.index_count == 0 {

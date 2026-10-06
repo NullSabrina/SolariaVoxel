@@ -1980,6 +1980,50 @@ historicos, coherencia de `RenderKind`); clippy `-D warnings` limpio. **Limite**
 
 ---
 
+### 2026-10-05 (v0.11.0) — Memoria: medir por categorias y luz de bloque dispersa (auditoria FASE 10)
+
+**Decision.** (1) Se anade `world/memory.rs` (`WorldMemory`) y
+`World::memory_report()`, que miden el mundo cargado por categorias (bloques,
+luz de cielo, luz de bloque, fluido, cabeceras, registros editados, cola de
+agua) y se imprimen al arrancar. (2) `Column.block_light` pasa de `Vec<u8>` a
+`Option<Box<[u8]>>` **disperso**: sin emisores no reserva 98 KB y
+`clear_block_light` libera en vez de rellenar. (3) Se **decide no** hacer
+bit-packing (paleta 1/2/4/8 bits) de bloques/luz todavia.
+
+**Motivo.** El audit (FASE 10) pide medir antes de cambiar la representacion y
+solo aplicar bit-packing si las mediciones lo justifican. Medicion real (radio 4,
+81 columnas, mundo de terreno): bloques 7.6 MB, luz de cielo 7.6 MB, luz de
+bloque 6.2 MB, cabeceras ~0.04 MB; total ~21.5 MB (~265 KB/columna). La luz de
+bloque era ~1/3 pero solo 15 de 81 columnas no tienen emisores (hay lava
+repartida), asi que el ahorro de memoria es modesto (~1.7 MB); el beneficio
+grande es de **CPU**: elimina el `memset` de 98 KB por columna en cada cambio de
+streaming (era 81 x 98 KB = ~8 MB de escritura por cruce de chunk).
+
+**Alternativas descartadas.**
+- Bit-packing de bloques por seccion (paleta + indices): es el mayor ahorro
+  potencial, pero reescribe `Chunk::get/set`, meshing, luz y save; sin un
+  benchmark (FASE 13) el riesgo de degradar CPU/cache supera a ~7.6 MB de ahorro
+  a radio 4. Se pospone con datos.
+- Empaquetar la luz a 4 bits (mitad): mismo argumento; los accesos de luz son hot
+  path (meshing y BFS) y el shift/mask podria costar mas de lo que ahorra.
+- Cache LRU caliente/templada/fria: el streaming ya **descarga** columnas fuera
+  del radio (frio) conservando sus ediciones en `modified`; un LRU de columnas
+  recien descargadas es una optimizacion de latencia, no de memoria, y se pospone
+  a FASE 11 (renderer scale).
+- Contar tambien la memoria GPU en `WorldMemory`: rompe la frontera `world`/`render`;
+  el renderer expone `gpu_mesh_bytes()` y el arranque lo imprime aparte.
+
+**Consecuencia.** `world/memory.rs`, `World::memory_report`, `Column` (block_light
+disperso + `blocklight_bytes`/`skylight_bytes`/`fluid_bytes`), `render/mesh.rs`
+(`gpu_bytes`), `render/renderer.rs` (`world_memory`/`gpu_mesh_bytes`/...),
+`engine/app.rs` (traza `[mem]`). 194 tests (nuevos: no reserva sin emisores,
+liberacion, informe por categorias); clippy `-D warnings` limpio. **Limite**:
+la traza de GPU sale al arrancar (antes de que la cola de meshing se vacie), asi
+que el dato de GPU no es representativo aun. Siguiente cuello de botella: draw
+calls y culling con mundo grande (FASE 11).
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

@@ -10,20 +10,22 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.10.0 - Registro central de bloques
+//! ## Estado actual: v0.11.0 - Medida de memoria por categorias
 //!
-//! FASE 9 de la auditoria: se elimina la duplicacion de la metadata de bloques.
-//! Antes vivia en tres sitios (`block.rs`, `ITEMS` de `app.rs`, tiles de
-//! `atlas.rs`) que podian desincronizarse.
-//! * Nuevo `world::registry` con `BlockDefinition` + tabla `BLOCKS`: nombre,
-//!   tiles por cara, solidez, visibilidad, `RenderKind`, `FluidKind`, emision,
-//!   si es item y dureza (reservada).
-//! * `Block` sigue siendo un `u8` y delega sus consultas en la tabla.
-//! * `atlas::TILES` se **deriva** del registro y `app.rs` consume
-//!   `BlockRegistry::items()` (sin lista propia). Tests garantizan coherencia.
+//! FASE 10 de la auditoria: **medir antes de cambiar la representacion**.
+//! * Nuevo `world::memory` (`WorldMemory`) + `World::memory_report()`: bloques,
+//!   luz de cielo, luz de bloque, fluido, cabeceras, registros editados y cola
+//!   de agua. Se imprime al arrancar; alimentara el overlay F3 (FASE 13).
+//! * `Column.block_light` pasa a ser **disperso** (`Option<Box<[u8]>>`): sin
+//!   emisores no reserva 98 KB y `clear_block_light` libera en vez de hacer un
+//!   `memset` de 98 KB por columna en cada cambio de streaming. Es la
+//!   optimizacion justificada por la medicion.
+//! * Decision documentada: el bit-packing (paleta 1/2/4/8 bits) de bloques/luz
+//!   **no** se hace aun: la medicion (radio 4: ~7.6 MB bloques + ~7.6 MB cielo
+//!   + ~6.2 MB luz de bloque) no compensa el riesgo/CPU sin benchmarks.
 //!
-//! Hereda de v0.9.3 (transparencia ordenada), cerrando la FASE 7. Siguiente
-//! (auditoria): memoria (FASE 10), renderer scale (FASE 11).
+//! Hereda de v0.10.0 (registro de bloques, FASE 9). Siguiente (auditoria):
+//! renderer scale (FASE 11).
 //!
 //! ## Organizacion del codigo
 //!

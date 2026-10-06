@@ -8,22 +8,24 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.10.0` — Registro central de bloques
+## Estado actual: `v0.11.0` — Medida de memoria por categorías
 
-FASE 9 de la auditoría: se elimina la duplicación de la metadata de bloques, que
-vivía en `block.rs`, en `ITEMS` de `app.rs` y en los tiles de `atlas.rs`.
+FASE 10 de la auditoría: **medir antes de cambiar la representación**.
 
-- Nuevo `world/registry.rs` con `BlockDefinition` + tabla `BLOCKS`: nombre, tiles
-  por cara, solidez, visibilidad, `RenderKind`, `FluidKind`, emisión de luz, si
-  es item y dureza (reservada para minado).
-- `Block` sigue siendo un `u8` y **delega** sus consultas en la tabla.
-- `atlas::TILES` se **deriva** del registro y `app.rs` consume
-  `BlockRegistry::items()` (sin lista propia). Los tests garantizan coherencia.
-- Hereda de **v0.9.3**: transparencia ordenada (cierre de FASE 7).
+- Nuevo `world/memory.rs` (`WorldMemory`) + `World::memory_report()`: bloques,
+  luz de cielo, luz de bloque, fluido, cabeceras, registros editados y cola de
+  agua. Se imprime al arrancar (`[mem] ...`); alimentará el overlay F3 (FASE 13).
+- `Column.block_light` pasa a ser **disperso** (`Option<Box<[u8]>>`): sin
+  emisores no reserva 98 KB, y `clear_block_light` libera en lugar de hacer un
+  `memset` de 98 KB por columna en cada cambio de streaming.
+- Decisión documentada: el **bit-packing** de bloques/luz (paleta 1/2/4/8 bits)
+  no se hace aún; la medición (radio 4: ~7.6 MB bloques, ~7.6 MB cielo, ~6.2 MB
+  luz de bloque) no compensa el riesgo/CPU sin benchmarks que lo respalden.
+- Hereda de **v0.10.0**: registro central de bloques (FASE 9).
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (auditoría): memoria (FASE 10),
-renderer scale (FASE 11).
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): renderer scale
+(FASE 11).
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
@@ -84,6 +86,7 @@ src/
 ├── world/
 │   ├── block.rs     Tipos de bloque (id) que delegan en el registro.
 │   ├── registry.rs  Registro central de bloques (metadata unica).
+│   ├── memory.rs    Contabilidad de memoria del mundo por categorias.
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas (carga assets/atlas.png; fallback).
 │   ├── terrain.rs   Generacion: clima/biomas, relieve, superficie y acuiferos.

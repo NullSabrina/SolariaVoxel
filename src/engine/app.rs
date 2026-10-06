@@ -780,6 +780,30 @@ impl ApplicationHandler for App {
         println!("[engine] jugador posado en y={:.2}", camera.position.y);
         self.camera = Some(camera);
 
+        // Informe de memoria por categorias (FASE 10): medir antes de optimizar.
+        if let Some(renderer) = self.renderer.as_ref() {
+            use crate::world::memory::mib;
+            let m = renderer.world_memory();
+            println!(
+                "[mem] mundo: {} col | bloques {:.1} MB | cielo {:.1} MB | bloque {:.1} MB | fluido {:.1} MB | struct {:.1} MB | editados {} ({:.1} MB) | cola agua {} celdas",
+                m.columns,
+                mib(m.blocks_bytes),
+                mib(m.skylight_bytes),
+                mib(m.blocklight_bytes),
+                mib(m.fluid_bytes),
+                mib(m.struct_overhead_bytes),
+                m.modified_chunks,
+                mib(m.modified_bytes),
+                m.water_queue_cells,
+            );
+            println!(
+                "[mem] render: {} col con malla | GPU {:.1} MB | {} secciones pendientes",
+                renderer.mesh_columns(),
+                mib(renderer.gpu_mesh_bytes() as usize),
+                renderer.pending_mesh_sections(),
+            );
+        }
+
         // Modo demo (SOLARIA_DEMO=1): escena fija para las capturas. La camara
         // queda congelada (ver `Self::demo`), asi la vista no se mueve antes de
         // la foto. El montaje vive en `engine::demo`.

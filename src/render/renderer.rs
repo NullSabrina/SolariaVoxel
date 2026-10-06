@@ -802,6 +802,33 @@ impl Renderer {
         self.world.seed()
     }
 
+    /// Informe de memoria del mundo (CPU) por categorias. Ver [`crate::world::memory`].
+    pub fn world_memory(&self) -> crate::world::WorldMemory {
+        self.world.memory_report()
+    }
+
+    /// Bytes reservados en GPU por las mallas actuales (vertices + indices).
+    pub fn gpu_mesh_bytes(&self) -> u64 {
+        self.meshes
+            .values()
+            .flat_map(|column| column.iter())
+            .map(|section| {
+                section.opaque.as_ref().map_or(0, Mesh::gpu_bytes)
+                    + section.water.as_ref().map_or(0, Mesh::gpu_bytes)
+            })
+            .sum()
+    }
+
+    /// Columnas con alguna malla registrada.
+    pub fn mesh_columns(&self) -> usize {
+        self.meshes.len()
+    }
+
+    /// Secciones pendientes de meshing en la cola.
+    pub fn pending_mesh_sections(&self) -> usize {
+        self.mesh_queue.len()
+    }
+
     /// Actualiza el entorno visual del frame: factor dia/noche y color de cielo
     /// (sRGB, canales 0..1). El color se convierte a lineal para el clear.
     pub fn set_environment(&mut self, day_factor: f32, sky_color: [f32; 3]) {

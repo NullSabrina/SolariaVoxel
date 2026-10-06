@@ -16,6 +16,7 @@ pub mod caves;
 pub mod chunk;
 pub mod fluid_mesher;
 pub mod greedy;
+pub mod memory;
 pub mod mesh_snapshot;
 pub mod mesher;
 pub mod raycast;
@@ -29,6 +30,7 @@ pub mod water;
 
 pub use block::{Block, Face};
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};
+pub use memory::WorldMemory;
 pub use mesher::{SectionMesh, mesh_column, mesh_section};
 pub use raycast::{RayHit, raycast};
 pub use recipe::{RECIPES, Recipe, match_recipe};
