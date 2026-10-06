@@ -10,20 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.17 - Meshing CPU asincrono (+ revisiones)
+//! ## Estado actual: v0.8.18 - Reuso de buffers GPU
 //!
-//! FASE 6 (meshing async) de la auditoria:
-//! * `world::mesh_snapshot`: `SectionSnapshot` (18x18x18 con anillo de 1 bloque)
-//!   que copia bloques/luz/agua de una seccion; el greedy/fluido corre sobre el.
-//! * `render::mesh_worker::MeshScheduler`: pool de hilos que meshea el snapshot
-//!   **sin tocar wgpu** y devuelve vertices/indices.
-//! * El hilo principal: construye el snapshot (barato), manda el trabajo, y en
-//!   `poll_meshing` **valida la revision** (descarta lo obsoleto) y sube a GPU.
-//! * Las secciones vacias se saltan sin snapshot.
+//! FASE 6 (buffers) de la auditoria: re-meshear una seccion ya no crea/destruye
+//! buffers GPU.
+//! * `Mesh` reserva cada buffer con holgura (`next_power_of_two`) y expone
+//!   `update(device, queue, vertices, indices)`: reescribe con `write_buffer`
+//!   mientras quepa, y solo recrea si el nuevo tamano no cabe.
+//! * `poll_meshing` usa `update` (via `update_mesh`) si la seccion ya tenia
+//!   malla; `draw` salta si no hay indices.
 //!
-//! Hereda de v0.8.16 (meshing por secciones), v0.8.15 (luz incremental).
+//! Hereda de v0.8.17 (meshing CPU asincrono), v0.8.16 (meshing por secciones).
 //!
-//! Siguiente (auditoria): reuso de buffers GPU, fluids (active set), registry.
+//! Siguiente (auditoria): fluids (active set + persistencia), registry, memoria.
 //!
 //! ## Organizacion del codigo
 //!

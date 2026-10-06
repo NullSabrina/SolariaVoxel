@@ -76,34 +76,87 @@ impl Vertex {
 }
 
 /// Una malla subida a la GPU.
+///
+/// Los buffers se crean con holgura (`next_power_of_two`) y se **reutilizan** al
+/// re-meshear con [`Mesh::update`] mientras quepan: asi editar un bloque no
+/// crea/destruye buffers GPU cada vez.
 pub struct Mesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    vertex_capacity: u64,
+    index_capacity: u64,
 }
 
 impl Mesh {
     /// Crea la malla a partir de vertices e indices (u32).
     pub fn new(device: &wgpu::Device, label: &str, vertices: &[Vertex], indices: &[u32]) -> Self {
+        let vbytes = std::mem::size_of_val(vertices) as u64;
+        let ibytes = std::mem::size_of_val(indices) as u64;
+        let vertex_capacity = vbytes.next_power_of_two().max(1);
+        let index_capacity = ibytes.next_power_of_two().max(1);
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{label}.vertices")),
             contents: bytemuck::cast_slice(vertices),
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{label}.indices")),
             contents: bytemuck::cast_slice(indices),
-            usage: wgpu::BufferUsages::INDEX,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
         });
         Self {
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as u32,
+            vertex_capacity,
+            index_capacity,
         }
+    }
+
+    /// Reutiliza los buffers para nuevos vertices/indices (re-mesheo). Solo los
+    /// recrea si el nuevo tamano no cabe en la capacidad reservada.
+    pub fn update(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        vertices: &[Vertex],
+        indices: &[u32],
+    ) {
+        let vbytes = std::mem::size_of_val(vertices) as u64;
+        let ibytes = std::mem::size_of_val(indices) as u64;
+        if vbytes > self.vertex_capacity {
+            self.vertex_capacity = vbytes.next_power_of_two();
+            self.vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mesh.vertices"),
+                size: self.vertex_capacity,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if ibytes > self.index_capacity {
+            self.index_capacity = ibytes.next_power_of_two();
+            self.index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mesh.indices"),
+                size: self.index_capacity,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+        if vbytes > 0 {
+            queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(vertices));
+        }
+        if ibytes > 0 {
+            queue.write_buffer(&self.index_buffer, 0, bytemuck::cast_slice(indices));
+        }
+        self.index_count = indices.len() as u32;
     }
 
     /// Emite los comandos de dibujo de esta malla en un render pass.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        if self.index_count == 0 {
+            return;
+        }
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.index_count, 0, 0..1);

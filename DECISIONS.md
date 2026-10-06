@@ -1774,6 +1774,30 @@ ve correcta, sin stderr; meshing repartido entre frames. **Limites**: los buffer
 GPU se siguen creando por re-mesheo (sin pool/reuso aun); el snapshot se construye
 en el hilo principal (5832 lecturas/job, barato pero no cero); sin LOD/batching.
 
+### 2026-10-05 (v0.8.18) — Reuso de buffers GPU (auditoria FASE 6)
+
+**Decision.** Al re-meshear una seccion no se crean/destruyen buffers GPU:
+
+* `Mesh` reserva cada buffer con holgura (`next_power_of_two`) y guarda su
+  capacidad; `Mesh::update(device, queue, vertices, indices)`:
+  - si el nuevo tamano cabe → `queue.write_buffer` (sin allocacion);
+  - si no cabe → recrea solo ese buffer con la nueva capacidad.
+* `Renderer::poll_meshing` usa `update_mesh` (actualiza la `Mesh` existente de la
+  seccion, o la crea si no habia). `Mesh::draw` sale si no hay indices.
+
+**Motivo.** El audit (§9.4) pide reutilizar buffers GPU; crear un `Buffer` por
+re-mesheo es churn (allocaciones + descriptors) y ademas se pagaba en cada
+edicion de un bloque.
+
+**Alternativas descartadas.** Arena/ring buffer global: mas complejo y no
+necesario mientras el tamaño por seccion es acotado; per-section pool con
+capacidad holgada ya elimina el churn.
+
+**Consecuencia.** `render/mesh.rs` (capacidades + `update`), `renderer.rs`
+(`update_mesh`). 174 tests; clippy `-D warnings` limpio. Verificado en runtime
+(demo viva, captura correcta). **Limite**: la malla de una seccion que se
+**vacia** se descarta en el `pump` (se pierde su buffer); se podria conservar.
+
 ---
 
 ## Plantilla para futuras entradas

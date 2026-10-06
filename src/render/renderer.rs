@@ -32,6 +32,27 @@ use crate::world::{
     Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, StreamChange, World, raycast,
 };
 
+/// Reutiliza la malla `slot` con la nueva geometria (o la crea si falta). Los
+/// buffers GPU se reutilizan mientras quepan (ver [`Mesh::update`]), evitando
+/// crear/destruir buffers en cada re-mesheo.
+fn update_mesh(
+    slot: &mut Option<Mesh>,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    vertices: &[crate::render::mesh::Vertex],
+    indices: &[u32],
+    label: &str,
+) {
+    match slot {
+        Some(mesh) => mesh.update(device, queue, vertices, indices),
+        None => {
+            if !vertices.is_empty() {
+                *slot = Some(Mesh::new(device, label, vertices, indices));
+            }
+        }
+    }
+}
+
 /// Errores que pueden ocurrir al inicializar el renderer.
 #[derive(Debug)]
 pub enum RendererError {
@@ -504,26 +525,22 @@ impl Renderer {
                 .or_insert_with(|| Box::new(ColumnMeshes::default()));
             let slot = &mut entry[out.section];
             let label = format!("col_{}_{}_sec_{}", out.pos.x, out.pos.z, out.section);
-            slot.opaque = if out.opaque.0.is_empty() {
-                None
-            } else {
-                Some(Mesh::new(
-                    &self.device,
-                    &label,
-                    &out.opaque.0,
-                    &out.opaque.1,
-                ))
-            };
-            slot.water = if out.water.0.is_empty() {
-                None
-            } else {
-                Some(Mesh::new(
-                    &self.device,
-                    &format!("{label}_water"),
-                    &out.water.0,
-                    &out.water.1,
-                ))
-            };
+            update_mesh(
+                &mut slot.opaque,
+                &self.device,
+                &self.queue,
+                &out.opaque.0,
+                &out.opaque.1,
+                &label,
+            );
+            update_mesh(
+                &mut slot.water,
+                &self.device,
+                &self.queue,
+                &out.water.0,
+                &out.water.1,
+                &format!("{label}_water"),
+            );
         }
     }
 

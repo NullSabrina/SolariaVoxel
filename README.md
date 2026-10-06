@@ -8,22 +8,21 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.17` — Meshing CPU asíncrono (+ revisiones)
+## Estado actual: `v0.8.18` — Reuso de buffers GPU
 
-FASE 6 (meshing async) de la auditoría:
+FASE 6 (buffers) de la auditoría: re-meshear una sección ya no crea/destruye
+buffers GPU.
 
-- `world::mesh_snapshot`: `SectionSnapshot` (18×18×18 con anillo de 1 bloque) que
-  copia bloques/luz/agua de una sección; el greedy/fluido corre sobre él.
-- `render::mesh_worker::MeshScheduler`: pool de hilos que meshea el snapshot
-  **sin tocar `wgpu`** y devuelve vértices/índices.
-- El hilo principal construye el snapshot (barato), manda el trabajo y en
-  `poll_meshing` **valida la revisión** (descarta lo obsoleto) y sube a GPU.
-- Las secciones vacías se saltan sin snapshot.
-- Hereda de **v0.8.16**: meshing por secciones. **v0.8.15**: luz incremental.
+- `Mesh` reserva cada buffer con holgura (`next_power_of_two`) y expone
+  `update(device, queue, vertices, indices)`: reescribe con `write_buffer`
+  mientras quepa, y sólo recrea si el nuevo tamaño no cabe.
+- `poll_meshing` usa `update` si la sección ya tenía malla; `draw` salta si no
+  hay índices.
+- Hereda de **v0.8.17**: meshing CPU asíncrono. **v0.8.16**: meshing por secciones.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (auditoría): reuso de buffers
-GPU, fluids (active set), registry.
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): fluids (active
+set + persistencia), registry, memoria.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.
