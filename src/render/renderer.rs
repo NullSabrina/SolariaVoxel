@@ -104,11 +104,19 @@ struct SectionMeshes {
 /// Mallas de una columna: una `SectionMeshes` por seccion.
 type ColumnMeshes = [SectionMeshes; SECTION_COUNT];
 
-/// Distancia (bloques) a la que empieza la niebla.
-const FOG_START: f32 = 40.0;
-/// Distancia (bloques) a la que la niebla es total. Coincide con el borde del
-/// area cargada (~64 bloques en los ejes), asi que lo funde con el cielo.
-const FOG_END: f32 = 64.0;
+/// Radio de carga/culling por defecto, en chunks. Configurable con
+/// `SOLARIA_VIEW_RADIUS` (1..=12). La niebla y el culling por distancia se atan a
+/// el, asi que subirlo alarga la vista sin tocar nada mas.
+const DEFAULT_VIEW_RADIUS: i32 = 4;
+
+/// Radio de vista desde el entorno, acotado para no reventar la memoria.
+fn view_radius_from_env() -> i32 {
+    std::env::var("SOLARIA_VIEW_RADIUS")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(DEFAULT_VIEW_RADIUS)
+        .clamp(1, 12)
+}
 
 /// Presupuesto de meshing por frame, en milisegundos. Al descubrir chunks se
 /// encolan las columnas y se meshean a este ritmo en lugar de todas de golpe: el
@@ -186,7 +194,7 @@ fn axis_distance(p: f32, lo: f32, hi: f32) -> f32 {
 
 /// Distancia al cuadrado del punto `cam` a la AABB `[min, max]` (0 si dentro).
 /// Base del **culling por distancia**: una seccion cuya AABB entera queda mas
-/// alla de `FOG_END` esta totalmente cubierta por la niebla (color de cielo) y
+/// alla de la niebla (`fog_end`) esta totalmente cubierta por el color de cielo y
 /// no hace falta dibujarla.
 #[inline]
 fn nearest_dist2(cam: Vec3, min: [f32; 3], max: [f32; 3]) -> f32 {
@@ -256,6 +264,11 @@ pub struct Renderer {
     clear_color: wgpu::Color,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
     day_factor: f32,
+    /// Distancia (bloques) a la que empieza la niebla. Atada al radio de vista.
+    fog_start: f32,
+    /// Distancia (bloques) a la que la niebla es total: borde del area cargada.
+    /// El culling por distancia usa este valor.
+    fog_end: f32,
     /// Instante de arranque: da el tiempo que anima la superficie del agua.
     start: Instant,
 }
@@ -321,8 +334,15 @@ impl Renderer {
             Self::DEPTH_FORMAT,
         );
 
-        // Mundo con radio 4 (9x9 = 81 columnas), con los chunks restaurados.
-        let view_radius = 4;
+        // Radio de vista configurable (`SOLARIA_VIEW_RADIUS`, por defecto 4).
+        // La niebla termina justo en el borde del area cargada (radio * 16), asi
+        // que lo funde con el cielo, y el culling por distancia usa ese valor.
+        let view_radius = view_radius_from_env();
+        let fog_end = view_radius as f32 * CHUNK_SIZE as f32;
+        let fog_start = fog_end * 0.625; // mismo ratio que 40/64
+        println!(
+            "[render] radio de vista: {view_radius} chunks (niebla {fog_start:.0}..{fog_end:.0})"
+        );
         let restored_count = restored.len();
         let world = World::new(seed, view_radius, restored);
         if restored_count > 0 {
@@ -354,6 +374,8 @@ impl Renderer {
             stats: FrameStats::default(),
             clear_color: sky_color(),
             day_factor: 1.0,
+            fog_start,
+            fog_end,
             start: Instant::now(),
         };
         // Carga inicial **sincrona** del mundo alrededor del origen. El app
@@ -920,8 +942,8 @@ impl Renderer {
             [camera_pos.x, camera_pos.y, camera_pos.z],
             self.day_factor,
             fog_color,
-            FOG_START,
-            FOG_END,
+            self.fog_start,
+            self.fog_end,
             self.start.elapsed().as_secs_f32(),
         );
 
@@ -955,7 +977,7 @@ impl Renderer {
             columns: self.meshes.len() as u32,
             ..Default::default()
         };
-        let cull_dist2 = FOG_END * FOG_END;
+        let cull_dist2 = self.fog_end * self.fog_end;
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

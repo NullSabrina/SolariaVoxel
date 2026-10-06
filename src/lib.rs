@@ -10,17 +10,17 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.15.3 - Hardening de tests (raycast y streaming)
+//! ## Estado actual: v0.16.0 - Radio de vista configurable
 //!
-//! Bateria de tests de robustez que pedia la auditoria (§21 y §41):
-//! * Raycast: origen dentro de un bloque, rayos negativos, direccion nula y casi
-//!   cero, `max_distance = 0`, borde de chunk (x=15 -> 16), predicado que
-//!   atraviesa liquidos, rayo sobre un borde de celda y diagonal en coordenadas
-//!   negativas.
-//! * Streaming: carga y edicion en **chunks negativos**.
+//! `SOLARIA_VIEW_RADIUS` (1..=12, por defecto 4) fija el radio de carga y, con el,
+//! la **niebla** (`fog_end = radio * 16`) y el **culling por distancia**. Permite
+//! escalar la vista y medir: radio 8 = 289 columnas, ~76 MB de mundo, 530 draw
+//! calls, render ~2.4 ms (medido en `docs/performance.md`). El culling por
+//! distancia mantiene el coste de render casi plano, asi que no se implemento
+//! batching/LOD (optimizacion prematura sin un cuello medido).
 //!
-//! Hereda de v0.15.2 (luz de bloque regional). Fases 7/9/10/11/12/13 completadas.
-//! Pendiente: batching/LOD, interpolacion de render y overlay de texto con fuente.
+//! Hereda de v0.15.3 (hardening de tests). Fases 7/9/10/11/12/13 completadas.
+//! Pendiente: interpolacion de render y overlay de texto con fuente.
 //!
 //! ## Organizacion del codigo
 //!

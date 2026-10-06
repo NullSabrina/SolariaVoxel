@@ -72,6 +72,23 @@ sin culling por distancia:  dc≈292  (128 + 164)
 El **culling por distancia** (sección totalmente dentro de la niebla) reduce los
 draw calls ~56 %. El frustum ya descartaba 178 secciones. A 663 fps de render.
 
+## Escalado del radio de vista (`SOLARIA_VIEW_RADIUS`)
+
+La niebla y el culling por distancia se atan al radio, asi que subirlo alarga la
+vista. Vista de oceano, `SOLARIA_STATS=1` (dev, opt-level 1):
+
+| radio | columnas | memoria mundo | draw calls | triángulos | render |
+|---|---|---|---|---|---|
+| 4 (def.) | 81 | ~22 MB | 128 | 37 k | ~2 ms |
+| 6 | 169 | ~44 MB | 340 | 132 k | ~2.4 ms |
+| 8 | 289 | ~76 MB | 530 | 187 k | ~2.4 ms |
+
+La memoria crece ~lineal con las columnas (~265 KB/columna); el coste de render
+apenas cambia porque el **culling por distancia** limita lo visible a la esfera de
+niebla. No hay un cuello de draw calls a estos radios (530 dc es trivial).
+Por eso **no** se implemento batching/LOD: seria optimizacion prematura sin un
+caso medido que lo justifique.
+
 ## Cuellos pendientes
 
 1. **Luz de bloque en cambios de streaming** (~10.7 ms/cruce): la cache de

@@ -8,17 +8,26 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.15.3` — Hardening de tests (raycast y streaming)
+## Estado actual: `v0.16.0` — Radio de vista configurable
 
-Batería de tests de robustez que pedía la auditoría (§21 y §41):
+`SOLARIA_VIEW_RADIUS` (1..=12, por defecto 4) fija el radio de carga y, con él,
+la **niebla** (`fog_end = radio * 16`) y el **culling por distancia**.
 
-- Raycast: origen dentro de un bloque, rayos negativos, dirección nula y casi
-  cero, `max_distance = 0`, borde de chunk (x=15 → 16), predicado que atraviesa
-  líquidos, rayo sobre un borde de celda y diagonal en coordenadas negativas.
-- Streaming: carga y edición en **chunks negativos**.
-- Hereda de **v0.15.2**: luz de bloque regional.
-- Fases 7, 9, 10, 11, 12 y 13 de la auditoría completadas. Pendiente:
-  batching/LOD, interpolación de render y overlay de texto con fuente.
+Medido (ver `docs/performance.md`):
+
+| radio | columnas | memoria mundo | draw calls | render |
+|---|---|---|---|---|
+| 4 (def.) | 81 | ~22 MB | 128 | ~2 ms |
+| 8 | 289 | ~76 MB | 530 | ~2.4 ms |
+
+El culling por distancia mantiene el coste de render casi plano, así que **no** se
+implementó batching/LOD (sería optimización prematura sin un cuello medido).
+
+- Hereda de **v0.15.3**: hardening de tests. Fases 7, 9, 10, 11, 12 y 13 de la
+  auditoría completadas. Pendiente: interpolación de render y overlay de texto.
+
+Variables: `SOLARIA_DEMO`, `SOLARIA_OCEAN`, `SOLARIA_STATS`, **`SOLARIA_VIEW_RADIUS`**,
+`SOLARIA_FLUID_BUDGET_CELLS/_MS`.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, `F` = volar, **`F3` =
 diagnóstico**, click izq = romper, click der = colocar. Variables: `SOLARIA_DEMO`,

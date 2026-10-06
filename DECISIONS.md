@@ -2283,6 +2283,45 @@ Siguiente cuello: batching/LOD, interpolacion de render o overlay de texto.
 
 ---
 
+### 2026-10-05 (v0.16.0) — Radio de vista configurable (y por que NO hay batching/LOD)
+
+**Decision.** El radio de carga/render se configura con `SOLARIA_VIEW_RADIUS`
+(1..=12, por defecto 4). La niebla (`fog_start/fog_end`) y el **culling por
+distancia** se derivan de el (`fog_end = radio * 16`, `fog_start = 0.625 *
+fog_end`, mismo ratio que 40/64). Se documenta el escalado medido y se decide
+**no** implementar batching/LOD.
+
+**Motivo.** El renderer estaba a radio fijo 4 sin forma de escalarlo ni medirlo.
+Ahora se puede subir la vista y comprobar el coste con datos.
+
+**Medicion (dev, opt-level 1, vista de oceano).**
+```
+radio 4:  81 col | ~22 MB | 128 dc |  37k tri | render ~2.0 ms
+radio 6: 169 col | ~44 MB | 340 dc | 132k tri | render ~2.4 ms
+radio 8: 289 col | ~76 MB | 530 dc | 187k tri | render ~2.4 ms
+```
+
+**Por que no batching/LOD.** El culling por distancia (niebla) hace que el coste
+de render sea **casi plano** al subir el radio (~2.4 ms hasta radio 8) y 530 draw
+calls es trivial para una GPU moderna. El audit pide medir antes de optimizar;
+no hay un cuello medido que justifique batching (que ademas subiria el coste de
+re-meshing por edicion) ni LOD (la vista cabe entera). Se deja documentado como
+posible mejora futura si el objetivo pasa a ser mundos mucho mas grandes.
+
+**Alternativas descartadas.**
+- Radio fijo mayor: no permite ajustar al hardware ni medir; el env var lo deja en
+  manos del usuario.
+- Fog end constante con radio variable: dejaria un borde visible (terreno mas alla
+  de la niebla) o niebla antes del borde; atarlo al radio lo mantiene limpio.
+
+**Consecuencia.** `render/renderer.rs` (`view_radius_from_env`, `fog_start/end`),
+`docs/performance.md` (tabla de escalado). 218 tests; clippy `-D warnings` limpio.
+Verificado en runtime a radios 4/6/8. **Limite**: la memoria crece ~lineal con las
+columnas (~265 KB/columna); a radios grandes el `warm_streaming` inicial es mas
+lento. Siguiente: interpolacion de render y overlay de texto.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```
