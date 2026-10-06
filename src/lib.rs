@@ -10,17 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.15.1 - Cache de emisores de luz
+//! ## Estado actual: v0.15.2 - Luz de bloque regional
 //!
-//! Optimizacion del cuello medido: `World::recompute_block_light` re-escaneaba
-//! las 24 secciones de cada columna cargada en cada cambio de streaming.
-//! `Column` guarda ahora una **cache perezosa de emisores** (indice local +
-//! nivel) que se invalida al editar un bloque. El recalculo de luz de bloque al
-//! cruzar de chunk baja de ~19 ms a ~12 ms (−37 %); en frio sigue ~21 ms.
+//! La luz de bloque al cruzar de chunk ya no recorre todo el mundo cargado:
+//! `recompute_block_light_region` limpia y reconstruye solo la **region** (las
+//! columnas que entran/salen mas su anillo de 1), y siembra la **frontera** desde
+//! la luz preservada de fuera (sin bordes oscuros). El BFS de propagacion queda
+//! acotado por los emisores de la region. Un test comprueba que coincide
+//! **exactamente** con el recalculo global en un escenario de altas/bajas/frontera.
 //!
-//! Hereda de v0.15.0 (migracion v1 + determinismo). Fases 7/9/10/11/12/13
-//! completadas. Pendiente: luz de bloque **regional** (no global), batching/LOD,
-//! interpolacion de render y overlay de texto con fuente.
+//! Medido: cruce de chunk ~10.7 ms (era ~12 ms con solo la cache y ~19 ms antes).
+//!
+//! Hereda de v0.15.1 (cache de emisores). Fases 7/9/10/11/12/13 completadas.
+//! Pendiente: batching/LOD, interpolacion de render y overlay de texto con fuente.
 //!
 //! ## Organizacion del codigo
 //!

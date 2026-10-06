@@ -2213,6 +2213,53 @@ descargar columnas.
 
 ---
 
+### 2026-10-05 (v0.15.2) — Luz de bloque regional (siembra de frontera)
+
+**Decision.** `World::recompute_block_light_region(changed)` limpia y reconstruye
+la luz de bloque solo de la **region** = `changed` (columnas cargadas/descargadas)
+mas su anillo de 1 columna, en vez de todo el mundo. Como la luz viaja 15 bloques
+(< 1 chunk), la region cubre todo lo que puede cambiar. Ademas siembra la
+**frontera** de la region desde la luz **preservada** de las columnas de fuera,
+para no perder la luz que entra desde mas alla del anillo (sin bordes oscuros).
+El renderer usa esta ruta en `apply_stream_change`; `recompute_block_light` se
+mantiene como referencia y en tests.
+
+**Motivo.** El audit pide luz incremental/regional y la medicion
+(`docs/performance.md`) mostraba ~12 ms por cruce tras cachear emisores, con el
+BFS propagando por **todo** el mundo cargado. El recálculo regional acota el
+trabajo a las columnas afectadas y, sobre todo, **escala con el radio** (O(perimetro)
+en vez de O(area)).
+
+**Medicion (dev, opt-level 1, cruce +9/-9).**
+```
+recompute_block_light (global, cache):   12.04 ms
+recompute_block_light_region (region):   10.69 ms   (era 19.03 ms en v0.15.0)
+```
+La mejora es modesta con **lava densa** (el BFS desde emisores es casi constante
+al radio), pero la ruta regional no depende del area del mundo.
+
+**Alternativas descartadas.**
+- Igual que v0.15.1 (solo cache, global): no acota el BFS ni mejora al crecer el radio.
+- BFS acotado estrictamente a la region (sin propagar fuera): perderia la luz que
+  un emisor nuevo de la region proyecta hacia fuera; ademas la propagacion hacia
+  fuera solo **sube** luz ya valida, asi que es inocua.
+- Sembrar la frontera recorriendo TODAS las celdas de la region: O(celdas). Solo
+  se recorren las **caras** de las columnas de borde que dan a fuera (4 x 384 x 16
+  por columna de borde), mucho mas barato.
+
+**Consecuencia.** `world/store.rs` (`recompute_block_light_region`,
+`collect_block_light_emitters`, `seed_block_light_boundary`,
+`propagate_block_light`, `recompute_block_light` refactorizado),
+`render/renderer.rs` (ruta regional). 208 tests (nuevo: equivalencia
+regional==global con altas/bajas/frontera); clippy `-D warnings` limpio. **Bug
+corregido en el camino**: el BFS re-encolaba celdas de columnas no cargadas
+(`put_block_light` es no-op) → bucle infinito; ahora escribe directo en la
+columna y solo encola si escribio. **Limite**: con lava muy densa el coste sigue
+dominado por el BFS. Siguiente cuello: batching/LOD (draw calls) o interpolacion
+de render.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

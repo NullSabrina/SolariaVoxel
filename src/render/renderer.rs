@@ -483,9 +483,16 @@ impl Renderer {
             dirty
         };
         // La luz puede haber cambiado (torches/cuevas que entran/salen): la
-        // recomputamos (region afectada) antes de meshear.
+        // recomputamos (region afectada) antes de meshear. La luz de bloque usa
+        // la **region** de las columnas que entran/salen (no todo el mundo).
         self.world.recompute_skylight(&dirty);
-        self.world.recompute_block_light();
+        let block_changed: Vec<ChunkPos> = change
+            .loaded
+            .iter()
+            .chain(change.unloaded.iter())
+            .copied()
+            .collect();
+        self.world.recompute_block_light_region(&block_changed);
         // Liberar mallas de columnas descargadas (y sacarlas de la cola).
         for pos in &change.unloaded {
             self.meshes.remove(pos);

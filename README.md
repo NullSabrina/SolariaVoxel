@@ -8,18 +8,20 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.15.1` — Caché de emisores de luz
+## Estado actual: `v0.15.2` — Luz de bloque regional
 
-Optimización del cuello medido en `docs/performance.md`: `recompute_block_light`
-re-escaneaba las 24 secciones de cada columna cargada en cada cambio de
-streaming. `Column` guarda ahora una **caché perezosa de emisores** (índice local
-+ nivel) que se invalida al editar un bloque. El recálculo de luz de bloque al
-cruzar de chunk baja de ~19 ms a ~12 ms (**−37 %**); en frío sigue ~21 ms.
+La luz de bloque al cruzar de chunk ya no recorre todo el mundo cargado:
+`recompute_block_light_region` limpia y reconstruye solo la **región** (las
+columnas que entran/salen más su anillo de 1) y siembra la **frontera** desde la
+luz preservada de fuera (sin bordes oscuros). Un test comprueba que coincide
+**exactamente** con el recálculo global en un escenario de altas/bajas/frontera.
 
-- Hereda de **v0.15.0**: migración v1 real + test de determinismo.
-- Fases 7, 9, 10, 11, 12 y 13 de la auditoría completadas. Pendiente: luz de
-  bloque **regional** (no global), batching/LOD, interpolación de render y
-  overlay de texto con fuente.
+- Medido: cruce de chunk ~**10.7 ms** (era ~12 ms con solo la caché de emisores,
+  ~19 ms antes). Mejora pequeña con lava densa pero **escala con el radio**
+  (O(perímetro) vs O(área)).
+- Hereda de **v0.15.1**: caché de emisores de luz.
+- Fases 7, 9, 10, 11, 12 y 13 de la auditoría completadas. Pendiente:
+  batching/LOD, interpolación de render y overlay de texto con fuente.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, `F` = volar, **`F3` =
 diagnóstico**, click izq = romper, click der = colocar. Variables: `SOLARIA_DEMO`,

@@ -33,7 +33,8 @@ Benchmarks heredados (`world::store::tests`):
 | `recompute_skylight` (81 col) | 20.7 ms | recalculo **regional** de luz de cielo |
 | `recompute_skylight` (3x3) | 3.9 ms | región tras una edición |
 | `recompute_block_light` (frio) | 21.2 ms | primera vez (construye la cache de emisores) |
-| `recompute_block_light` (cruce, cache caliente) | **11.95 ms** | era 19.03 ms antes de cachear los emisores (−37 %) |
+| `recompute_block_light` (global, cache) | 12.0 ms | tras cachear los emisores (era 19.03 ms, −37 %) |
+| `recompute_block_light_region` (cruce, app) | **10.7 ms** | ruta real: solo limpia/reconstruye la **región** de las columnas que entran/salen |
 | `update_streaming` (cruce, +9/-9) | 22.6 ms | generación síncrona en el benchmark |
 | greedy 27 columnas (125 secciones) | 37.7 ms | meshing CPU de una región |
 
@@ -73,11 +74,11 @@ draw calls ~56 %. El frustum ya descartaba 178 secciones. A 663 fps de render.
 
 ## Cuellos pendientes
 
-1. **Luz de bloque en cambios de streaming** (~12 ms/cruce tras cachear los
-   emisores; 21 ms en frío): sigue siendo un recálculo **global** al entrar/salir
-   columnas. La cache de emisores (v0.15.1) quita el barrido de secciones; el
-   siguiente paso es un recalculo **regional** alrededor de las columnas que
-   cambian (como la luz de cielo) para no recorrer todo el mundo cargado.
+1. **Luz de bloque en cambios de streaming** (~10.7 ms/cruce): la cache de
+   emisores (v0.15.1) quitó el barrido de secciones y el recálculo **regional**
+   (v0.15.2) limita la limpieza a la región afectada; lo que queda es el **BFS de
+   propagación** desde los emisores (con lava por todas partes, es casi constante
+   al radio). Aun así escala mejor (O(perímetro) en vez de O(área)).
 2. **Luz de cielo** (~3.9 ms por edición regional): funcional, pero no es
    incremental puro.
 3. **Generación de terreno** (~3.9 ms/columna, ~292 ms para 81 columnas): es

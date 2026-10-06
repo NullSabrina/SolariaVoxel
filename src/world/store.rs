@@ -500,9 +500,90 @@ impl World {
     pub fn recompute_block_light(&mut self) {
         use std::collections::VecDeque;
 
-        // 1. Recolectar los emisores usando la **cache por columna** (evita
-        //    escanear las 24 secciones de cada columna en cada cruce de chunk).
-        let mut sources: Vec<(i32, i32, i32, u8)> = Vec::new();
+        // 1. Emisores (cache por columna).
+        let sources = self.collect_block_light_emitters();
+
+        // 2. Limpiar todo y sembrar las fuentes.
+        for column in self.columns.values_mut() {
+            column.clear_block_light();
+        }
+        let mut queue: VecDeque<([i32; 3], u8)> = VecDeque::new();
+        for (p, e) in sources {
+            self.put_block_light(p, e);
+            queue.push_back((p, e));
+        }
+
+        // 3. Propagar.
+        self.propagate_block_light(&mut queue);
+    }
+
+    /// Recalcula la luz de bloque solo en la **region** afectada por columnas que
+    /// entran o salen, en vez de todo el mundo cargado.
+    ///
+    /// `changed` son las columnas que se han cargado o descargado. La luz viaja
+    /// **15 bloques (< 1 chunk)**, asi que la region = `changed` + su anillo de 1
+    /// columna (5x5) cubre todo lo que puede cambiar: las columnas descargadas
+    /// dejan su luz obsoleta en los vecinos (que se limpian y reconstruyen) y las
+    /// cargadas reciben la luz de los emisores de al lado. Se siembra ademas la
+    /// **frontera** de la region desde la luz **preservada** de las columnas de
+    /// fuera, para no perder la luz que entra desde mas alla del anillo.
+    pub fn recompute_block_light_region(&mut self, changed: &[ChunkPos]) {
+        use std::collections::{HashSet, VecDeque};
+
+        // 1. Region = changed + anillo de 1, solo columnas cargadas.
+        let mut region: HashSet<ChunkPos> = HashSet::new();
+        for p in changed {
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    let n = ChunkPos::new(p.x + dx, p.z + dz);
+                    if self.columns.contains_key(&n) {
+                        region.insert(n);
+                    }
+                }
+            }
+        }
+        if region.is_empty() {
+            return;
+        }
+
+        // 2. Emisores dentro de la region (antes de limpiar).
+        let mut seeds: Vec<([i32; 3], u8)> = Vec::new();
+        for &pos in &region {
+            let bx = pos.x * CHUNK_SIZE as i32;
+            let bz = pos.z * CHUNK_SIZE as i32;
+            let Some(column) = self.columns.get_mut(&pos) else {
+                continue;
+            };
+            for &(idx, e) in column.emitters() {
+                let x = (idx & 0x0F) as i32;
+                let z = ((idx >> 4) & 0x0F) as i32;
+                let y = (idx >> 8) as i32;
+                seeds.push(([bx + x, y, bz + z], e));
+            }
+        }
+
+        // 3. Limpiar solo la region y sembrar.
+        for &pos in &region {
+            if let Some(column) = self.columns.get_mut(&pos) {
+                column.clear_block_light();
+            }
+        }
+        let mut queue: VecDeque<([i32; 3], u8)> = VecDeque::new();
+        for (p, e) in seeds {
+            self.put_block_light(p, e);
+            queue.push_back((p, e));
+        }
+
+        // 4. Sembrar la frontera desde la luz de las columnas de fuera.
+        self.seed_block_light_boundary(&region, &mut queue);
+
+        // 5. Propagar (puede salir de la region: alli solo **sube** luz).
+        self.propagate_block_light(&mut queue);
+    }
+
+    /// Emisores de luz de todas las columnas cargadas, en coordenadas de mundo.
+    fn collect_block_light_emitters(&mut self) -> Vec<([i32; 3], u8)> {
+        let mut out = Vec::new();
         for (pos, column) in self.columns.iter_mut() {
             let bx = pos.x * CHUNK_SIZE as i32;
             let bz = pos.z * CHUNK_SIZE as i32;
@@ -510,24 +591,55 @@ impl World {
                 let x = (idx & 0x0F) as i32;
                 let z = ((idx >> 4) & 0x0F) as i32;
                 let y = (idx >> 8) as i32;
-                sources.push((bx + x, y, bz + z, e));
+                out.push(([bx + x, y, bz + z], e));
             }
         }
+        out
+    }
 
-        // 2. Limpiar y sembrar las fuentes.
-        let mut queue: VecDeque<(i32, i32, i32, u8)> = VecDeque::new();
-        for column in self.columns.values_mut() {
-            column.clear_block_light();
-        }
-        for (x, y, z, e) in sources {
-            let (pos, local) = Self::world_to_local([x, y, z]);
-            if let Some(column) = self.columns.get_mut(&pos) {
-                column.set_block_light(local[0], local[1], local[2], e);
-                queue.push_back((x, y, z, e));
+    /// Siembra las celdas de la region que tocan una columna **fuera** de ella,
+    /// con la luz que les llega desde alli (menos 1). Recupera la luz que entra
+    /// del exterior tras limpiar la region; sin esto quedaria un borde oscuro.
+    fn seed_block_light_boundary(
+        &mut self,
+        region: &std::collections::HashSet<ChunkPos>,
+        queue: &mut std::collections::VecDeque<([i32; 3], u8)>,
+    ) {
+        for &pos in region {
+            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+                if region.contains(&n) || !self.columns.contains_key(&n) {
+                    continue;
+                }
+                let bx = pos.x * CHUNK_SIZE as i32;
+                let bz = pos.z * CHUNK_SIZE as i32;
+                for y in 0..WORLD_HEIGHT as i32 {
+                    for t in 0..CHUNK_SIZE as i32 {
+                        // Celda de la region en la cara que da a `n`.
+                        let (ix, iz) = if dx != 0 {
+                            (if dx > 0 { 15 } else { 0 }, t)
+                        } else {
+                            (t, if dz > 0 { 15 } else { 0 })
+                        };
+                        let inside = [bx + ix, y, bz + iz];
+                        if self.get_block(inside).is_solid() {
+                            continue;
+                        }
+                        let outside = [inside[0] + dx, y, inside[2] + dz];
+                        let l = self.block_light_at(outside);
+                        if l > 1 && self.block_light_at(inside) < l - 1 {
+                            self.put_block_light(inside, l - 1);
+                            queue.push_back((inside, l - 1));
+                        }
+                    }
+                }
             }
         }
+    }
 
-        // 3. Propagar a los 6 vecinos (en coordenadas de mundo, cruzando chunks).
+    /// BFS de propagacion de luz de bloque (solo sube). Cruza chunks; escribir en
+    /// una columna no cargada es un no-op (`put_block_light`).
+    fn propagate_block_light(&mut self, queue: &mut std::collections::VecDeque<([i32; 3], u8)>) {
         const NEIGHBORS: [(i32, i32, i32); 6] = [
             (1, 0, 0),
             (-1, 0, 0),
@@ -536,17 +648,21 @@ impl World {
             (0, 0, 1),
             (0, 0, -1),
         ];
-        while let Some((x, y, z, level)) = queue.pop_front() {
+        while let Some((p, level)) = queue.pop_front() {
             if level <= 1 {
                 continue;
             }
             let next = level - 1;
             for (dx, dy, dz) in NEIGHBORS {
-                let (nx, ny, nz) = (x + dx, y + dy, z + dz);
-                if ny < 0 || ny >= WORLD_HEIGHT as i32 {
+                let n = [p[0] + dx, p[1] + dy, p[2] + dz];
+                if n[1] < 0 || n[1] >= WORLD_HEIGHT as i32 {
                     continue;
                 }
-                let (pos, local) = Self::world_to_local([nx, ny, nz]);
+                // Escribimos directo en la columna: asi solo encolamos cuando la
+                // escritura ocurre de verdad. Con `put_block_light` (no-op si la
+                // columna no esta cargada) el BFS re-encolaba celdas sin columna
+                // y entraba en bucle infinito.
+                let (pos, local) = Self::world_to_local(n);
                 let Some(column) = self.columns.get_mut(&pos) else {
                     continue;
                 };
@@ -555,7 +671,7 @@ impl World {
                 }
                 if column.block_light_at(local[0], local[1], local[2]) < next {
                     column.set_block_light(local[0], local[1], local[2], next);
-                    queue.push_back((nx, ny, nz, next));
+                    queue.push_back((n, next));
                 }
             }
         }
@@ -1281,9 +1397,19 @@ mod tests {
         let t = std::time::Instant::now();
         world.recompute_skylight(&dirty);
         println!("skylight (region {} col): {:?}", dirty.len(), t.elapsed());
+        // Luz de bloque: ruta **regional** (la de la app) vs global de referencia.
+        let changed: Vec<ChunkPos> = change
+            .loaded
+            .iter()
+            .chain(change.unloaded.iter())
+            .copied()
+            .collect();
+        let t = std::time::Instant::now();
+        world.recompute_block_light_region(&changed);
+        println!("block_light (region, app): {:?}", t.elapsed());
         let t = std::time::Instant::now();
         world.recompute_block_light();
-        println!("block_light: {:?}", t.elapsed());
+        println!("block_light (global, ref): {:?}", t.elapsed());
 
         // Meshing aproximado: greedy de las secciones no vacias de las columnas
         // a re-meshear (sin GPU).
@@ -1337,6 +1463,48 @@ mod tests {
         assert!(world.water_at([8, 101, 8]).is_source(), "la fuente sigue");
         // El nivel decrece al alejarse de la fuente.
         assert!(world.water_level([8, 101, 8]) > world.water_level([9, 101, 8]));
+    }
+
+    #[test]
+    fn la_luz_de_bloque_regional_coincide_con_la_global() {
+        use super::super::block::Block;
+        // Mundo grande (radio 4) para que la region sea un subconjunto estricto.
+        let mut world = World::new(7, 4, vec![]);
+        world.warm_streaming([8.0, 74.0, 8.0]); // columnas x/z en -4..4
+
+        // Emisores en y=120 (todo aire): uno que se descargara (col -4), dos en
+        // columnas de FUERA de la region (cols -2 y 3, prueba la siembra de
+        // frontera) y uno dentro (col 4, prueba el alta).
+        assert!(world.set_block([-60, 120, 8], Block::Torch)); // col -4 (se descarga)
+        assert!(world.set_block([-24, 120, 8], Block::Torch)); // col -2 (fuera de region)
+        assert!(world.set_block([60, 120, 8], Block::Torch)); // col 3 (fuera de region)
+        assert!(world.set_block([70, 120, 8], Block::Lava)); // col 4 (dentro)
+
+        // Cruce de chunk: entra x=5, sale x=-4.
+        let change = world.update_streaming([16.0, 74.0, 8.0]);
+        let changed: Vec<ChunkPos> = change
+            .loaded
+            .iter()
+            .chain(change.unloaded.iter())
+            .copied()
+            .collect();
+        world.recompute_block_light_region(&changed);
+
+        let mut coords = Vec::new();
+        for y in 110..131 {
+            for z in -24..25 {
+                for x in -80..81 {
+                    coords.push([x, y, z]);
+                }
+            }
+        }
+        let regional: Vec<u8> = coords.iter().map(|&c| world.block_light_at(c)).collect();
+        world.recompute_block_light();
+        let global: Vec<u8> = coords.iter().map(|&c| world.block_light_at(c)).collect();
+        assert_eq!(
+            regional, global,
+            "la luz de bloque regional difiere de la global"
+        );
     }
 
     #[test]
