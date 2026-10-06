@@ -1711,6 +1711,39 @@ tests; clippy `-D warnings` limpio. **Limite restante**: los cambios de streamin
 siguen llamando al recalculo global de luz de bloque (columnas nuevas con
 antorchas); se acotara despues.
 
+### 2026-10-05 (v0.8.16) — Meshing por secciones (auditoria FASE 6, dirty sections)
+
+**Decision.** La cola de (re)meshing pasa de **columna** a **seccion**
+`(ChunkPos, section)`:
+
+* `mesh_queue: VecDeque<(ChunkPos, usize)>`; `queue_section` / `queue_column`.
+* `pump_meshing` meshea UNA seccion y actualiza solo ese `SectionMeshes` (crea el
+  `ColumnMeshes` de la columna si falta); salta las secciones vacias.
+* `build_column_meshes` -> `build_section_meshes`.
+* Una **edicion** (`set_block`) encola solo la seccion editada; ademas la seccion
+  contigua si el voxel toca un limite de seccion, y las columnas vecinas (y
+  diagonales) si toca un borde de chunk -> `refresh_sections(voxel)`. Antes
+  `refresh_area` reconstruia 9 columnas x 24 secciones (= 216 secciones) por
+  edicion; ahora tipicamente 1.
+* Streaming y agua siguen encolando todas las secciones de la columna (el pump
+  salta las vacias); `set_blocks` (demo) y `tick_water` usan las nuevas colas.
+
+**Motivo.** El audit pide meshing por **dirty sections** (§9.2): no reconstruir
+una columna entera (ni 9) si solo cambio una seccion. Reduce el coste por edicion
+de ~216 secciones a 1-4.
+
+**Alternativas descartadas.** Meshing en workers de verdad (CPU mesh neutral +
+upload en el hilo principal + revisiones): es el siguiente sub-paso; aqui primero
+se elimina el trabajo redundante, que es lo que se nota al editar.
+
+**Consecuencia.** `renderer.rs` (`mesh_queue` por seccion, `queue_section`/
+`queue_column`, `build_section_meshes`, `refresh_sections`, fuera `refresh_area`;
+`set_block`/`set_blocks`/`tick_water`/`apply_stream_change` adaptados). 174 tests;
+clippy `-D warnings` limpio. Verificado en runtime: la demo aplica 561 edits y la
+escena (parcela + antorcha) se ve correcta. **Limites**: el meshing CPU sigue en
+el hilo principal (amortizado por el presupuesto del pump); los buffers GPU se
+recrean por seccion (sin pool/reuso aun).
+
 ---
 
 ## Plantilla para futuras entradas

@@ -151,9 +151,9 @@ pub struct Renderer {
     world: World,
     /// Mallas por columna: se recrean al entrar/salir columnas del radio.
     meshes: HashMap<ChunkPos, Box<ColumnMeshes>>,
-    /// Columnas pendientes de (re)meshear. Se van vaciando con un presupuesto de
-    /// tiempo por frame para no dar tirones al descubrir chunks.
-    mesh_queue: VecDeque<ChunkPos>,
+    /// Secciones pendientes de (re)meshear `(columna, seccion)`. Se van vaciando
+    /// con un presupuesto de tiempo por frame para no dar tirones.
+    mesh_queue: VecDeque<(ChunkPos, usize)>,
 
     clear_color: wgpu::Color,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
@@ -387,7 +387,7 @@ impl Renderer {
         // Liberar mallas de columnas descargadas (y sacarlas de la cola).
         for pos in &change.unloaded {
             self.meshes.remove(pos);
-            self.mesh_queue.retain(|p| p != pos);
+            self.mesh_queue.retain(|(p, _)| p != pos);
         }
         // Encolar las columnas nuevas y sus vecinas de borde; se meshean
         // repartidas entre frames (`pump_meshing`), empezando por las cercanas.
@@ -403,7 +403,7 @@ impl Renderer {
         );
         to_queue.sort_by_key(|p| (p.x - center.x).abs() + (p.z - center.z).abs());
         for pos in to_queue {
-            self.queue_mesh(pos);
+            self.queue_column(pos);
         }
         if !change.loaded.is_empty() || !change.unloaded.is_empty() {
             println!(
@@ -416,44 +416,62 @@ impl Renderer {
         }
     }
 
-    /// Encola una columna para (re)meshear, si esta cargada y no esta ya en cola.
-    fn queue_mesh(&mut self, pos: ChunkPos) {
-        if self.world.is_loaded(pos) && !self.mesh_queue.contains(&pos) {
-            self.mesh_queue.push_back(pos);
+    /// Encola una **seccion** para (re)meshear, si la columna esta cargada.
+    fn queue_section(&mut self, pos: ChunkPos, section: usize) {
+        if self.world.is_loaded(pos) && !self.mesh_queue.contains(&(pos, section)) {
+            self.mesh_queue.push_back((pos, section));
         }
     }
 
-    /// Meshea columnas de la cola hasta agotar un presupuesto de tiempo. Meshea
-    /// **al menos una** para garantir progreso. Asi el coste de descubrir chunks
-    /// se reparte entre frames y no produce un tiron.
+    /// Encola todas las secciones de una columna (chunk nuevo del streaming).
+    fn queue_column(&mut self, pos: ChunkPos) {
+        if !self.world.is_loaded(pos) {
+            return;
+        }
+        for section in 0..SECTION_COUNT {
+            if !self.mesh_queue.contains(&(pos, section)) {
+                self.mesh_queue.push_back((pos, section));
+            }
+        }
+    }
+
+    /// Meshea secciones de la cola hasta agotar un presupuesto de tiempo. Asi el
+    /// coste de descubrir/editar mundo se reparte entre frames y no da un tiron.
     fn pump_meshing(&mut self, budget_ms: f32) {
         let start = Instant::now();
-        while let Some(pos) = self.mesh_queue.pop_front() {
+        while let Some((pos, section)) = self.mesh_queue.pop_front() {
             if !self.world.is_loaded(pos) {
                 continue;
             }
-            let meshes = self.build_column_meshes(pos);
-            self.meshes.insert(pos, Box::new(meshes));
+            let built = self.build_section_meshes(pos, section);
+            let entry = self
+                .meshes
+                .entry(pos)
+                .or_insert_with(|| Box::new(ColumnMeshes::default()));
+            entry[section] = built;
             if start.elapsed().as_secs_f32() * 1000.0 >= budget_ms {
                 break;
             }
         }
     }
 
-    /// Construye las mallas de todas las secciones de una columna, consultando
-    /// los **vecinos** (para no dibujar muros internos entre chunks).
-    fn build_column_meshes(&self, pos: ChunkPos) -> ColumnMeshes {
+    /// Construye la malla de **una seccion** (opaco + agua) de una columna,
+    /// consultando los vecinos para no dibujar muros internos entre chunks.
+    fn build_section_meshes(&self, pos: ChunkPos, section: usize) -> SectionMeshes {
         let origin = World::chunk_origin(pos);
         // Geometria ya en coordenadas de mundo.
         let base_x = pos.x * CHUNK_SIZE as i32;
         let base_z = pos.z * CHUNK_SIZE as i32;
 
         let Some(column) = self.world.column(pos) else {
-            return std::array::from_fn(|_| SectionMeshes::default());
+            return SectionMeshes::default();
         };
+        // Seccion sin geometria: nada que meshear.
+        if self.world.section_is_empty(pos, section) {
+            return SectionMeshes::default();
+        }
         // La gran mayoria de consultas caen **dentro** de la columna (lectura
-        // directa, sin HashMap ni `div_euclid`); solo los bordes (-1 / 16) miran
-        // el chunk vecino. Era el otro gran coste de meshear.
+        // directa); solo los bordes (-1 / 16) miran el chunk vecino.
         let in_col = |x: i32, y: i32, z: i32| {
             (0..CHUNK_SIZE as i32).contains(&x)
                 && (0..CHUNK_SIZE as i32).contains(&z)
@@ -477,57 +495,69 @@ impl Renderer {
                 (self.world.sky_light_at(w), self.world.block_light_at(w))
             }
         };
-        // Nivel de agua (0 = sin agua) en coordenadas locales, mirando el chunk
-        // vecino si hace falta: la interpolacion de esquinas cruza el borde, asi
-        // que la consulta debe cruzarlo tambien.
+        // Nivel de agua en coordenadas locales (cruza el borde para la rampa).
         let level =
             |x: i32, y: i32, z: i32| -> u8 { self.world.water_level([base_x + x, y, base_z + z]) };
 
-        let mut out: ColumnMeshes = std::array::from_fn(|_| SectionMeshes::default());
-        for (section, slot) in out.iter_mut().enumerate() {
-            // Las secciones sin nada que dibujar no generan geometria; saltarlas
-            // evita 24 pasadas de greedy por columna (y hace barato el re-mesheo
-            // de vecinas del streaming).
-            if self.world.section_is_empty(pos, section) {
-                continue;
-            }
-            // La geometria opaca sigue siendo greedy; el agua la genera el
-            // mesher fluido, que interpola las esquinas para dar la rampa.
-            let (v, i, _, _) = greedy::greedy_section_query(&query, &light, section, origin);
-            if !v.is_empty() {
-                slot.opaque = Some(Mesh::new(
-                    &self.device,
-                    &format!("col_{}_{}_sec_{section}", pos.x, pos.z),
-                    &v,
-                    &i,
-                ));
-            }
-            let (wv, wi) =
-                crate::world::fluid_mesher::fluid_section(&level, &query, &light, section, origin);
-            if !wv.is_empty() {
-                slot.water = Some(Mesh::new(
-                    &self.device,
-                    &format!("col_{}_{}_sec_{section}_water", pos.x, pos.z),
-                    &wv,
-                    &wi,
-                ));
-            }
+        let mut slot = SectionMeshes::default();
+        // La geometria opaca sigue siendo greedy; el agua la genera el mesher
+        // fluido, que interpola las esquinas para dar la rampa.
+        let (v, i, _, _) = greedy::greedy_section_query(&query, &light, section, origin);
+        if !v.is_empty() {
+            slot.opaque = Some(Mesh::new(
+                &self.device,
+                &format!("col_{}_{}_sec_{section}", pos.x, pos.z),
+                &v,
+                &i,
+            ));
         }
-        out
+        let (wv, wi) =
+            crate::world::fluid_mesher::fluid_section(&level, &query, &light, section, origin);
+        if !wv.is_empty() {
+            slot.water = Some(Mesh::new(
+                &self.device,
+                &format!("col_{}_{}_sec_{section}_water", pos.x, pos.z),
+                &wv,
+                &wi,
+            ));
+        }
+        slot
     }
 
-    /// Reconstruye la malla de una columna cargada y la de su anillo **3x3**
-    /// (incluidas diagonales). Hace falta tras editar porque la luz de bloque
-    /// viaja hasta 15 bloques y puede cambiar caras de columnas vecinas en
-    /// diagonal; y tras cargar/descargar porque cambian las caras de borde.
-    fn refresh_area(&mut self, center: ChunkPos) {
-        for dz in -1..=1 {
-            for dx in -1..=1 {
-                let n = ChunkPos::new(center.x + dx, center.z + dz);
-                if self.world.is_loaded(n) {
-                    let m = self.build_column_meshes(n);
-                    self.meshes.insert(n, Box::new(m));
-                }
+    /// Encola las secciones afectadas por una **edicion** en `voxel` (y las
+    /// vecinas de borde): la seccion editada; la de al lado si el voxel toca un
+    /// limite de seccion; y las columnas vecinas si toca un borde de chunk.
+    /// Mucho mas barato que reconstruir 9 columnas x 24 secciones.
+    fn refresh_sections(&mut self, voxel: [i32; 3]) {
+        let (pos, local) = World::world_to_local(voxel);
+        let section = local[1] / CHUNK_SIZE;
+        let mut sections: Vec<usize> = vec![section];
+        if local[1].is_multiple_of(CHUNK_SIZE) && section > 0 {
+            sections.push(section - 1);
+        }
+        if local[1] % CHUNK_SIZE == CHUNK_SIZE - 1 && section + 1 < SECTION_COUNT {
+            sections.push(section + 1);
+        }
+        let on_x = local[0] == 0 || local[0] == CHUNK_SIZE - 1;
+        let on_z = local[2] == 0 || local[2] == CHUNK_SIZE - 1;
+        let mut chunks: Vec<ChunkPos> = vec![pos];
+        if on_x {
+            chunks.push(ChunkPos::new(pos.x - 1, pos.z));
+            chunks.push(ChunkPos::new(pos.x + 1, pos.z));
+        }
+        if on_z {
+            chunks.push(ChunkPos::new(pos.x, pos.z - 1));
+            chunks.push(ChunkPos::new(pos.x, pos.z + 1));
+        }
+        if on_x && on_z {
+            chunks.push(ChunkPos::new(pos.x - 1, pos.z - 1));
+            chunks.push(ChunkPos::new(pos.x + 1, pos.z + 1));
+            chunks.push(ChunkPos::new(pos.x - 1, pos.z + 1));
+            chunks.push(ChunkPos::new(pos.x + 1, pos.z - 1));
+        }
+        for c in chunks {
+            for &s in &sections {
+                self.queue_section(c, s);
             }
         }
     }
@@ -604,7 +634,7 @@ impl Renderer {
         // de forma incremental dentro de `set_block`. Re-mesheamos el area.
         let (pos, _) = World::world_to_local(voxel);
         self.world.recompute_skylight(&area3x3(pos));
-        self.refresh_area(pos);
+        self.refresh_sections(voxel);
         true
     }
 
@@ -616,8 +646,8 @@ impl Renderer {
         if dirty.is_empty() {
             return 0;
         }
-        // La cara de una columna depende de sus vecinas, asi que re-mesheamos el
-        // anillo 3x3 (igual que al editar un bloque).
+        // La superficie del agua depende de sus vecinas: encolamos las columnas
+        // del anillo 3x3 (todas sus secciones; el pump salta las vacias).
         let mut to_remesh: Vec<ChunkPos> = Vec::new();
         for pos in &dirty {
             for dz in -1..=1 {
@@ -630,8 +660,7 @@ impl Renderer {
             }
         }
         for n in to_remesh {
-            let meshes = self.build_column_meshes(n);
-            self.meshes.insert(n, Box::new(meshes));
+            self.queue_column(n);
         }
         dirty.len()
     }
@@ -649,22 +678,19 @@ impl Renderer {
                 touched.push(pos);
             }
         }
-        // Reconstruimos el area 3x3 de cada columna tocada, sin repetir; ese
-        // mismo conjunto son las columnas "sucias" para la luz.
-        let mut to_remesh: Vec<ChunkPos> = Vec::new();
+        // La luz de cielo se recalcula por region (area 3x3 de cada columna
+        // tocada); el meshing se encola a granularidad de seccion por edicion.
+        let mut sky_dirty: Vec<ChunkPos> = Vec::new();
         for pos in touched {
             for n in area3x3(pos) {
-                if !to_remesh.contains(&n) {
-                    to_remesh.push(n);
+                if !sky_dirty.contains(&n) {
+                    sky_dirty.push(n);
                 }
             }
         }
-        self.world.recompute_skylight(&to_remesh);
-        for n in to_remesh {
-            if self.world.is_loaded(n) {
-                let m = self.build_column_meshes(n);
-                self.meshes.insert(n, Box::new(m));
-            }
+        self.world.recompute_skylight(&sky_dirty);
+        for &(voxel, _) in edits {
+            self.refresh_sections(voxel);
         }
         applied
     }

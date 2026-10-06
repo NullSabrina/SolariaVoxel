@@ -8,21 +8,21 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.8.15` — Luz de bloque incremental
+## Estado actual: `v0.8.16` — Meshing por secciones (dirty sections)
 
-P0 de la auditoría: editar un bloque ya **no** recalcula la luz de bloque de todo
-el mundo cargado.
+FASE 6 (dirty sections) de la auditoría:
 
-- `World::relight_block`: cola de **remoción** (apaga la luz que partía de la
-  celda y re-siembra desde otras fuentes) + cola de **adición** (sólo sube),
-  acotadas al alcance de la luz (< 16 bloques). Cruza chunks.
-- `set_block` la ejecuta; el renderer ya no llama a `recompute_block_light` en
-  las ediciones. Test: incremental **==** recálculo global.
-- Hereda de **v0.8.14**: streaming por jobs. **v0.8.13**: guardado async.
+- La cola de meshing es por **sección** `(columna, sección)`, no por columna.
+- Editar un bloque encola sólo la sección afectada (y las vecinas de borde cuando
+  toca un límite de sección/chunk); antes `refresh_area` reconstruía 9 columnas ×
+  24 secciones.
+- El resto (streaming/agua) encola las secciones de la columna; el pump con
+  presupuesto de tiempo salta las vacías.
+- Hereda de **v0.8.15**: luz de bloque incremental. **v0.8.14**: streaming async.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (auditoría): meshing async,
-fluids (active set), registry.
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): meshing async en
+workers + revisiones, buffers GPU reutilizables, fluids, registry.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

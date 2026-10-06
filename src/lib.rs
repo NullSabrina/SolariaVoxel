@@ -10,19 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.8.15 - Luz de bloque incremental
+//! ## Estado actual: v0.8.16 - Meshing por secciones (dirty sections)
 //!
-//! P0 de la auditoria: editar un bloque ya **no** recalcula la luz de bloque de
-//! todo el mundo cargado.
-//! * `World::relight_block`: cola de **remocion** (apaga la luz que partia de la
-//!   celda y re-siembra desde las celdas con otra fuente) + cola de **adicion**
-//!   (solo sube) acotadas al alcance de la luz (< 16 bloques). Cruza chunks.
-//! * `set_block` la ejecuta; el renderer ya no llama a `recompute_block_light` en
-//!   las ediciones. Test: incremental == recalculo global.
+//! FASE 6 (parte de dirty sections) de la auditoria:
+//! * La cola de meshing es por **seccion** `(columna, seccion)`, no por columna.
+//! * Editar un bloque encola solo la seccion afectada (y las vecinas de borde
+//!   cuando toca un limite de seccion/chunk); antes `refresh_area` reconstruia 9
+//!   columnas x 24 secciones.
+//! * El resto (streaming/agua) encola todas las secciones de la columna; el pump
+//!   con presupuesto de tiempo salta las vacias.
 //!
-//! Hereda de v0.8.14 (streaming por jobs), v0.8.13 (guardado async).
+//! Hereda de v0.8.15 (luz de bloque incremental), v0.8.14 (streaming por jobs).
 //!
-//! Siguiente (auditoria): meshing async, fluids (active set), registry.
+//! Siguiente (auditoria): meshing async en workers + revisiones, buffers GPU
+//! reutilizables, fluids (active set), registry.
 //!
 //! ## Organizacion del codigo
 //!
