@@ -1907,6 +1907,40 @@ vecinas (correcto pero no minimo); no se midio aun el ahorro con benchmark
 
 ---
 
+### 2026-10-05 (v0.9.3) — Transparencia ordenada del agua (auditoria FASE 7, parte 4)
+
+**Decision.** El pase translucido del agua deja de iterar el `HashMap` de mallas
+sin orden: cada frame se recogen las secciones con malla de agua que pasan el
+frustum en `water_order: Vec<(dist2, ChunkPos, seccion)>` (buffer reutilizado, sin
+allocar por frame), se ordenan de **lejos a cerca** por distancia al centro de la
+seccion a la camara y se dibujan en ese orden. Se mantiene **z-test ON y z-write
+OFF** (ya configurado en `pipeline.rs`).
+
+**Motivo.** El audit (§11.5) pide transparencia correcta: el blending alfa es
+sensible al orden y el orden de un `HashMap` no esta definido, asi que el agua
+podia componerse de forma inconsistente entre frames/campo de vision. El agua no
+debe escribir z (taparia las caras de agua que tiene detras) pero si consultarlo
+(no debe dibujarse sobre geometria opaca delante).
+
+**Alternativas descartadas.**
+- Ordenar por columna solo (sin seccion): insuficiente con agua en varias alturas
+  de la misma columna.
+- OIT (order-independent transparency) / weighted-blended: mas complejo y
+  costoso; no hace falta para una capa de agua discreta.
+- `HashMap` ordenado / `BTreeMap` de meshes: orden por clave, no por distancia;
+  no resuelve la composicion.
+- Recalcular distancias de todos los vertices: el centro de la seccion basta para
+  ordenar secciones y es O(n).
+
+**Consecuencia.** `render/renderer.rs` (`water_order`, `sort_water_back_to_front`,
+pase de agua). 186 tests; clippy `-D warnings` limpio. Verificado en runtime
+(demo de oceano: agua translucida correcta, 396 fps). **Limite**: el orden es por
+seccion, no por triangulo; con varias capas de agua muy solapadas podria quedar
+algun artefacto, aceptable para el modelo actual. **FASE 7 cerrada.** Siguiente
+cuello de botella: la duplicacion de definiciones de bloque (FASE 9, registry).
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

@@ -8,22 +8,19 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.9.2` — Remeshing incremental de fluidos
+## Estado actual: `v0.9.3` — Transparencia ordenada
 
-FASE 7 (fluidos, parte 3) de la auditoría:
+FASE 7 (fluidos, parte 4, cierra la fase) de la auditoría: el agua se dibuja en
+un pase translúcido **ordenado de lejos a cerca** por distancia a la cámara
+(`water_order`, reutilizado cada frame), en lugar de iterar el `HashMap` de
+mallas sin orden. Decisión explícita: **z-test ON, z-write OFF**.
 
-- `World::tick_water` devuelve **secciones** sucias (`FluidDirty`), con marcas de
-  borde de chunk, en vez de columnas enteras. El renderer re-meshea sólo esas
-  secciones (más las verticales colindantes y, si toca un borde, la columna
-  vecina): antes re-mesheaba el anillo 3x3 completo (24 secciones por columna).
-- Presupuesto configurable `FluidBudget { cells, ms }`
-  (`SOLARIA_FLUID_BUDGET_CELLS`, `SOLARIA_FLUID_BUDGET_MS`).
-- Hereda de **v0.9.1**: persistencia de fluidos (FORMAT v5, migrador v4->v5).
-  **v0.9.0**: fluido local por columna (nibbles + active set).
+- Hereda de **v0.9.2**: remeshing incremental de fluidos. **v0.9.1**:
+  persistencia (FORMAT v5, migrador v4->v5). **v0.9.0**: fluido local por columna.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, click izq = romper, click
-der = colocar (sobre una mesa, la abre). Siguiente (auditoría): transparencia
-ordenada, registry, memoria.
+der = colocar (sobre una mesa, la abre). Siguiente (auditoría): registry de
+bloques, memoria, renderer scale.
 
 Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 `world.vf` (junto al ejecutable). La proxima vez se carga automaticamente.

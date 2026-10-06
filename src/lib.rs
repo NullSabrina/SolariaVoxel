@@ -10,19 +10,16 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.9.2 - Remeshing incremental de fluidos
+//! ## Estado actual: v0.9.3 - Transparencia ordenada
 //!
-//! FASE 7 (fluidos, parte 3) de la auditoria:
-//! * `World::tick_water` devuelve **secciones** sucias (`FluidDirty`), con marcas
-//!   de borde de chunk, en vez de columnas enteras. El renderer re-meshea solo
-//!   esas secciones (mas las verticales colindantes y, si toca un borde, la
-//!   columna vecina): antes re-mesheaba el anillo 3x3 completo (24 secciones por
-//!   columna).
-//! * Presupuesto configurable `FluidBudget { cells, ms }`
-//!   (`SOLARIA_FLUID_BUDGET_CELLS`, `SOLARIA_FLUID_BUDGET_MS`).
+//! FASE 7 (fluidos, parte 4) de la auditoria: el agua se dibuja en un pase
+//! translucido **ordenado de lejos a cerca** por distancia a la camara
+//! (`water_order`, reutilizado cada frame), en lugar de iterando el `HashMap` de
+//! meshes sin orden. Decision explicita: **z-test ON, z-write OFF**.
 //!
-//! Hereda de v0.9.1 (persistencia de fluidos), v0.9.0 (fluido local). Siguiente
-//! (auditoria): transparencia ordenada, registry, memoria.
+//! Hereda de v0.9.2 (remeshing incremental de fluidos), v0.9.1 (persistencia),
+//! v0.9.0 (fluido local). Con esto se cierra la **FASE 7**. Siguiente
+//! (auditoria): registry de bloques, memoria, renderer scale.
 //!
 //! ## Organizacion del codigo
 //!

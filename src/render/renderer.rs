@@ -165,6 +165,13 @@ fn vertical_neighbor_sections(section: usize) -> Vec<usize> {
     out
 }
 
+/// Ordena los drawables de agua de **lejos a cerca** (back-to-front) para que el
+/// blending alfa componga bien. `f32::total_cmp` evita el `unwrap` de
+/// `partial_cmp` y el panic con NaN.
+fn sort_water_back_to_front(order: &mut [(f32, ChunkPos, usize)]) {
+    order.sort_by(|a, b| b.0.total_cmp(&a.0));
+}
+
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
@@ -197,6 +204,10 @@ pub struct Renderer {
     mesh_scheduler: MeshScheduler,
     /// Revision por seccion: descarta resultados de meshing obsoletos.
     mesh_rev: HashMap<(ChunkPos, usize), u64>,
+    /// Orden de dibujo del agua (translucido) del ultimo frame: `(dist2, pos,
+    /// seccion)`. Se reutiliza entre frames (sin allocar por frame) y se ordena
+    /// de **lejos a cerca** para que el blending alfa componga bien.
+    water_order: Vec<(f32, ChunkPos, usize)>,
 
     clear_color: wgpu::Color,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
@@ -295,6 +306,7 @@ impl Renderer {
             mesh_queue: VecDeque::new(),
             mesh_scheduler: MeshScheduler::new(2),
             mesh_rev: HashMap::new(),
+            water_order: Vec::new(),
             clear_color: sky_color(),
             day_factor: 1.0,
             start: Instant::now(),
@@ -901,24 +913,46 @@ impl Renderer {
                     }
                 }
             }
-            // Pase de agua (translucido): mismo bind group, otro pipeline
-            // (blending, sin escritura de z).
+            // Pase de agua (translucido): mismo bind group, otro pipeline con
+            // blending alfa. **Decision**: z-test ON y z-write OFF (ver
+            // `pipeline.rs`), porque el agua no debe tapar lo que tiene detras ni
+            // escribir profundidad entre sus propias caras. Como el blending alfa
+            // es sensible al orden y el `HashMap` de meshes no lo garantiza,
+            // ordenamos las secciones de agua de **lejos a cerca** por distancia
+            // a la camara (reutilizando el buffer `water_order`).
             pass.set_pipeline(self.pipeline.water_pipeline());
+            self.water_order.clear();
             for (pos, column) in &self.meshes {
                 let (wx, wz) = (
                     (pos.x * CHUNK_SIZE as i32) as f32,
                     (pos.z * CHUNK_SIZE as i32) as f32,
                 );
                 for (index, section_meshes) in column.iter().enumerate() {
-                    let Some(mesh) = section_meshes.water.as_ref() else {
+                    if section_meshes.water.is_none() {
                         continue;
-                    };
+                    }
                     let y0 = index as f32 * section;
-                    if frustum
+                    if !frustum
                         .intersects_aabb([wx, y0, wz], [wx + section, y0 + section, wz + section])
                     {
-                        mesh.draw(&mut pass);
+                        continue;
                     }
+                    // Distancia al centro de la seccion (basta para ordenar).
+                    let dx = wx + section * 0.5 - camera_pos.x;
+                    let dy = y0 + section * 0.5 - camera_pos.y;
+                    let dz = wz + section * 0.5 - camera_pos.z;
+                    self.water_order
+                        .push((dx * dx + dy * dy + dz * dz, *pos, index));
+                }
+            }
+            sort_water_back_to_front(&mut self.water_order);
+            for &(_, pos, index) in &self.water_order {
+                if let Some(mesh) = self
+                    .meshes
+                    .get(&pos)
+                    .and_then(|column| column[index].water.as_ref())
+                {
+                    mesh.draw(&mut pass);
                 }
             }
 
@@ -949,6 +983,20 @@ mod tests {
             vertical_neighbor_sections(SECTION_COUNT - 1),
             vec![SECTION_COUNT - 2, SECTION_COUNT - 1]
         );
+    }
+
+    #[test]
+    fn el_agua_se_ordena_de_lejos_a_cerca() {
+        let mut order = vec![
+            (4.0, ChunkPos::new(0, 0), 0),
+            (100.0, ChunkPos::new(3, 3), 5),
+            (25.0, ChunkPos::new(1, 0), 2),
+        ];
+        sort_water_back_to_front(&mut order);
+        let dists: Vec<f32> = order.iter().map(|d| d.0).collect();
+        assert_eq!(dists, vec![100.0, 25.0, 4.0]);
+        // La seccion mas lejana se dibuja primero.
+        assert_eq!(order[0].1, ChunkPos::new(3, 3));
     }
 
     #[test]
