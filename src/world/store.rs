@@ -25,7 +25,7 @@ use super::chunk::{CHUNK_SIZE, Column, SECTION_COUNT, WORLD_HEIGHT};
 use super::save::{ChunkPos, ChunkRecord};
 use super::streaming::{GenResult, TerrainScheduler};
 use super::terrain::TerrainGenerator;
-use super::water::{self, Fluid, FluidGrid, MAX_LEVEL};
+use super::water::{self, Fluid, FluidBudget, FluidGrid, MAX_LEVEL};
 
 /// Un mundo vivo: columnas cargadas + cache + generador.
 pub struct World {
@@ -846,12 +846,27 @@ impl World {
         self.water_queue.len()
     }
 
-    /// Avanza la simulacion de agua hasta `budget` celdas. Devuelve las columnas
-    /// que cambiaron (para re-meshearlas).
-    pub fn tick_water(&mut self, budget: usize) -> Vec<ChunkPos> {
-        let mut dirty: Vec<ChunkPos> = Vec::new();
+    /// Avanza la simulacion de agua hasta `budget` celdas (sin cota de tiempo).
+    /// Devuelve las **secciones** que cambiaron (para re-meshearlas de forma
+    /// incremental, no la columna entera).
+    pub fn tick_water(&mut self, budget: usize) -> Vec<FluidDirty> {
+        self.tick_water_with(FluidBudget {
+            cells: budget,
+            ms: f32::INFINITY,
+        })
+    }
+
+    /// Avanza la simulacion de agua con un presupuesto de celdas **y** de tiempo.
+    /// Devuelve las secciones sucias (con marcas de borde si el cambio toco un
+    /// borde de chunk, para re-meshear tambien la columna vecina).
+    pub fn tick_water_with(&mut self, budget: FluidBudget) -> Vec<FluidDirty> {
+        let start = std::time::Instant::now();
+        let mut dirty: Vec<FluidDirty> = Vec::new();
         let mut processed = 0usize;
-        while processed < budget {
+        while processed < budget.cells {
+            if start.elapsed().as_secs_f32() * 1000.0 >= budget.ms {
+                break;
+            }
             let Some(p) = self.water_queue.pop() else {
                 break;
             };
@@ -859,7 +874,7 @@ impl World {
             if !(0..WORLD_HEIGHT as i32).contains(&p[1]) {
                 continue;
             }
-            let (pos, _) = Self::world_to_local(p);
+            let (pos, local) = Self::world_to_local(p);
             if !self.columns.contains_key(&pos) {
                 continue;
             }
@@ -868,9 +883,7 @@ impl World {
                 continue;
             }
             if water::step_cell(self, p) {
-                if !dirty.contains(&pos) {
-                    dirty.push(pos);
-                }
+                add_fluid_dirty(&mut dirty, pos, local);
                 for n in water::neighborhood(p) {
                     self.enqueue_water(n);
                 }
@@ -878,6 +891,28 @@ impl World {
         }
         dirty
     }
+}
+
+/// Registro de una **seccion** cuyo fluido cambio, con las marcas de borde
+/// necesarias para re-meshear tambien la columna vecina. Se fusiona con la
+/// entrada de la misma seccion (los bordes se acumulan con OR).
+fn add_fluid_dirty(dirty: &mut Vec<FluidDirty>, pos: ChunkPos, local: [usize; 3]) {
+    let section = local[1] / CHUNK_SIZE;
+    let edge_x = local[0] == 0 || local[0] == CHUNK_SIZE - 1;
+    let edge_z = local[2] == 0 || local[2] == CHUNK_SIZE - 1;
+    for d in dirty.iter_mut() {
+        if d.pos == pos && d.section == section {
+            d.edge_x |= edge_x;
+            d.edge_z |= edge_z;
+            return;
+        }
+    }
+    dirty.push(FluidDirty {
+        pos,
+        section,
+        edge_x,
+        edge_z,
+    });
 }
 
 /// Los 6 vecinos ortogonales.
@@ -946,6 +981,18 @@ pub fn apply_record(column: &mut Column, record: &ChunkRecord) {
             }
         }
     }
+}
+
+/// Una **seccion** cuyo fluido cambio en un tick, con marcas de borde para
+/// re-meshear la columna vecina solo cuando hace falta (remeshing incremental).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FluidDirty {
+    pub pos: ChunkPos,
+    pub section: usize,
+    /// El cambio toca un borde X del chunk (afecta a la columna vecina en X).
+    pub edge_x: bool,
+    /// El cambio toca un borde Z del chunk (afecta a la columna vecina en Z).
+    pub edge_z: bool,
 }
 
 /// Cambios producidos por un tick de streaming.
@@ -1315,6 +1362,74 @@ mod tests {
             "el nivel de flujo se perdio al descargar/recargar"
         );
         assert_eq!(world.water_at([8, 101, 8]), Fluid::Source);
+    }
+
+    #[test]
+    fn el_tick_reporta_la_seccion_y_no_el_borde_si_es_interior() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 0, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                world.set_block([x, 100, z], Block::Stone);
+            }
+        }
+        // Anillo solido que confina el agua lejos de los bordes del chunk, para
+        // que toda celda sucia sea interior (x/z dentro de 5..11).
+        for i in 4..=12i32 {
+            world.set_block([i, 101, 4], Block::Stone);
+            world.set_block([i, 101, 12], Block::Stone);
+            world.set_block([4, 101, i], Block::Stone);
+            world.set_block([12, 101, i], Block::Stone);
+        }
+        world.set_block([8, 101, 8], Block::Water);
+        let dirty = world.tick_water(100_000);
+        assert!(!dirty.is_empty(), "deberia haber secciones sucias");
+        assert!(dirty.iter().all(|d| d.section == 101 / CHUNK_SIZE));
+        assert_eq!(dirty[0].pos, ChunkPos::new(0, 0));
+        assert!(
+            dirty.iter().all(|d| !d.edge_x && !d.edge_z),
+            "el agua confinada no deberia tocar bordes de chunk"
+        );
+    }
+
+    #[test]
+    fn el_tick_marca_el_borde_cuando_el_cambio_toca_un_borde_de_chunk() {
+        use super::super::block::Block;
+        let mut world = World::new(7, 0, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                world.set_block([x, 100, z], Block::Stone);
+            }
+        }
+        // Fuente pegada al borde x=0 del chunk (0,0).
+        world.set_block([0, 101, 8], Block::Water);
+        let dirty = world.tick_water(100_000);
+        assert!(dirty.iter().any(|d| d.edge_x), "deberia marcar el borde X");
+    }
+
+    #[test]
+    fn el_presupuesto_de_celdas_limita_el_tick() {
+        use super::super::block::Block;
+        use super::super::water::FluidBudget;
+        let mut world = World::new(7, 0, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                world.set_block([x, 100, z], Block::Stone);
+            }
+        }
+        world.set_block([8, 101, 8], Block::Water);
+        let before = world.pending_water_cells();
+        assert!(before > 0, "deberia haber celdas activas tras editar");
+        // 0 celdas: el tick no procesa nada y la cola queda intacta.
+        let dirty = world.tick_water_with(FluidBudget {
+            cells: 0,
+            ms: f32::INFINITY,
+        });
+        assert!(dirty.is_empty());
+        assert_eq!(world.pending_water_cells(), before, "no se consumio nada");
     }
 
     #[test]

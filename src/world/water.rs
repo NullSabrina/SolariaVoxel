@@ -32,6 +32,46 @@ pub const MAX_LEVEL: u8 = 8;
 /// Cuanto pierde el agua por cada bloque horizontal que se aleja de una fuente.
 pub const FLOW_DECAY: u8 = 1;
 
+/// Presupuesto de la simulacion de fluidos por tick. Doble cota: numero de
+/// celdas y milisegundos, para que un cambio grande (romper un dique) no bloquee
+/// el frame aunque queden pocas celdas por procesar. Configurable por entorno
+/// (`SOLARIA_FLUID_BUDGET_CELLS`, `SOLARIA_FLUID_BUDGET_MS`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FluidBudget {
+    /// Celdas maximas a procesar por tick.
+    pub cells: usize,
+    /// Tiempo maximo de simulacion por tick (ms).
+    pub ms: f32,
+}
+
+impl Default for FluidBudget {
+    fn default() -> Self {
+        Self {
+            cells: 8192,
+            ms: 4.0,
+        }
+    }
+}
+
+impl FluidBudget {
+    /// Lee el presupuesto del entorno, o el valor por defecto si no hay nada.
+    pub fn from_env() -> Self {
+        let mut budget = Self::default();
+        if let Ok(s) = std::env::var("SOLARIA_FLUID_BUDGET_CELLS")
+            && let Ok(v) = s.parse::<usize>()
+        {
+            budget.cells = v;
+        }
+        if let Ok(s) = std::env::var("SOLARIA_FLUID_BUDGET_MS")
+            && let Ok(v) = s.parse::<f32>()
+            && v > 0.0
+        {
+            budget.ms = v;
+        }
+        budget
+    }
+}
+
 /// Estado del agua en una celda.
 ///
 /// * `None` — no hay agua.

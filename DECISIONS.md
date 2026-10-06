@@ -1873,6 +1873,40 @@ cuello de botella: el coste de re-meshear de mas al fluir agua.
 
 ---
 
+### 2026-10-05 (v0.9.2) — Remeshing incremental de fluidos (auditoria FASE 7, parte 3)
+
+**Decision.** `World::tick_water` devuelve `Vec<FluidDirty>` (seccion + marcas de
+borde X/Z de chunk) en vez de `Vec<ChunkPos>`. El renderer encola **solo** la
+seccion afectada y sus vecinas verticales; si el cambio toco un borde de chunk,
+tambien las secciones correspondientes de la(s) columna(s) vecina(s). La
+simulacion pasa a tener un presupuesto configurable `FluidBudget { cells, ms }`
+(por entorno con `SOLARIA_FLUID_BUDGET_CELLS` / `SOLARIA_FLUID_BUDGET_MS`).
+
+**Motivo.** El audit (§11.4) pide no re-meshear el anillo 3x3 completo si solo
+cambio una celda. El codigo anterior re-mesheaba 9 columnas x 24 secciones por
+cada tick con agua activa; en una cascada se disparaba el coste de meshing. La
+geometria de agua de una seccion lee la celda de arriba (cara superior) y las
+laterales de su misma `y`, asi que hacen falta la seccion y las verticales
+colindantes; el borde X/Z solo afecta a la columna vecina.
+
+**Alternativas descartadas.**
+- Devolver solo `ChunkPos` y volver a encolar la columna entera: no reduce el
+  trabajo (24 secciones por columna).
+- Devolver la posicion local de cada celda: no hace falta; las marcas de borde
+  bastan y evitan un tipo mas grande.
+- Presupuesto solo por celdas: una cascada con celdas baratas pero muchas puede
+  seguir pasandose de tiempo; la cota de ms lo acota en hardware lento.
+
+**Consecuencia.** `world/water.rs` (`FluidBudget`), `world/store.rs` (`FluidDirty`,
+`tick_water_with`, `add_fluid_dirty`, `tick_water` delega),
+`render/renderer.rs` (`queue_fluid_dirty`, `vertical_neighbor_sections`),
+`engine/app.rs` (presupuesto por entorno). 185 tests; clippy `-D warnings`
+limpio. **Limites**: sigue habiendo over-queuing de las secciones verticales
+vecinas (correcto pero no minimo); no se midio aun el ahorro con benchmark
+(FASE 13). Siguiente cuello de botella: el orden de dibujo del agua (v0.9.3).
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

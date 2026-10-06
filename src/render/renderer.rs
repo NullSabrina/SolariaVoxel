@@ -29,7 +29,8 @@ use crate::render::pipeline::ScenePipeline;
 use crate::render::ui::{UiPipeline, UiQuad};
 use crate::world::mesh_snapshot::section_snapshot;
 use crate::world::{
-    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, RayHit, SECTION_COUNT, StreamChange, World, raycast,
+    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, FluidBudget, FluidDirty, RayHit, SECTION_COUNT,
+    StreamChange, World, raycast,
 };
 
 /// Reutiliza la malla `slot` con la nueva geometria (o la crea si falta). Los
@@ -144,6 +145,22 @@ fn area3x3(center: ChunkPos) -> Vec<ChunkPos> {
         for dx in -1..=1 {
             out.push(ChunkPos::new(center.x + dx, center.z + dz));
         }
+    }
+    out
+}
+
+/// La seccion y sus vecinas verticales (la de arriba y la de abajo, si existen).
+/// La geometria de agua de una seccion lee la celda de arriba (cara superior) y
+/// las laterales comparten nivel con las de su misma `y`, asi que un cambio en
+/// una seccion puede afectar a la contigua.
+fn vertical_neighbor_sections(section: usize) -> Vec<usize> {
+    let mut out = Vec::with_capacity(3);
+    if section > 0 {
+        out.push(section - 1);
+    }
+    out.push(section);
+    if section + 1 < SECTION_COUNT {
+        out.push(section + 1);
     }
     out
 }
@@ -658,31 +675,51 @@ impl Renderer {
         true
     }
 
-    /// Avanza la simulacion de agua y **re-meshea** las columnas que cambiaron
-    /// (y sus vecinas). El agua no emite luz, asi que no recomputamos la luz de
-    /// bloque: solo la geometria. Devuelve cuantas celdas proceso.
-    pub fn tick_water(&mut self, budget: usize) -> usize {
-        let dirty = self.world.tick_water(budget);
+    /// Avanza la simulacion de agua y **re-meshea solo las secciones** que
+    /// cambiaron (mas las verticales colindantes y, si el cambio toco un borde
+    /// de chunk, la columna vecina). Antes se re-mesheaba el anillo 3x3 completo
+    /// de columnas (todas sus 24 secciones). El agua no emite luz, asi que no se
+    /// recomputa luz: solo la geometria. Devuelve cuantas celdas se simularon.
+    pub fn tick_water(&mut self, budget: FluidBudget) -> usize {
+        let dirty = self.world.tick_water_with(budget);
         if dirty.is_empty() {
             return 0;
         }
-        // La superficie del agua depende de sus vecinas: encolamos las columnas
-        // del anillo 3x3 (todas sus secciones; el pump salta las vacias).
-        let mut to_remesh: Vec<ChunkPos> = Vec::new();
-        for pos in &dirty {
-            for dz in -1..=1 {
-                for dx in -1..=1 {
-                    let n = ChunkPos::new(pos.x + dx, pos.z + dz);
-                    if self.world.is_loaded(n) && !to_remesh.contains(&n) {
-                        to_remesh.push(n);
-                    }
-                }
-            }
-        }
-        for n in to_remesh {
-            self.queue_column(n);
+        for d in &dirty {
+            self.queue_fluid_dirty(d);
         }
         dirty.len()
+    }
+
+    /// Encola las secciones a re-meshear por un cambio de fluido. La geometria de
+    /// una seccion lee las celdas vecinas en los 6 ejes, asi que se encola la
+    /// seccion y las de arriba/abajo; si el cambio toco un borde X/Z del chunk,
+    /// tambien las secciones correspondientes de la(s) columna(s) vecina(s).
+    fn queue_fluid_dirty(&mut self, d: &FluidDirty) {
+        let sections = vertical_neighbor_sections(d.section);
+        for &s in &sections {
+            self.queue_section(d.pos, s);
+        }
+        let mut cols: Vec<ChunkPos> = Vec::new();
+        if d.edge_x {
+            cols.push(ChunkPos::new(d.pos.x - 1, d.pos.z));
+            cols.push(ChunkPos::new(d.pos.x + 1, d.pos.z));
+        }
+        if d.edge_z {
+            cols.push(ChunkPos::new(d.pos.x, d.pos.z - 1));
+            cols.push(ChunkPos::new(d.pos.x, d.pos.z + 1));
+        }
+        if d.edge_x && d.edge_z {
+            cols.push(ChunkPos::new(d.pos.x - 1, d.pos.z - 1));
+            cols.push(ChunkPos::new(d.pos.x + 1, d.pos.z + 1));
+            cols.push(ChunkPos::new(d.pos.x - 1, d.pos.z + 1));
+            cols.push(ChunkPos::new(d.pos.x + 1, d.pos.z - 1));
+        }
+        for c in cols {
+            for &s in &sections {
+                self.queue_section(c, s);
+            }
+        }
     }
 
     /// Aplica **muchos** cambios de bloque y regenera las mallas afectadas una
@@ -903,6 +940,16 @@ impl Renderer {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn las_secciones_vecinas_verticales_no_se_salen_del_rango() {
+        assert_eq!(vertical_neighbor_sections(0), vec![0, 1]);
+        assert_eq!(vertical_neighbor_sections(5), vec![4, 5, 6]);
+        assert_eq!(
+            vertical_neighbor_sections(SECTION_COUNT - 1),
+            vec![SECTION_COUNT - 2, SECTION_COUNT - 1]
+        );
+    }
 
     #[test]
     fn columnas_a_remeshear_son_las_vecinas_cargadas() {

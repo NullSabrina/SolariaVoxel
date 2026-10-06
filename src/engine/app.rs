@@ -85,6 +85,8 @@ pub struct App {
     day_cycle: DayCycle,
     /// Acumulador para el tick de agua (10 Hz), separado de la fisica y el render.
     water_timer: f32,
+    /// Presupuesto del tick de fluidos (celdas y ms). Configurable por entorno.
+    fluid_budget: crate::world::FluidBudget,
     /// Modo demo (`SOLARIA_DEMO`): congela la camara y elige la escena de la
     /// captura. La fisica y el resaltado se desactivan para que la vista no se
     /// desplace antes de la foto.
@@ -137,10 +139,6 @@ const UI_SCALE: f32 = 2.0;
 /// Periodo del tick de **agua**, en segundos (10 Hz). Va aparte de la fisica y
 /// del render: el agua fluye mas despacio y cuesta menos por frame.
 const WATER_PERIOD: f32 = 0.1;
-
-/// Celdas de agua procesadas por tick. Si hay mas, se reparten entre ticks: el
-/// agua fluye mas lento pero el juego no se congela.
-const WATER_BUDGET: usize = 8192;
 
 /// Periodo del **autoguardado** en segundo plano (segundos). El mundo se guarda
 /// sin bloquear el render.
@@ -217,7 +215,7 @@ impl App {
             if self.water_timer >= WATER_PERIOD {
                 self.water_timer -= WATER_PERIOD;
                 if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.tick_water(WATER_BUDGET);
+                    renderer.tick_water(self.fluid_budget);
                 }
             }
 
@@ -760,6 +758,12 @@ impl ApplicationHandler for App {
         }
         self.seed = seed;
         self.world_header = header;
+        // Presupuesto de fluidos configurable por entorno.
+        self.fluid_budget = crate::world::FluidBudget::from_env();
+        println!(
+            "[world] presupuesto de fluidos: {} celdas / {:.1} ms por tick",
+            self.fluid_budget.cells, self.fluid_budget.ms
+        );
         // Barra rapida por defecto.
         // Barra rapida por defecto: los primeros `HOTBAR_SLOTS` items.
         self.hotbar = std::array::from_fn(|i| ITEMS[i]);

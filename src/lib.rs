@@ -10,20 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.9.1 - Persistencia de fluidos
+//! ## Estado actual: v0.9.2 - Remeshing incremental de fluidos
 //!
-//! FASE 7 (fluidos, parte 2) de la auditoria: el agua que fluye ya no vuelve a
-//! fuente al recargar.
-//! * `FORMAT_VERSION = 5`: `ChunkRecord` guarda los **niveles de flujo** del agua
-//!   (campo `fluid`, mismo indice que los bloques, LZ4; vacio si no hay flujo).
-//! * Migrador **v4 -> v5**: un mundo anterior no traia fluido, asi que todo
-//!   `Water` se interpreta como **fuente**, exactamente su comportamiento previo
-//!   (cero perdida). `ChunkRecordV4`/`WorldSaveV4` son el espejo posicional.
-//! * `apply_record` restaura bloques y niveles; el flujo sobrevive tambien a
-//!   descargar y recargar una columna en la misma sesion.
+//! FASE 7 (fluidos, parte 3) de la auditoria:
+//! * `World::tick_water` devuelve **secciones** sucias (`FluidDirty`), con marcas
+//!   de borde de chunk, en vez de columnas enteras. El renderer re-meshea solo
+//!   esas secciones (mas las verticales colindantes y, si toca un borde, la
+//!   columna vecina): antes re-mesheaba el anillo 3x3 completo (24 secciones por
+//!   columna).
+//! * Presupuesto configurable `FluidBudget { cells, ms }`
+//!   (`SOLARIA_FLUID_BUDGET_CELLS`, `SOLARIA_FLUID_BUDGET_MS`).
 //!
-//! Hereda de v0.9.0 (fluido local por columna). Siguiente (auditoria): remeshing
-//! incremental de fluidos, transparencia ordenada, registry, memoria.
+//! Hereda de v0.9.1 (persistencia de fluidos), v0.9.0 (fluido local). Siguiente
+//! (auditoria): transparencia ordenada, registry, memoria.
 //!
 //! ## Organizacion del codigo
 //!
