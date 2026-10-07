@@ -86,6 +86,13 @@ El `terrain_generate_column` queda practicamente igual (~6.1 ms/columna): la
 vecinos por cada candidato de decoracion que hacia el antiguo `slope_ok`. El
 ruido 2D sigue siendo O(256) por columna (no O(256 x altura)).
 
+### FASE 4 — landforms
+
+El perfil de landform anade **un ruido 2D por muestra** (dentro de la rejilla), mas
+una transformacion `terrace`. `terrain_generate_column` queda igual (~5.9 ms/
+columna): el coste lo domina la generacion de columnas (cuevas FASE 6), no el
+perfil.
+
 ## Memoria (FASE 10)
 
 `World::memory_report()` con radio 4 (**81 columnas**), mundo de terreno:

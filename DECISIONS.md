@@ -2674,6 +2674,38 @@ Una columna solo recibe un tipo de decoracion (arbol **o** roca).
 decoracion); clippy limpio. Generacion practicamente igual (~6.1 ms/columna, la
 rejilla compensa el re-muestreo). `FORMAT_VERSION` intacto (5).
 
+## v0.23.0 — Worldgen FASE 4: landforms (mesetas, terrazas, acantilados)
+
+### 2026-10-07 — Perfiles de relieve por region
+
+**Decision.** Anadir un **perfil de landform** por region que transforma la
+altura base:
+- `LandformProfile::{Rolling, Plateau, Terraced, Cliffs}` elegido por contexto
+  (`mountain_mask`, `humidity`, `continentalness` y un ruido de region propio).
+- Transformacion `terrace(h, step, sharpness)`: cuantiza la altura en escalones
+  con risers mas o menos verticales. `Plateau` (step 8, blando) da cimas planas
+  en zonas secas y elevadas; `Terraced` (step 4) da terrazas geologicas
+  dispersas; `Cliffs` (step 14, muy abrupto) da acantilados en las montanas.
+- El perfil se aplica **solo en tierra**, con transicion suave en la costa
+  (`landness x smoothstep(mar, mar+6, h)`), para no aterrazar el mar.
+
+**Motivo.** El audit pide landforms (FASE 4): el relieve era la misma formula en
+todo el mundo; ahora hay mesetas, terrazas y acantilados por region.
+
+**Alternativas descartadas.** Overhangs/voladizos 3D (requieren cavar la
+superficie con ruido 3D; mas coste y riesgo visual: se descartan por ahora).
+Terrazas por bioma directo (el contexto geografico da mejores regiones).
+
+**Tradeoffs.** Cambia el relieve en todo el mundo (`GENERATOR_VERSION -> 14`).
+Cambiar los `step` cambia mucho el aspecto; quedan como parametros de config.
+Sin overhangs (limitacion honesta).
+
+**Consecuencia.** `worldgen/{config,math,mod}.rs` (campos de config, `terrace`,
+`LandformProfile`), `world/save.rs` (`GENERATOR_VERSION -> 14`).
+`WORLDGEN_CONFIG_VERSION -> 2`. 258 tests (3 nuevos: `terrace` plano/monotono,
+seleccion de landform, mesetas aplanan); clippy limpio. Preview `height` con
+anillos de terraza; generacion dentro del mismo orden. `FORMAT_VERSION` = 5.
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

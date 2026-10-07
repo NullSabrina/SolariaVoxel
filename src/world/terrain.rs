@@ -621,12 +621,15 @@ mod tests {
         let _ = g.generate_column(0, 0);
         let calls = g.noise_calls();
         println!("ruido 2D en una columna: {calls} evaluaciones");
-        // Con el worldgen por etapas (geografia + clima + celda) son ~15 por
-        // celda (x,z); el invariante es O(256), no O(256 * altura). Si el ruido
+        // Con el worldgen por etapas (geografia + clima + celda + landform) son
+        // ~20 por muestra, y la rejilla con padding muestrea (16+2)^2 = 324
+        // celdas. El invariante es O(muestras), NO O(256 * altura): si el ruido
         // se llamara dentro del bucle `for y` serian ~18000+.
+        let grid = (CHUNK_SIZE as u32 + 2) * (CHUNK_SIZE as u32 + 2);
         assert!(
-            calls < CHUNK_SIZE as u32 * CHUNK_SIZE as u32 * 24,
-            "demasiadas evaluaciones 2D: {calls}"
+            calls < grid * 24,
+            "demasiadas evaluaciones 2D: {calls} (limite {})",
+            grid * 24
         );
     }
 

@@ -51,6 +51,21 @@ pub fn remap_clamped(x: f32, a: f32, b: f32, c: f32, d: f32) -> f32 {
     lerp(c, d, saturate(inverse_lerp(a, b, x)))
 }
 
+/// Perfil de **terrazas/mesetas** (FASE 4): cuantiza `h` a escalones de `step`,
+/// con la transicion alrededor del medio controlada por `sharpness` (menor =
+/// risers mas verticales, treads mas planos). `sharpness` en `(0, 0.5)`.
+#[inline]
+pub fn terrace(h: f32, step: f32, sharpness: f32) -> f32 {
+    if step <= 0.0 {
+        return h;
+    }
+    let q = h / step;
+    let base = q.floor();
+    let frac = q - base;
+    let s = smoothstep(0.5 - sharpness, 0.5 + sharpness, frac);
+    (base + s) * step
+}
+
 /// Interpola una **curva** (spline) definida por puntos `(x, y)` ordenados por
 /// `x` y estrictamente creciente. Fuera del rango, extrapola las pendientes de
 /// los extremos. Es la herramienta para relaciones `continentalness -> altura`
@@ -100,6 +115,24 @@ mod tests {
         assert!((remap(15.0, 10.0, 20.0, 0.0, 100.0) - 50.0).abs() < 1e-4);
         // remap_clamped recorta fuera de rango.
         assert_eq!(remap_clamped(30.0, 10.0, 20.0, 0.0, 100.0), 100.0);
+    }
+
+    #[test]
+    fn la_terraza_crea_escalones_planos_y_es_monotona() {
+        let step = 4.0;
+        // Treads: lejos del medio caen exactamente en multiplos de `step`.
+        assert!((terrace(4.1, step, 0.1) - 4.0).abs() < 1e-4);
+        assert!((terrace(7.9, step, 0.1) - 8.0).abs() < 1e-4);
+        // El medio del riser da el punto medio.
+        assert!((terrace(6.0, step, 0.1) - 6.0).abs() < 1e-4);
+        // Monotona no decreciente.
+        let mut prev = f32::NEG_INFINITY;
+        for i in 0..400 {
+            let h = i as f32 * 0.25;
+            let t = terrace(h, step, 0.1);
+            assert!(t >= prev - 1e-4, "no monotona en h={h}");
+            prev = t;
+        }
     }
 
     #[test]

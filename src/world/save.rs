@@ -73,7 +73,9 @@ pub const FORMAT_VERSION: u32 = 5;
 /// * v13: **decoracion por reglas** (FASE 7): arboles con claros (clusters) y
 ///   rocas en laderas altas, con reglas de bioma/altura/humedad/pendiente/rio y
 ///   rejilla de muestras con padding.
-pub const GENERATOR_VERSION: u32 = 13;
+/// * v14: **landforms** (FASE 4): perfiles de relieve por region (mesetas de
+///   cima plana, terrazas geologicas y acantilados) aplicados a la altura.
+pub const GENERATOR_VERSION: u32 = 14;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";

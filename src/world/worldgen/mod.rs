@@ -85,6 +85,51 @@ impl LandClass {
     }
 }
 
+/// Perfil de relieve de una region (FASE 4). Se aplica a la altura base para dar
+/// **mesetas** de cima plana, **terrazas** geologicas o **acantilados**.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LandformProfile {
+    /// Relieve suave (sin cambios).
+    Rolling,
+    /// Mesetas de cima plana (zonas secas y elevadas): escalones grandes.
+    Plateau,
+    /// Terrazas geologicas: escalones mas finos y regulares.
+    Terraced,
+    /// Acantilados: escalones muy grandes con risers casi verticales.
+    Cliffs,
+}
+
+impl LandformProfile {
+    /// Decide el perfil a partir de montana, clima y un ruido de region.
+    pub fn select(
+        continentalness: f32,
+        mountain_mask: f32,
+        humidity: f32,
+        landform_noise: f32,
+        cfg: &WorldGenConfig,
+    ) -> Self {
+        if mountain_mask > 0.55 {
+            LandformProfile::Cliffs
+        } else if humidity < 0.40 && continentalness > 0.28 {
+            LandformProfile::Plateau
+        } else if landform_noise > cfg.terrace_region {
+            LandformProfile::Terraced
+        } else {
+            LandformProfile::Rolling
+        }
+    }
+
+    /// Aplica el perfil a una altura (en bloques).
+    pub fn apply(self, h: f32, cfg: &WorldGenConfig) -> f32 {
+        match self {
+            LandformProfile::Rolling => h,
+            LandformProfile::Plateau => math::terrace(h, cfg.plateau_step, 0.10),
+            LandformProfile::Terraced => math::terrace(h, cfg.terrace_step, 0.14),
+            LandformProfile::Cliffs => math::terrace(h, cfg.cliff_step, 0.06),
+        }
+    }
+}
+
 /// Datos geograficos de un punto, **antes** de convertirlos a bloques.
 #[derive(Clone, Copy, Debug)]
 pub struct TerrainSample {
@@ -172,6 +217,8 @@ pub struct WorldGen {
     river_warp: Perlin,
     river_width: Perlin,
     lake_basin: Perlin,
+    /// Landforms (FASE 4): reparte mesetas/terrazas/acantilados por region.
+    landform: Perlin,
     /// Contador de evaluaciones de ruido (tests de coste). Atomico para seguir
     /// siendo `Send + Sync`.
     noise_calls: AtomicU32,
@@ -221,6 +268,7 @@ impl WorldGen {
             river_warp: Perlin::new(derive(seed, 114)),
             river_width: Perlin::new(derive(seed, 115)),
             lake_basin: Perlin::new(derive(seed, 116)),
+            landform: Perlin::new(derive(seed, 117)),
             noise_calls: AtomicU32::new(0),
             config,
             seed,
@@ -352,6 +400,16 @@ impl WorldGen {
         let blend = math::smoothstep(0.15, 0.55, cell.edge);
         let temperature = math::lerp(t_local, t_cell, blend);
         let humidity = math::lerp(h_local, h_cell, blend);
+
+        // --- Landforms (FASE 4): mesetas/terrazas/acantilados ---
+        self.bump();
+        let lf = self
+            .landform
+            .get([sx * cfg.landform_scale, sz * cfg.landform_scale]) as f32;
+        let profile = LandformProfile::select(continentalness, mountain_mask, humidity, lf, cfg);
+        // Solo en tierra y por encima de la costa, con transicion suave.
+        let land_blend = landness * math::smoothstep(SEA_LEVEL as f32, SEA_LEVEL as f32 + 6.0, h);
+        h = math::lerp(h, profile.apply(h, cfg), land_blend);
 
         // Altura normalizada (0 en el mar, 1 en `altitude_top`).
         let elevation =
@@ -558,5 +616,41 @@ mod tests {
             max = max.max(s.coast_roll);
         }
         assert!(max - min > 0.3, "coast_roll poco variado: {min}..{max}");
+    }
+
+    #[test]
+    fn los_landforms_se_seleccionan_por_contexto() {
+        let cfg = WorldGenConfig::default();
+        // Montana -> acantilados.
+        assert_eq!(
+            LandformProfile::select(0.6, 0.8, 0.5, 0.0, &cfg),
+            LandformProfile::Cliffs
+        );
+        // Seco y elevado -> mesetas.
+        assert_eq!(
+            LandformProfile::select(0.5, 0.1, 0.2, 0.0, &cfg),
+            LandformProfile::Plateau
+        );
+        // Humedo con ruido de region alto -> terrazas.
+        assert_eq!(
+            LandformProfile::select(0.1, 0.0, 0.8, 0.9, &cfg),
+            LandformProfile::Terraced
+        );
+        // Resto -> suave.
+        assert_eq!(
+            LandformProfile::select(0.1, 0.0, 0.8, -0.5, &cfg),
+            LandformProfile::Rolling
+        );
+    }
+
+    #[test]
+    fn las_mesetas_aplanan_dentro_del_escalon() {
+        let cfg = WorldGenConfig::default();
+        let a = LandformProfile::Plateau.apply(96.5, &cfg);
+        let b = LandformProfile::Plateau.apply(98.0, &cfg);
+        assert!(
+            (a - b).abs() < 1e-3,
+            "la meseta deberia aplanar dentro del escalon: {a} vs {b}"
+        );
     }
 }

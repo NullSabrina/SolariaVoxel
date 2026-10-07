@@ -10,7 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.22.0 - Worldgen FASE 7: decoracion por reglas
+//! ## Estado actual: v0.23.0 - Worldgen FASE 4: landforms
+//!
+//! El relieve deja de ser el mismo en todo el mundo: un **perfil de landform**
+//! por region (`LandformProfile`: `Rolling`/`Plateau`/`Terraced`/`Cliffs`) se
+//! aplica a la altura. Mesetas de cima plana en zonas secas y elevadas, terrazas
+//! geologicas dispersas y **acantilados** en las montanas; la transformacion es
+//! una funcion `terrace(h, step, sharpness)` que cuantiza la altura en escalones.
+//! Solo actua en tierra (transicion suave en la costa).
+//!
+//! `GENERATOR_VERSION -> 14`. `WORLDGEN_CONFIG_VERSION -> 2` (nuevos parametros
+//! de landform). `FORMAT_VERSION` intacto (5). Hereda de v0.22.0.
+//!
+//! ## v0.22.0 - Worldgen FASE 7: decoracion por reglas
 //!
 //! La decoracion (arboles, rocas) pasa a un sistema de **reglas**
 //! (`worldgen/decoration.rs`): cada tipo es una `DecorationRule` con

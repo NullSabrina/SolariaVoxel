@@ -8,31 +8,29 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.22.0` — Worldgen FASE 7: decoracion por reglas
+## Estado actual: `v0.23.0` — Worldgen FASE 4: landforms
 
-La decoracion (arboles, rocas) es ahora un sistema de **reglas**
-(`worldgen/decoration.rs`):
+El relieve deja de ser uniforme: un **perfil de landform por region** se aplica
+a la altura (`LandformProfile`):
 
-- Cada tipo es una `DecorationRule` con condiciones de **bioma, altura,
-  humedad, pendiente y cercania a rio**, mas una probabilidad; anadir un tipo de
-  decoracion es anadir una fila.
-- **Clusters**: los arboles se agrupan en bosques **con claros** (ruido de
-  agrupacion de baja frecuencia); ya no es un `hash` uniforme.
-- **Rocas** (boulders) en laderas altas, en manchas.
-- La pendiente y la altura salen de una **rejilla de muestras con padding**
-  (18x18, una sola pasada), sin re-muestrear `height()` por candidato.
-- Se evitan arboles **flotantes** o en **acantilados**.
+- **Plateau** (mesetas de cima plana) en zonas secas y elevadas.
+- **Terraced** (terrazas geologicas) en las regiones que marca un ruido propio.
+- **Cliffs** (acantilados) en las montanas.
+- **Rolling** (suave) en el resto.
+- La transformacion es `terrace(h, step, sharpness)`, que cuantiza la altura en
+  escalones; solo actua en **tierra**, con transicion suave en la costa.
 
-`GENERATOR_VERSION → 13`. `FORMAT_VERSION` intacto (5).
+`GENERATOR_VERSION → 14`. `WORLDGEN_CONFIG_VERSION → 2`.
 
+- **Decoracion** (`v0.22.0`): reglas (`DecorationRule`), arboles con claros
+  (clusters) y rocas; rejilla de muestras con padding.
 - **Agua** (`v0.21.0`–`v0.21.1`): modelo de Minecraft (fuente→distancia),
   fuentes infinitas, caida; el agua **generada se asienta sola** al cargar la
   columna y el tick va a 10 Hz.
 - **Worldgen** (`v0.17`–`v0.20`): fases 1/2 (continentes, costas, cordilleras),
   3 (bioma por region celular), 5 (hidrologia: rios y lagos) y 6 (cuevas
   jerarquicas). Ver [`docs/worldgen.md`](./docs/worldgen.md).
-- **Repo** (`v0.19.1`): limpieza y orden (codigo muerto fuera, backups de arte a
-  `assets/backup/`, metadatos, licencia dual, `.gitattributes`).
+- **Repo** (`v0.19.1`): limpieza y orden.
 - **Formato de guardado** (`FORMAT_VERSION = 5`): independiente del generador,
   con migradores y test de datos del jugador.
 - **Render**: greedy meshing con face culling, pase de agua translucida
@@ -105,7 +103,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-255 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+258 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash

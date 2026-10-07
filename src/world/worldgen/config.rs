@@ -11,7 +11,7 @@
 //! parametros".
 
 /// Version de la configuracion de worldgen.
-pub const WORLDGEN_CONFIG_VERSION: u32 = 1;
+pub const WORLDGEN_CONFIG_VERSION: u32 = 2;
 
 /// Parametros de la generacion de mundo. Valores iniciales a calibrar.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,6 +88,16 @@ pub struct WorldGenConfig {
     pub lake_scale: f64,
     pub lake_threshold: f32,
     pub lake_depth: f32,
+
+    // --- Landforms (FASE 4) ---
+    /// Frecuencia del ruido que reparte los landforms por region.
+    pub landform_scale: f64,
+    /// Altura (bloques) de los escalones de meseta / terraza / acantilado.
+    pub plateau_step: f32,
+    pub terrace_step: f32,
+    pub cliff_step: f32,
+    /// Umbral del ruido de landform por encima del cual hay terrazas.
+    pub terrace_region: f32,
 }
 
 impl Default for WorldGenConfig {
@@ -139,6 +149,12 @@ impl Default for WorldGenConfig {
             lake_scale: 0.0025,
             lake_threshold: 0.62,
             lake_depth: 5.0,
+
+            landform_scale: 0.0012,
+            plateau_step: 8.0,
+            terrace_step: 4.0,
+            cliff_step: 14.0,
+            terrace_region: 0.55,
         }
     }
 }
@@ -172,6 +188,10 @@ impl WorldGenConfig {
             ("river_scale", self.river_scale as f32),
             ("river_warp_scale", self.river_warp_scale as f32),
             ("lake_scale", self.lake_scale as f32),
+            ("landform_scale", self.landform_scale as f32),
+            ("plateau_step", self.plateau_step),
+            ("terrace_step", self.terrace_step),
+            ("cliff_step", self.cliff_step),
         ] {
             if v <= 0.0 {
                 return Err(ConfigError::NotPositive(name));
@@ -185,6 +205,9 @@ impl WorldGenConfig {
         }
         if !(0.0..=1.0).contains(&self.lake_threshold) {
             return Err(ConfigError::OutOfRange("lake_threshold"));
+        }
+        if !(0.0..=1.0).contains(&self.terrace_region) {
+            return Err(ConfigError::OutOfRange("terrace_region"));
         }
         if !(0.0..=1.0).contains(&self.cell_jitter) {
             return Err(ConfigError::OutOfRange("cell_jitter"));
