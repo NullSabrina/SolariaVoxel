@@ -154,7 +154,7 @@ impl Default for WorldGenConfig {
             plateau_step: 8.0,
             terrace_step: 4.0,
             cliff_step: 14.0,
-            terrace_region: 0.55,
+            terrace_region: 0.18,
         }
     }
 }

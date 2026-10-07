@@ -53,10 +53,21 @@ Column (24 secciones de 16^3 + luz de cielo / luz de bloque)
 
 ## Herramientas
 
-Preview offline (PNG):
+Preview offline (PNG): mapas cenitales (`biome`, `height`, `continental`,
+`river`, `landform`) y slices de cuevas (`cave` horizontal a `y=30`, `cave_yz`
+vertical). Imprime metricas (oceanos, alturas p50/p95/p99, agua superficial,
+aire subterraneo, reparto de biomas y landforms).
 
 ```bash
-cargo run --release --example worldgen_preview -- <seed> <px> <bloques_por_px> <biome|height|continental|river>
+cargo run --release --example worldgen_preview -- <seed> <px> <bloques_por_px> <layer>
+cargo run --release --example worldgen_preview -- 13371 512 6 landform
+cargo run --release --example worldgen_preview -- 13371 320 4 cave
+```
+
+Galeria de semillas (mosaico de mapas de bioma de 8 seeds):
+
+```bash
+cargo run --release --example seed_gallery
 ```
 
 Escenas demo del motor: `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_RIVER`,
@@ -67,4 +78,4 @@ Escenas demo del motor: `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_RIVER`,
 - `GENERATOR_VERSION` (resultado del mundo) y `FORMAT_VERSION` (binario) son
   **independientes**. Cambiar el mundo sube `GENERATOR_VERSION`; cambiar el
   guardado sube `FORMAT_VERSION` con migrador + test.
-- Actual: `GENERATOR_VERSION = 14`, `FORMAT_VERSION = 5`.
+- Actual: `GENERATOR_VERSION = 15`, `FORMAT_VERSION = 5`.

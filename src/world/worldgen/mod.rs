@@ -108,9 +108,9 @@ impl LandformProfile {
         landform_noise: f32,
         cfg: &WorldGenConfig,
     ) -> Self {
-        if mountain_mask > 0.55 {
+        if mountain_mask > 0.15 {
             LandformProfile::Cliffs
-        } else if humidity < 0.40 && continentalness > 0.28 {
+        } else if humidity < 0.48 && continentalness > 0.15 {
             LandformProfile::Plateau
         } else if landform_noise > cfg.terrace_region {
             LandformProfile::Terraced
@@ -161,6 +161,8 @@ pub struct TerrainSample {
     pub river_proximity: f32,
     /// Nivel hasta el que llenar agua (0 = sin agua). Incluye mar, rios y lagos.
     pub surface_water: f32,
+    /// Perfil de landform aplicado a la altura (FASE 4).
+    pub landform: LandformProfile,
 }
 
 /// Deriva una semilla por campo a partir de la del mundo. No usa estado global
@@ -495,6 +497,7 @@ impl WorldGen {
             base_height: carved,
             river_proximity,
             surface_water,
+            landform: profile,
         }
     }
 }

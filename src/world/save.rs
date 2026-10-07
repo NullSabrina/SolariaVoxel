@@ -75,7 +75,10 @@ pub const FORMAT_VERSION: u32 = 5;
 ///   rejilla de muestras con padding.
 /// * v14: **landforms** (FASE 4): perfiles de relieve por region (mesetas de
 ///   cima plana, terrazas geologicas y acantilados) aplicados a la altura.
-pub const GENERATOR_VERSION: u32 = 14;
+/// * v15: **tooling** (FASE 9) + calibracion de landforms: previews de cuevas
+///   (slices), seed gallery y metricas; umbrales de landform ajustados para que
+///   mesetas/terrazas/acantilados aparezcan con una proporcion util.
+pub const GENERATOR_VERSION: u32 = 15;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";

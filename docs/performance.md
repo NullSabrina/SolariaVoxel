@@ -93,6 +93,16 @@ una transformacion `terrace`. `terrain_generate_column` queda igual (~5.9 ms/
 columna): el coste lo domina la generacion de columnas (cuevas FASE 6), no el
 perfil.
 
+### FASE 9 — tooling de worldgen
+
+Previews offline sin GPU: mapas (`biome`/`height`/`continental`/`river`/
+`landform`), slices de cuevas (`cave`, `cave_yz`) y `seed_gallery`. Las metricas
+(oceanos, alturas p50/p95/p99, agua superficial, aire subterraneo, reparto de
+biomas/landforms) se imprimen por consola. `cave_carve_at` es una consulta barata
+(una muestra de geografia + decision) que hace viables los slices sin generar
+columnas completas. Reparto de landforms calibrado en seed 13371 (1280x1280):
+Rolling ~63 %, Terraced ~24 %, Plateau ~8 %, Cliffs ~2 %.
+
 ## Memoria (FASE 10)
 
 `World::memory_report()` con radio 4 (**81 columnas**), mundo de terreno:

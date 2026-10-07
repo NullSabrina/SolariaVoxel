@@ -2706,6 +2706,41 @@ Sin overhangs (limitacion honesta).
 seleccion de landform, mesetas aplanan); clippy limpio. Preview `height` con
 anillos de terraza; generacion dentro del mismo orden. `FORMAT_VERSION` = 5.
 
+## v0.24.0 — Worldgen FASE 9: tooling y calibracion
+
+### 2026-10-07 — Previews de cuevas, seed gallery y metricas
+
+**Decision.** Completar el **tooling** de worldgen para equilibrar con datos:
+- `worldgen_preview` gana la capa `landform` (colorea el perfil de region) y
+  **slices de cuevas**: `cave` (horizontal a `y=30`, vista cenital) y `cave_yz`
+  (vertical en `x=0`, perfil Y-Z).
+- Metricas: alturas **p50/p95/p99**, agua superficial %, aire subterraneo % y
+  reparto de biomas/landforms.
+- `TerrainGenerator::cave_carve_at(x,y,z)`: consulta **barata** de cueva (una
+  muestra de geografia + decision), sin generar la columna entera: hace viables
+  los slices.
+- `examples/seed_gallery.rs`: mosaico de mapas de bioma de 8 semillas.
+- **Calibracion**: los umbrales de landform (v0.23.0) dejaban casi todo el mundo
+  en `Rolling` (98.6 %); se ajustaron (montana > 0.15, humedad < 0.48, terrazas
+  0.18) y ahora el reparto es ~60 % Rolling / ~25 % Terraced / ~10 % Plateau /
+  ~3 % Cliffs.
+
+**Motivo.** El audit pide tooling (FASE 9) para medir y ver el generador sin
+arrancar el juego; y la calibracion de landforms solo era visible con el nuevo
+preview.
+
+**Alternativas descartadas.** Generar columnas enteras para los slices (lento);
+dibujar etiquetas de seed en la galeria (requiere fuente bitmap).
+
+**Tradeoffs.** La calibracion cambia el mundo otra vez (`GENERATOR_VERSION ->
+15`). Sin etiquetas en la galeria (el orden de semillas va en consola).
+
+**Consecuencia.** `examples/{worldgen_preview,seed_gallery}.rs`,
+`world/terrain.rs` (`cave_carve_at`), `worldgen/mod.rs` (`landform` en
+`TerrainSample` + umbrales), `world/save.rs` (`GENERATOR_VERSION -> 15`). 259
+tests (nuevo: `cave_carve_at` determinista y encuentra cuevas); clippy limpio.
+Previews: `worldgen_preview_13371_{landform,cave,cave_yz}.png`, `seed_gallery.png`.
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

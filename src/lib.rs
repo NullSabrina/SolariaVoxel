@@ -10,7 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.23.0 - Worldgen FASE 4: landforms
+//! ## Estado actual: v0.24.0 - Worldgen FASE 9: tooling y calibracion
+//!
+//! Herramientas offline para **equilibrar el generador con datos**:
+//! * `worldgen_preview` gana capas `landform` (colorea el perfil de cada region)
+//!   y **slices de cuevas** (`cave` horizontal a `y=30`, `cave_yz` vertical), y
+//!   metricas nuevas (alturas p50/p95/p99, agua superficial, aire subterraneo).
+//! * `seed_gallery`: mosaico de mapas de bioma de 8 semillas en un PNG.
+//! * `TerrainGenerator::cave_carve_at` — consulta barata de cueva para previews.
+//! * Umbrales de landform **calibrados** para que mesetas/terrazas/acantilados
+//!   aparezcan con una proporcion util (antes casi todo era `Rolling`).
+//!
+//! `GENERATOR_VERSION -> 15`. `FORMAT_VERSION` intacto (5). Hereda de v0.23.0.
+//!
+//! ## v0.23.0 - Worldgen FASE 4: landforms
 //!
 //! El relieve deja de ser el mismo en todo el mundo: un **perfil de landform**
 //! por region (`LandformProfile`: `Rolling`/`Plateau`/`Terraced`/`Cliffs`) se

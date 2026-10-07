@@ -8,22 +8,24 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.23.0` — Worldgen FASE 4: landforms
+## Estado actual: `v0.24.0` — Worldgen FASE 9: tooling y calibracion
 
-El relieve deja de ser uniforme: un **perfil de landform por region** se aplica
-a la altura (`LandformProfile`):
+Herramientas offline para equilibrar el generador **con datos**:
 
-- **Plateau** (mesetas de cima plana) en zonas secas y elevadas.
-- **Terraced** (terrazas geologicas) en las regiones que marca un ruido propio.
-- **Cliffs** (acantilados) en las montanas.
-- **Rolling** (suave) en el resto.
-- La transformacion es `terrace(h, step, sharpness)`, que cuantiza la altura en
-  escalones; solo actua en **tierra**, con transicion suave en la costa.
+- `worldgen_preview` gana la capa `landform` (colorea el perfil de cada region)
+  y **slices de cuevas**: `cave` (horizontal a `y=30`) y `cave_yz` (vertical).
+- Metricas nuevas: alturas p50/p95/p99, agua superficial % y aire subterraneo %.
+- `seed_gallery`: mosaico de mapas de bioma de 8 semillas en un PNG.
+- `TerrainGenerator::cave_carve_at`: consulta barata de cueva para previews.
+- Umbrales de landform **calibrados** (antes casi todo el mundo era `Rolling`).
 
-`GENERATOR_VERSION → 14`. `WORLDGEN_CONFIG_VERSION → 2`.
+`GENERATOR_VERSION → 15`. `FORMAT_VERSION` intacto (5).
 
-- **Decoracion** (`v0.22.0`): reglas (`DecorationRule`), arboles con claros
-  (clusters) y rocas; rejilla de muestras con padding.
+- **Landforms** (`v0.23.0`, FASE 4): perfiles de relieve por region — `Plateau`
+  (mesetas), `Terraced` (terrazas), `Cliffs` (acantilados), `Rolling`; via
+  `terrace(h, step, sharpness)`. `WORLDGEN_CONFIG_VERSION → 2`.
+- **Decoracion** (`v0.22.0`, FASE 7): reglas (`DecorationRule`), arboles con
+  claros (clusters) y rocas; rejilla de muestras con padding.
 - **Agua** (`v0.21.0`–`v0.21.1`): modelo de Minecraft (fuente→distancia),
   fuentes infinitas, caida; el agua **generada se asienta sola** al cargar la
   columna y el tick va a 10 Hz.
@@ -103,7 +105,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-258 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+259 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash
@@ -114,13 +116,21 @@ cargo clippy --all-targets --all-features -- -D warnings
 ## Preview del worldgen (offline, PNG)
 
 ```bash
-cargo run --release --example worldgen_preview -- <seed> <px> <bloques_por_px> <biome|height|continental|river>
+cargo run --release --example worldgen_preview -- <seed> <px> <bloques_por_px> <layer>
 ```
 
-Ejemplo:
+`layer`: `biome`, `height`, `continental`, `river`, `landform` (mapas cenitales),
+`cave` (slice horizontal de cuevas a `y=30`) o `cave_yz` (slice vertical).
 
 ```bash
-cargo run --release --example worldgen_preview -- 13371 512 4 biome
+cargo run --release --example worldgen_preview -- 13371 512 6 landform
+cargo run --release --example worldgen_preview -- 13371 320 4 cave
+```
+
+Galeria de semillas (mosaico de mapas de bioma):
+
+```bash
+cargo run --release --example seed_gallery
 ```
 
 Capturas:

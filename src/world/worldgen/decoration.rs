@@ -225,7 +225,7 @@ fn hash01(x: i32, z: i32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::worldgen::{LandClass, TerrainSample};
+    use crate::world::worldgen::{LandClass, LandformProfile, TerrainSample};
 
     /// Muestra sintetica para probar las reglas sin generar mundo.
     fn sample_for_test(biome: Biome, humidity: f32, height: i32) -> TerrainSample {
@@ -243,6 +243,7 @@ mod tests {
             base_height: height as f32,
             river_proximity: 0.0,
             surface_water: 0.0,
+            landform: LandformProfile::Rolling,
         }
     }
 

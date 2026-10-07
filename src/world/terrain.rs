@@ -188,6 +188,23 @@ impl TerrainGenerator {
         self.worldgen.sample(world_x as f64, world_z as f64)
     }
 
+    /// ¿Se cava la celda `(x, y, z)` (cueva, seca o inundada)? Consulta **barata**
+    /// para previews/metricas: muestrea la geografia una vez y decide, sin
+    /// generar la columna entera.
+    pub fn cave_carve_at(&self, x: i32, y: i32, z: i32) -> bool {
+        if !self.has_caves(x, z) {
+            return false;
+        }
+        let s = self.worldgen.sample(x as f64, z as f64);
+        let height = (s.base_height.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT);
+        let ctx = self.caves.context(x, z, s.mountain_mask);
+        let aquifer = self.aquifer_level(x, z);
+        !matches!(
+            self.caves.carve(&ctx, x, y, z, height, aquifer),
+            Carve::None
+        )
+    }
+
     /// Altura del terreno (numero de bloques solidos) en `(x, z)`.
     ///
     /// El relieve ya **no depende del bioma** (auditoria de worldgen #20): viene
@@ -859,6 +876,24 @@ mod tests {
             }
         }
         assert!(agua_subterranea > 0, "los acuiferos no llenaron cuevas");
+    }
+
+    #[test]
+    fn cave_carve_at_es_determinista_y_encuentra_cuevas() {
+        let g = TerrainGenerator::new(13_371);
+        let mut count = 0u32;
+        for x in 0..24 {
+            for z in 0..24 {
+                for y in 6..60 {
+                    let a = g.cave_carve_at(x, y, z);
+                    assert_eq!(a, g.cave_carve_at(x, y, z), "no determinista ({x},{y},{z})");
+                    if a {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        assert!(count > 0, "cave_carve_at no encontro cuevas");
     }
 
     #[test]

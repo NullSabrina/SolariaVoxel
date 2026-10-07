@@ -1,15 +1,21 @@
-//! Preview offline del generador de mundo (auditoria de worldgen, FASE 9 PARCIAL).
+//! Preview offline del generador de mundo (auditoria de worldgen, FASE 9).
 //!
-//! Genera mapas de un area grande sin arrancar el juego ni tocar la GPU, para
-//! **equilibrar el generador con datos** en vez de a ojo. Exporta un PNG y una
-//! tabla de metricas.
+//! Genera mapas/slices de un area grande sin arrancar el juego ni tocar la GPU,
+//! para **equilibrar el generador con datos** en vez de a ojo. Exporta un PNG y
+//! una tabla de metricas.
 //!
 //! Uso:
 //! ```text
 //! cargo run --release --example worldgen_preview -- [seed] [pixels] [blocks_per_pixel] [layer]
 //! cargo run --release --example worldgen_preview -- 13371 512 4 biome
 //! ```
-//! `layer`: `biome` (por defecto, mapa logico de biomas), `height` o `continental`.
+//!
+//! `layer`:
+//! * `biome` (por defecto), `height`, `continental`, `river`, `landform` — mapa
+//!   cenital del area.
+//! * `cave` — **slice horizontal** de cuevas a `y=30` (vista cenital).
+//! * `cave_yz` — **slice vertical** de cuevas en `x=0` (perfil Y-Z).
+//!
 //! Salida en `screenshots/worldgen_preview_<seed>_<layer>.png`.
 
 use std::collections::HashMap;
@@ -17,7 +23,7 @@ use std::io::BufWriter;
 
 use solaria_voxel::world::TerrainGenerator;
 use solaria_voxel::world::terrain::{Biome, SEA_LEVEL};
-use solaria_voxel::world::worldgen::LandClass;
+use solaria_voxel::world::worldgen::{LandClass, LandformProfile};
 
 fn arg_or(args: &[String], i: usize, default: i64) -> i64 {
     args.get(i)
@@ -37,6 +43,40 @@ fn biome_color(b: Biome) -> [u8; 3] {
     }
 }
 
+fn landform_color(p: LandformProfile) -> [u8; 3] {
+    match p {
+        LandformProfile::Rolling => [110, 180, 90],
+        LandformProfile::Plateau => [205, 150, 70],
+        LandformProfile::Terraced => [235, 210, 90],
+        LandformProfile::Cliffs => [185, 70, 95],
+    }
+}
+
+fn shade(base: [u8; 3], h: usize) -> [u8; 3] {
+    let s = 0.8 + 0.4 * ((h as f32 - SEA_LEVEL as f32) / 120.0).clamp(0.0, 1.0);
+    [
+        (base[0] as f32 * s).min(255.0) as u8,
+        (base[1] as f32 * s).min(255.0) as u8,
+        (base[2] as f32 * s).min(255.0) as u8,
+    ]
+}
+
+fn put(img: &mut [u8], pixels: usize, px: usize, py: usize, c: [u8; 3]) {
+    let i = (py * pixels + px) * 4;
+    img[i] = c[0];
+    img[i + 1] = c[1];
+    img[i + 2] = c[2];
+    img[i + 3] = 255;
+}
+
+fn percentile(sorted: &[i32], p: f64) -> i32 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let idx = ((sorted.len() - 1) as f64 * p).round() as usize;
+    sorted[idx]
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let seed = arg_or(&args, 1, 13_371) as u32;
@@ -46,30 +86,70 @@ fn main() {
 
     let span = pixels as i32 * step;
     let origin = -span / 2;
-    let generator = TerrainGenerator::new(seed);
-
+    let g = TerrainGenerator::new(seed);
     let mut img = vec![0u8; pixels * pixels * 4];
+
+    println!(
+        "[preview] seed={seed} area={span}x{span} bloques ({pixels}x{pixels} px, step {step}, layer {layer})"
+    );
+
+    match layer.as_str() {
+        "cave" => render_cave_horizontal(&g, &mut img, pixels, step, origin, 30),
+        "cave_yz" => render_cave_vertical(&g, &mut img, pixels, step, origin),
+        _ => render_map(&g, &mut img, pixels, step, origin, &layer),
+    }
+
+    let path = format!("screenshots/worldgen_preview_{seed}_{layer}.png");
+    std::fs::create_dir_all("screenshots").ok();
+    let file = std::fs::File::create(&path).expect("crear PNG");
+    let mut enc = png::Encoder::new(BufWriter::new(file), pixels as u32, pixels as u32);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    let mut writer = enc.write_header().expect("cabecera PNG");
+    writer.write_image_data(&img).expect("datos PNG");
+    println!("[preview] escrito {path}");
+}
+
+/// Mapa cenital del area (bioma/altura/continental/rio/landform) + metricas.
+fn render_map(
+    g: &TerrainGenerator,
+    img: &mut [u8],
+    pixels: usize,
+    step: i32,
+    origin: i32,
+    layer: &str,
+) {
     let (mut n_ocean, mut n_land, mut n_deep) = (0u64, 0u64, 0u64);
-    let (mut h_min, mut h_max, mut h_sum) = (i32::MAX, i32::MIN, 0i64);
+    let mut n_river = 0u64;
+    let mut heights: Vec<i32> = Vec::with_capacity(pixels * pixels);
     let mut cells: std::collections::HashSet<u64> = std::collections::HashSet::new();
     let mut biome_counts: HashMap<Biome, u64> = HashMap::new();
+    let mut landform_counts: HashMap<u8, u64> = HashMap::new();
 
     for py in 0..pixels {
         for px in 0..pixels {
             let x = origin + px as i32 * step;
             let z = origin + py as i32 * step;
-            let s = generator.sample(x, z);
-            let h = generator.height(x, z);
+            let s = g.sample(x, z);
+            let h = g.height(x, z);
             cells.insert(s.cell_id);
             match s.land {
                 LandClass::DeepOcean => n_deep += 1,
                 LandClass::Ocean | LandClass::Shelf => n_ocean += 1,
                 _ => n_land += 1,
             }
-            h_min = h_min.min(h as i32);
-            h_max = h_max.max(h as i32);
-            h_sum += h as i64;
+            heights.push(h as i32);
+            if s.surface_water > s.base_height + 0.5 {
+                n_river += 1;
+            }
             *biome_counts.entry(s.biome).or_insert(0) += 1;
+            let lf_key = match s.landform {
+                LandformProfile::Rolling => 0,
+                LandformProfile::Plateau => 1,
+                LandformProfile::Terraced => 2,
+                LandformProfile::Cliffs => 3,
+            };
+            *landform_counts.entry(lf_key).or_insert(0) += 1;
 
             let color = if s.land.is_ocean() {
                 let d = ((SEA_LEVEL as f32 - h as f32) / 64.0).clamp(0.0, 1.0);
@@ -79,7 +159,7 @@ fn main() {
                     (150.0 + 90.0 * (1.0 - d)) as u8,
                 ]
             } else {
-                match layer.as_str() {
+                match layer {
                     "height" => {
                         let t = ((h as f32 - SEA_LEVEL as f32) / 120.0).clamp(0.0, 1.0);
                         if t < 0.5 {
@@ -108,65 +188,44 @@ fn main() {
                             [255, (200.0 - 140.0 * d) as u8, (180.0 - 140.0 * d) as u8]
                         }
                     }
-                    // "river": bioma sombreado + cauces y lagos en azul.
+                    "landform" => shade(landform_color(s.landform), h),
                     "river" => {
-                        let base = biome_color(s.biome);
-                        let shade =
-                            0.8 + 0.4 * ((h as f32 - SEA_LEVEL as f32) / 120.0).clamp(0.0, 1.0);
-                        let land = [
-                            base[0] as f32 * shade,
-                            base[1] as f32 * shade,
-                            base[2] as f32 * shade,
-                        ];
-                        let water = s.surface_water > s.base_height + 0.5;
-                        if water {
+                        let base = shade(biome_color(s.biome), h);
+                        if s.surface_water > s.base_height + 0.5 {
                             let t = s.river_proximity.clamp(0.0, 1.0).max(0.35);
                             [
-                                (land[0] * (1.0 - t) + 40.0 * t) as u8,
-                                (land[1] * (1.0 - t) + 110.0 * t) as u8,
-                                (land[2] * (1.0 - t) + 220.0 * t) as u8,
+                                (base[0] as f32 * (1.0 - t) + 40.0 * t) as u8,
+                                (base[1] as f32 * (1.0 - t) + 110.0 * t) as u8,
+                                (base[2] as f32 * (1.0 - t) + 220.0 * t) as u8,
                             ]
                         } else {
-                            [
-                                land[0].min(255.0) as u8,
-                                land[1].min(255.0) as u8,
-                                land[2].min(255.0) as u8,
-                            ]
+                            base
                         }
                     }
-                    // "biome": color del bioma sombreado por altura.
-                    _ => {
-                        let base = biome_color(s.biome);
-                        let shade =
-                            0.8 + 0.4 * ((h as f32 - SEA_LEVEL as f32) / 120.0).clamp(0.0, 1.0);
-                        [
-                            (base[0] as f32 * shade).min(255.0) as u8,
-                            (base[1] as f32 * shade).min(255.0) as u8,
-                            (base[2] as f32 * shade).min(255.0) as u8,
-                        ]
-                    }
+                    _ => shade(biome_color(s.biome), h),
                 }
             };
-            let i = (py * pixels + px) * 4;
-            img[i] = color[0];
-            img[i + 1] = color[1];
-            img[i + 2] = color[2];
-            img[i + 3] = 255;
+            put(img, pixels, px, py, color);
         }
     }
 
     let total = (pixels * pixels) as f64;
-    let avg = h_sum as f64 / total;
+    heights.sort_unstable();
     println!(
-        "[preview] seed={seed} area={span}x{span} bloques ({pixels}x{pixels} px, step {step}, layer {layer})"
-    );
-    println!(
-        "[preview] oceano {:.1}% (abisal {:.1}%) | tierra {:.1}%",
+        "[preview] oceano {:.1}% (abisal {:.1}%) | tierra {:.1}% | agua superficial {:.1}%",
         100.0 * (n_ocean + n_deep) as f64 / total,
         100.0 * n_deep as f64 / total,
-        100.0 * n_land as f64 / total
+        100.0 * n_land as f64 / total,
+        100.0 * n_river as f64 / total
     );
-    println!("[preview] altura min/avg/max = {h_min}/{avg:.1}/{h_max} (nivel del mar {SEA_LEVEL})");
+    println!(
+        "[preview] altura min/p50/p95/p99/max = {}/{}/{}/{}/{} (nivel del mar {SEA_LEVEL})",
+        heights[0],
+        percentile(&heights, 0.50),
+        percentile(&heights, 0.95),
+        percentile(&heights, 0.99),
+        heights[heights.len() - 1]
+    );
     println!("[preview] celdas de bioma distintas: {}", cells.len());
     let mut bioc: Vec<(&Biome, &u64)> = biome_counts.iter().collect();
     bioc.sort_by(|a, b| b.1.cmp(a.1));
@@ -175,14 +234,85 @@ fn main() {
         print!(" {b:?} {:.1}%", 100.0 * *n as f64 / total);
     }
     println!();
+    let names = ["Rolling", "Plateau", "Terraced", "Cliffs"];
+    print!("[preview] landforms:");
+    for (k, name) in names.iter().enumerate() {
+        let n = landform_counts.get(&(k as u8)).copied().unwrap_or(0);
+        print!(" {name} {:.1}%", 100.0 * n as f64 / total);
+    }
+    println!();
+}
 
-    let path = format!("screenshots/worldgen_preview_{seed}_{layer}.png");
-    std::fs::create_dir_all("screenshots").ok();
-    let file = std::fs::File::create(&path).expect("crear PNG");
-    let mut enc = png::Encoder::new(BufWriter::new(file), pixels as u32, pixels as u32);
-    enc.set_color(png::ColorType::Rgba);
-    enc.set_depth(png::BitDepth::Eight);
-    let mut writer = enc.write_header().expect("cabecera PNG");
-    writer.write_image_data(&img).expect("datos PNG");
-    println!("[preview] escrito {path}");
+/// Slice horizontal de cuevas a la altura `y` (vista cenital).
+fn render_cave_horizontal(
+    g: &TerrainGenerator,
+    img: &mut [u8],
+    pixels: usize,
+    step: i32,
+    origin: i32,
+    y: i32,
+) {
+    let mut carved = 0u64;
+    for py in 0..pixels {
+        for px in 0..pixels {
+            let x = origin + px as i32 * step;
+            let z = origin + py as i32 * step;
+            let surface = g.height(x, z) as i32;
+            let color = if y > surface {
+                [200, 220, 240] // por encima del terreno
+            } else if g.cave_carve_at(x, y, z) {
+                carved += 1;
+                [40, 170, 180] // cueva
+            } else {
+                [90, 80, 70] // roca maciza
+            };
+            put(img, pixels, px, py, color);
+        }
+    }
+    let total = (pixels * pixels) as f64;
+    println!(
+        "[preview] slice horizontal y={y}: cueva {:.2}% de las celdas del plano",
+        100.0 * carved as f64 / total
+    );
+}
+
+/// Slice vertical de cuevas en `x=0` (perfil Y-Z).
+fn render_cave_vertical(
+    g: &TerrainGenerator,
+    img: &mut [u8],
+    pixels: usize,
+    step: i32,
+    origin: i32,
+) {
+    let y_max = 200i32;
+    let x = 0;
+    let mut carved = 0u64;
+    let mut underground = 0u64;
+    for py in 0..pixels {
+        let y = (pixels - 1 - py) as i32 * y_max / (pixels.max(2) - 1) as i32;
+        for px in 0..pixels {
+            let z = origin + px as i32 * step;
+            let surface = g.height(x, z) as i32;
+            let color = if y > surface {
+                [200, 220, 240] // cielo
+            } else if g.cave_carve_at(x, y, z) {
+                carved += 1;
+                [40, 170, 180] // cueva
+            } else {
+                [90, 80, 70] // roca
+            };
+            if y <= surface {
+                underground += 1;
+            }
+            put(img, pixels, px, py, color);
+        }
+    }
+    let frac = if underground == 0 {
+        0.0
+    } else {
+        100.0 * carved as f64 / underground as f64
+    };
+    println!(
+        "[preview] slice vertical x={x}: aire subterraneo (cuevas) {frac:.2}% de {underground} celdas"
+    );
 }
