@@ -236,6 +236,15 @@ pub struct HandView {
     pub bob: f32,
 }
 
+/// Datos del **personaje** en tercera persona: la vista completa (proyeccion *
+/// vista), la matriz del modelo en el mundo y la fase de andar.
+#[derive(Clone, Copy, Debug)]
+pub struct CharacterView {
+    pub view_projection: Mat4,
+    pub world: Mat4,
+    pub walk: f32,
+}
+
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
@@ -266,6 +275,9 @@ pub struct Renderer {
     hand_item: ModelMesh,
     /// Bloque del item actual (para no reconstruir su malla sin necesidad).
     hand_item_block: Option<Block>,
+    /// Mallas de las piezas del personaje (una por hueso) y sus pivotes.
+    char_parts: Vec<ModelMesh>,
+    char_pivots: Vec<[f32; 3]>,
 
     /// El mundo en memoria.
     world: World,
@@ -368,6 +380,14 @@ impl Renderer {
             "hand.item",
             &player::held_item([0.7, 0.7, 0.7]),
         );
+        // Piezas del personaje (una malla por hueso + su pivote para animar).
+        let body = player::character();
+        let char_parts = body
+            .iter()
+            .enumerate()
+            .map(|(i, p)| ModelMesh::new(&device, &queue, &format!("char.{i}"), &p.cuboids))
+            .collect();
+        let char_pivots = body.iter().map(|p| p.pivot).collect();
 
         // Radio de vista configurable (`SOLARIA_VIEW_RADIUS`, por defecto 4).
         // La niebla termina justo en el borde del area cargada (radio * 16), asi
@@ -405,6 +425,8 @@ impl Renderer {
             hand_arm,
             hand_item,
             hand_item_block: None,
+            char_parts,
+            char_pivots,
             world,
             meshes: HashMap::new(),
             mesh_queue: VecDeque::new(),
@@ -1039,6 +1061,7 @@ impl Renderer {
         camera_pos: Vec3,
         ui_quads: &[UiQuad],
         hand: Option<HandView>,
+        character: Option<CharacterView>,
     ) {
         // Manda a los workers el meshing pendiente (con presupuesto) y recoge lo
         // terminado, subiendolo a la GPU (validando revisiones).
@@ -1084,6 +1107,14 @@ impl Renderer {
                 &(h.projection * root * player::item_transform()),
                 hand_light,
             );
+        }
+        // Personaje (tercera persona): una matriz por hueso (slots 2..).
+        if let Some(c) = &character {
+            let pose = player::character_pose(c.walk);
+            for (i, pivot) in self.char_pivots.iter().enumerate() {
+                let m = c.view_projection * c.world * player::part_matrix(*pivot, pose[i]);
+                self.model.set(&self.queue, 2 + i as u32, &m, hand_light);
+            }
         }
 
         // Frustum de la camara: descartamos las secciones fuera de la vista sin
@@ -1233,6 +1264,12 @@ impl Renderer {
             if hand.is_some() {
                 self.model.draw(&mut pass, 0, &self.hand_arm);
                 self.model.draw(&mut pass, 1, &self.hand_item);
+            }
+            // Personaje (tercera persona).
+            if character.is_some() {
+                for (i, mesh) in self.char_parts.iter().enumerate() {
+                    self.model.draw(&mut pass, 2 + i as u32, mesh);
+                }
             }
 
             // Interfaz 2D (hotbar/inventario) al final, siempre encima.

@@ -116,7 +116,13 @@ pub struct App {
     /// `bob` = fase de balanceo al andar.
     swing: f32,
     bob: f32,
+    /// Camara en **tercera persona** (F5): se ve el personaje.
+    third_person: bool,
 }
+
+/// Distancia y altura de la camara en tercera persona.
+const TP_DISTANCE: f32 = 3.6;
+const TP_HEIGHT: f32 = 0.35;
 
 /// Ruta del archivo de mundo por defecto (junto al ejecutable de trabajo).
 fn world_path() -> std::path::PathBuf {
@@ -1036,6 +1042,7 @@ impl ApplicationHandler for App {
         // queda congelada (ver `Self::demo`), asi la vista no se mueve antes de
         // la foto. El montaje vive en `engine::demo`.
         self.show_stats = std::env::var("SOLARIA_STATS").is_ok();
+        self.third_person = std::env::var("SOLARIA_THIRD").is_ok();
         self.demo = demo::is_active();
         if self.demo {
             self.day_cycle = DayCycle::new(demo::time_of_day());
@@ -1141,6 +1148,18 @@ impl ApplicationHandler for App {
                             println!(
                                 "[engine] overlay F3: {}",
                                 if self.show_stats { "ON" } else { "OFF" }
+                            );
+                        }
+                        // F5: primera/tercera persona (ver el personaje).
+                        KeyCode::F5 if event.state == ElementState::Pressed => {
+                            self.third_person = !self.third_person;
+                            println!(
+                                "[engine] camara: {}",
+                                if self.third_person {
+                                    "tercera persona"
+                                } else {
+                                    "primera persona"
+                                }
                             );
                         }
                         // 1..9: selecciona la ranura de la hotbar.
@@ -1273,21 +1292,47 @@ impl ApplicationHandler for App {
                 self.update_ms = t_update.elapsed().as_secs_f32() * 1000.0;
                 let t_render = Instant::now();
                 if let (Some(renderer), Some(camera)) =
-                    (self.renderer.as_mut(), self.camera.as_ref())
+                    (self.renderer.as_mut(), self.camera.as_mut())
                 {
                     renderer.set_environment(day_factor, sky);
+                    let player_eye = camera.position;
+                    let third = self.third_person && !self.demo;
+                    // Tercera persona: la camara se separa del jugador (el
+                    // personaje se dibuja en la posicion del jugador).
+                    if third {
+                        let f = camera.forward();
+                        camera.position = Vec3::new(
+                            player_eye.x - f.x * TP_DISTANCE,
+                            player_eye.y - f.y * TP_DISTANCE + TP_HEIGHT,
+                            player_eye.z - f.z * TP_DISTANCE,
+                        );
+                        camera.update_view();
+                    }
                     let view_projection = camera.view_projection();
                     let position = camera.position;
-                    // Mano en primera persona (no en demo): usa la proyeccion
-                    // (la mano va en espacio de vista) y las fases de animacion.
-                    let hand = (!self.demo).then(|| crate::render::HandView {
+                    let feet = Vec3::new(
+                        player_eye.x,
+                        player_eye.y - crate::player::EYE_HEIGHT,
+                        player_eye.z,
+                    );
+                    // Mano solo en primera persona (no en demo).
+                    let hand = (!self.demo && !third).then(|| crate::render::HandView {
                         projection: camera.projection(),
                         swing: self.swing,
                         bob: self.bob,
                     });
+                    // Personaje solo en tercera persona.
+                    let character = third.then(|| crate::render::CharacterView {
+                        view_projection,
+                        world: crate::scene::player::character_matrix(feet, camera.yaw_deg),
+                        walk: self.bob,
+                    });
                     renderer.set_hand_item(self.hotbar[self.hotbar_sel]);
-                    renderer.sync_streaming(position);
-                    renderer.render(&view_projection, position, &ui, hand);
+                    renderer.sync_streaming(player_eye);
+                    renderer.render(&view_projection, position, &ui, hand, character);
+                    // Restaura la camara del jugador para la fisica del proximo frame.
+                    camera.position = player_eye;
+                    camera.update_view();
                 }
                 self.render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
 

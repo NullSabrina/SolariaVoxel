@@ -2870,6 +2870,39 @@ render). 269 tests (5 de modelo/mano); clippy limpio.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Captura `v0.28.0-hand.png`.
 Siguiente: **personaje** completo (tercera persona).
 
+## v0.29.0 — Personaje y camara en tercera persona
+
+### 2026-10-07 — Humanoide con animacion de andar + F5
+
+**Decision.**
+- **Personaje** (`scene/player.rs::character`): humanoide de 1.8 (pies en `y=0`,
+  ojos en 1.62) en 6 piezas (cabeza, tronco, 2 brazos, 2 piernas), algo mas
+  detallado que Steve (pelo, ojos, cinturon y botas). La mitad derecha en `+X`.
+- **Animacion**: `character_pose(walk)` rota las piezas sobre su pivote (hombro/
+  cadera) con piernas y brazos **en oposicion**.
+- **Tercera persona**: `F5` (o `SOLARIA_THIRD=1`) separa la camara del jugador y
+  dibuja el personaje; en primera persona se dibuja la **mano** y no el cuerpo.
+- Una **malla por hueso** (`ModelMesh`) y una matriz por pieza
+  (`translate(pivote) * rot_x * translate(-pivote)`); el pipeline de modelo ya
+  usa *dynamic offset* por pieza (slots).
+
+**Motivo.** El usuario pidio "mano en primera persona **y personaje**", y verlo
+requiere **tercera persona** (no hay otras entidades).
+
+**Alternativas descartadas.** Modelar en Blockbench y cargar `.bbmodel` (el motor
+no tiene loader; los cubos en codigo son suficientes y testeables). Cambiar la
+altura del jugador (se respeta `PLAYER_HEIGHT = 1.8`).
+
+**Tradeoffs.** Color plano (sin skin). La camara en tercera no evita atravesar
+paredes (sin raycast de camara todavia). El personaje no gira la cabeza ni tiene
+animacion de golpe propia (la mano si).
+
+**Consecuencia.** `scene/player.rs` (personaje + pose + matrices),
+`render/renderer.rs` (`CharacterView`, mallas por hueso),
+`engine/app.rs` (`third_person`, `F5`, camara desplazada, `SOLARIA_THIRD`).
+272 tests (3 de personaje); clippy limpio. Captura `v0.29.0-character.png`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

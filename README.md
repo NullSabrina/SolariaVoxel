@@ -8,18 +8,19 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.28.0` — Mano en primera persona
+## Estado actual: `v0.29.0` — Personaje y camara en tercera persona
 
-Se dibuja la **mano en primera persona**: el brazo (manga azul, puño dorado y
-mano de piel) y el **bloque sostenido** de la ranura activa, con animacion de
-**golpe** (al romper/colocar) y **balanceo** al andar.
+- **Mano en primera persona** (`v0.28.0`): brazo (manga, puño, piel) + **bloque
+  sostenido**, con animacion de **golpe** (romper/colocar) y **balanceo** al andar.
+- **Personaje** (`v0.28.0`+): humanoide de 1.8 con **pelo, ojos, cinturon y
+  botas** (algo mas que Steve) y **animacion de andar** (piernas y brazos en
+  oposicion).
+- **F5** alterna primera/tercera persona: en tercera la camara se separa del
+  jugador, se dibuja el personaje y se oculta la mano.
 
-Para ello se anade un sistema de **modelos de cubos de color**
-(`render/model.rs` + `scene/player.rs`), **independiente del atlas**:
-
-- Pipeline propio (`model.wgsl`) con **dynamic offset** por pieza, **sombreado
-  por cara horneado** en la CPU y luz dia/noche.
-- Es la base del **personaje** completo (siguiente version).
+Ambos usan un sistema de **modelos de cubos de color** propio
+(`render/model.rs` + `scene/player.rs`), **independiente del atlas**: pipeline
+con **dynamic offset** por pieza, **sombreado por cara horneado** y luz dia/noche.
 
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
@@ -68,7 +69,8 @@ Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 | `W`/`A`/`S`/`D` | Andar. |
 | `Espacio` | Saltar / nadar. |
 | `F` | Alterna modo **vuelo** (`Espacio`/`Shift` sube/baja). |
-| `F3` | Alterna el **diagnostico** (estadisticas en el titulo). |
+| `F3` | Alterna el **overlay de diagnostico** en pantalla. |
+| `F5` | Alterna **primera / tercera persona** (ver el personaje). |
 | `Escape` | Cierra inventario / libera el raton; si ya esta libre, cierra y guarda. |
 
 ## Variables de entorno
@@ -84,7 +86,8 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_CAVE` | Demo de cuevas. |
 | `SOLARIA_CRAFT` | Demo de crafteo. |
 | `SOLARIA_COLLIDE` | Demo de colision. |
-| `SOLARIA_STATS` | Muestra estadisticas (draw calls, triangulos, memoria). |
+| `SOLARIA_STATS` | Muestra el overlay de diagnostico al arrancar (`F3`). |
+| `SOLARIA_THIRD` | Arranca en tercera persona (`F5`). |
 | `SOLARIA_VIEW_RADIUS` | Radio de vista en columnas (niebla y culling atados). |
 | `SOLARIA_FLUID_BUDGET_CELLS` | Celdas de fluido simuladas por tick. |
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
@@ -102,7 +105,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-269 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+272 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash

@@ -10,7 +10,18 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.28.0 - Mano en primera persona (sistema de modelos)
+//! ## Estado actual: v0.29.0 - Personaje y camara en tercera persona
+//!
+//! Se anade el **personaje** completo (humanoide de 1.8, algo mas detallado que
+//! Steve: pelo, ojos, cinturon y botas) con **animacion de andar** (piernas y
+//! brazos en oposicion). La tecla **F5** alterna primera/tercera persona; en
+//! tercera la camara se separa del jugador y se dibuja el personaje, y la mano
+//! se oculta. Reutiliza el sistema de modelos de cubos de v0.28.0 (una malla por
+//! hueso, matriz por pivote).
+//!
+//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Hereda de v0.28.0.
+//!
+//! ## v0.28.0 - Mano en primera persona (sistema de modelos)
 //!
 //! Se dibuja la **mano en primera persona**: el brazo (manga + puño + piel) y el
 //! **bloque sostenido** en la mano, con animacion de **golpe** (al romper/colocar)

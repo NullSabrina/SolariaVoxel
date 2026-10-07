@@ -21,6 +21,11 @@ pub struct Cuboid {
 const SKIN: [f32; 3] = [0.92, 0.74, 0.60];
 const SLEEVE: [f32; 3] = [0.22, 0.46, 0.74];
 const TRIM: [f32; 3] = [0.86, 0.78, 0.32];
+const HAIR: [f32; 3] = [0.28, 0.18, 0.10];
+const PANTS: [f32; 3] = [0.26, 0.24, 0.30];
+const SHOES: [f32; 3] = [0.16, 0.13, 0.11];
+const EYE: [f32; 3] = [0.10, 0.10, 0.14];
+const BELT: [f32; 3] = [0.42, 0.28, 0.14];
 
 /// Cubos del **brazo derecho** en primera persona (manga, puño y mano de piel).
 ///
@@ -108,6 +113,179 @@ pub fn item_transform() -> Mat4 {
     Mat4::translation(Vec3::new(0.0, -0.78, -0.02)) * Mat4::rotation_x(0.6) * Mat4::rotation_z(0.5)
 }
 
+// ---------------------------------------------------------------------------
+// Personaje (tercera persona)
+// ---------------------------------------------------------------------------
+
+/// Una pieza del personaje: sus cubos (en espacio del modelo, pies en `y=0`) y su
+/// **pivote** (articulacion), alrededor del cual se rota al animar.
+pub struct BodyPart {
+    pub cuboids: Vec<Cuboid>,
+    pub pivot: [f32; 3],
+}
+
+/// Orden estable de las piezas de [`character`] (indice -> hueso).
+pub const PART_HEAD: usize = 0;
+pub const PART_TORSO: usize = 1;
+pub const PART_ARM_R: usize = 2;
+pub const PART_ARM_L: usize = 3;
+pub const PART_LEG_R: usize = 4;
+pub const PART_LEG_L: usize = 5;
+
+/// El personaje: humanoide de 1.8 de alto (pies en `y=0`, ojos en `1.62`), un
+/// poco mas detallado que Steve (pelo, ojos, cinturon, puños y botas).
+///
+/// La mitad derecha del modelo esta en **+X** (el modelo mira a `-Z`).
+pub fn character() -> Vec<BodyPart> {
+    let leg = 0.675; // alto de pierna
+    let torso_h = 0.675;
+    let hip = leg;
+    let shoulder = leg + torso_h;
+    let head_h = 0.45;
+    let head_top = shoulder + head_h;
+    let (hw, hd) = (0.225, 0.25); // media anchura / semi-fondo de torso
+    let arm = 0.225; // lado de brazo/pierna
+    vec![
+        // Cabeza (+ pelo + ojos).
+        BodyPart {
+            cuboids: vec![
+                Cuboid {
+                    from: [-hw + 0.0, shoulder, -hd],
+                    to: [hw, head_top, hd],
+                    color: SKIN,
+                },
+                // Pelo (tapa y nuca).
+                Cuboid {
+                    from: [-hw - 0.01, head_top - 0.10, -hd - 0.01],
+                    to: [hw + 0.01, head_top + 0.01, hd + 0.01],
+                    color: HAIR,
+                },
+                Cuboid {
+                    from: [-hw - 0.01, shoulder + 0.05, hd - 0.02],
+                    to: [hw + 0.01, head_top, hd + 0.02],
+                    color: HAIR,
+                },
+                // Ojos.
+                Cuboid {
+                    from: [-0.14, shoulder + 0.18, -hd - 0.015],
+                    to: [-0.05, shoulder + 0.27, -hd],
+                    color: EYE,
+                },
+                Cuboid {
+                    from: [0.05, shoulder + 0.18, -hd - 0.015],
+                    to: [0.14, shoulder + 0.27, -hd],
+                    color: EYE,
+                },
+            ],
+            pivot: [0.0, shoulder, 0.0],
+        },
+        // Torso + cinturon.
+        BodyPart {
+            cuboids: vec![
+                Cuboid {
+                    from: [-hw, hip, -hd],
+                    to: [hw, shoulder, hd],
+                    color: SLEEVE,
+                },
+                Cuboid {
+                    from: [-hw - 0.005, hip, -hd - 0.005],
+                    to: [hw + 0.005, hip + 0.09, hd + 0.005],
+                    color: BELT,
+                },
+            ],
+            pivot: [0.0, hip, 0.0],
+        },
+        // Brazo derecho (+X): manga y mano.
+        BodyPart {
+            cuboids: vec![
+                Cuboid {
+                    from: [hw, shoulder - 0.42, -arm / 2.0],
+                    to: [hw + arm, shoulder, arm / 2.0],
+                    color: SLEEVE,
+                },
+                Cuboid {
+                    from: [hw + 0.005, hip + 0.02, -arm / 2.0 + 0.005],
+                    to: [hw + arm - 0.005, shoulder - 0.42, arm / 2.0 - 0.005],
+                    color: SKIN,
+                },
+            ],
+            pivot: [hw, shoulder, 0.0],
+        },
+        // Brazo izquierdo (-X).
+        BodyPart {
+            cuboids: vec![
+                Cuboid {
+                    from: [-hw - arm, shoulder - 0.42, -arm / 2.0],
+                    to: [-hw, shoulder, arm / 2.0],
+                    color: SLEEVE,
+                },
+                Cuboid {
+                    from: [-hw - arm + 0.005, hip + 0.02, -arm / 2.0 + 0.005],
+                    to: [-hw - 0.005, shoulder - 0.42, arm / 2.0 - 0.005],
+                    color: SKIN,
+                },
+            ],
+            pivot: [-hw, shoulder, 0.0],
+        },
+        // Pierna derecha (+X): pantalon y bota.
+        BodyPart {
+            cuboids: vec![
+                Cuboid {
+                    from: [0.0, 0.12, -arm / 2.0],
+                    to: [arm, leg, arm / 2.0],
+                    color: PANTS,
+                },
+                Cuboid {
+                    from: [-0.005, 0.0, -arm / 2.0 - 0.005],
+                    to: [arm + 0.005, 0.12, arm / 2.0 + 0.005],
+                    color: SHOES,
+                },
+            ],
+            pivot: [arm / 2.0, leg, 0.0],
+        },
+        // Pierna izquierda (-X).
+        BodyPart {
+            cuboids: vec![
+                Cuboid {
+                    from: [-arm, 0.12, -arm / 2.0],
+                    to: [0.0, leg, arm / 2.0],
+                    color: PANTS,
+                },
+                Cuboid {
+                    from: [-arm - 0.005, 0.0, -arm / 2.0 - 0.005],
+                    to: [0.005, 0.12, arm / 2.0 + 0.005],
+                    color: SHOES,
+                },
+            ],
+            pivot: [-arm / 2.0, leg, 0.0],
+        },
+    ]
+}
+
+/// Rotaciones (grados, eje X) de cada pieza para la fase de andar `walk`
+/// (radianes). Piernas y brazos en oposicion (como al caminar).
+pub fn character_pose(walk: f32) -> [f32; 6] {
+    let s = walk.sin() * 42.0;
+    let mut a = [0.0f32; 6];
+    a[PART_ARM_R] = -s;
+    a[PART_ARM_L] = s;
+    a[PART_LEG_R] = s;
+    a[PART_LEG_L] = -s;
+    a[PART_HEAD] = (walk * 0.5).sin() * 2.0;
+    a
+}
+
+/// Matriz del personaje en el mundo: pies en `feet`, mirando segun `yaw`.
+pub fn character_matrix(feet: Vec3, yaw_deg: f32) -> Mat4 {
+    Mat4::translation(feet) * Mat4::rotation_y(-yaw_deg.to_radians())
+}
+
+/// Matriz de una pieza: rotacion sobre su pivote (eje X).
+pub fn part_matrix(pivot: [f32; 3], angle_x_deg: f32) -> Mat4 {
+    let p = Vec3::new(pivot[0], pivot[1], pivot[2]);
+    Mat4::translation(p) * Mat4::rotation_x(angle_x_deg.to_radians()) * Mat4::translation(-p)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +308,35 @@ mod tests {
         let idle = hand_transform(0.0, 0.0).transform_point(Vec3::ZERO);
         let hit = hand_transform(1.0, 0.0).transform_point(Vec3::ZERO);
         assert!(hit.y < idle.y, "el golpe deberia bajar la mano");
+    }
+
+    #[test]
+    fn el_personaje_tiene_seis_piezas() {
+        assert_eq!(character().len(), 6);
+    }
+
+    #[test]
+    fn las_piernas_y_brazos_van_en_oposicion() {
+        let p = character_pose(1.0);
+        assert!(
+            (p[PART_LEG_R] + p[PART_LEG_L]).abs() < 1e-4,
+            "piernas iguales"
+        );
+        // El brazo derecho acompaña a la pierna izquierda (signo opuesto).
+        assert!((p[PART_ARM_R] - p[PART_LEG_L]).abs() < 1e-4, "brazo/pierna");
+    }
+
+    #[test]
+    fn el_personaje_es_simetrico_en_x() {
+        let body = character();
+        for part in &body {
+            for c in &part.cuboids {
+                assert!(c.from[0] < c.to[0] && c.from[1] < c.to[1] && c.from[2] < c.to[2]);
+            }
+        }
+        // El tronco esta centrado.
+        let torso = &body[PART_TORSO].cuboids[0];
+        assert!((torso.from[0] + torso.to[0]).abs() < 1e-6);
     }
 
     #[test]
