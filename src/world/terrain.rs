@@ -246,8 +246,9 @@ impl TerrainGenerator {
                 // Cerca del borde de una celda se mezclan materiales con el vecino.
                 let border = geo.cell_edge < 0.35;
                 let has_caves = self.has_caves(wx, wz);
-                // Cerca del mar la superficie es arena (playa/fondo marino).
-                let coastal = height <= (SEA_LEVEL as usize) + 1;
+                // Superficie "costera": playa/fondo marino o **lecho de rio**
+                // (arena/grava) donde el cauce es claro.
+                let coastal = height <= (SEA_LEVEL as usize) + 1 || geo.river_proximity > 0.45;
 
                 for y in 0..height {
                     // Cuevas y acuiferos antes de colocar el terreno.
@@ -299,10 +300,11 @@ impl TerrainGenerator {
                     column.set(x, y, z, block);
                 }
 
-                // Oceano/lago: rellena de agua el aire entre la superficie y el
-                // nivel del mar.
-                if height < SEA_LEVEL as usize {
-                    for y in height..SEA_LEVEL as usize {
+                // Oceano / rio / lago: rellena de agua el aire entre la superficie
+                // (ya cavada) y el nivel de agua de la muestra.
+                let water_top = geo.surface_water.max(0.0).round() as usize;
+                if water_top > height {
+                    for y in height..water_top.min(WORLD_HEIGHT) {
                         if column.get(x, y, z) == Block::Air {
                             column.set(x, y, z, Block::Water);
                         }
@@ -735,6 +737,30 @@ mod tests {
             }
         }
         assert!(fondo_ok, "no se encontro fondo marino");
+    }
+
+    #[test]
+    fn un_cauce_de_rio_genera_agua_sobre_el_lecho() {
+        // Busca un punto claramente dentro de un cauce con agua y comprueba que
+        // la columna tiene bloques de agua (el rio no queda "seco").
+        let g = TerrainGenerator::new(13_371);
+        let mut found = false;
+        'find: for x in (-3000..3000).step_by(23) {
+            for z in (-3000..3000).step_by(41) {
+                let s = g.sample(x, z);
+                if s.river_proximity > 0.85 && s.surface_water > s.base_height + 1.0 {
+                    let ox = x - x.rem_euclid(CHUNK_SIZE as i32);
+                    let oz = z - z.rem_euclid(CHUNK_SIZE as i32);
+                    let column = g.generate_column(ox, oz);
+                    let (lx, lz) = ((x - ox) as usize, (z - oz) as usize);
+                    let agua = (0..WORLD_HEIGHT).any(|y| column.get(lx, y, lz) == Block::Water);
+                    assert!(agua, "cauce sin agua en ({x},{z})");
+                    found = true;
+                    break 'find;
+                }
+            }
+        }
+        assert!(found, "no se encontro ningun cauce claro");
     }
 
     #[test]

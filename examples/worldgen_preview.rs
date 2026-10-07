@@ -108,6 +108,32 @@ fn main() {
                             [255, (200.0 - 140.0 * d) as u8, (180.0 - 140.0 * d) as u8]
                         }
                     }
+                    // "river": bioma sombreado + cauces y lagos en azul.
+                    "river" => {
+                        let base = biome_color(s.biome);
+                        let shade =
+                            0.8 + 0.4 * ((h as f32 - SEA_LEVEL as f32) / 120.0).clamp(0.0, 1.0);
+                        let land = [
+                            base[0] as f32 * shade,
+                            base[1] as f32 * shade,
+                            base[2] as f32 * shade,
+                        ];
+                        let water = s.surface_water > s.base_height + 0.5;
+                        if water {
+                            let t = s.river_proximity.clamp(0.0, 1.0).max(0.35);
+                            [
+                                (land[0] * (1.0 - t) + 40.0 * t) as u8,
+                                (land[1] * (1.0 - t) + 110.0 * t) as u8,
+                                (land[2] * (1.0 - t) + 220.0 * t) as u8,
+                            ]
+                        } else {
+                            [
+                                land[0].min(255.0) as u8,
+                                land[1].min(255.0) as u8,
+                                land[2].min(255.0) as u8,
+                            ]
+                        }
+                    }
                     // "biome": color del bioma sombreado por altura.
                     _ => {
                         let base = biome_color(s.biome);

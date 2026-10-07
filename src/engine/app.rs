@@ -903,6 +903,8 @@ impl ApplicationHandler for App {
             if let (Some(renderer), Some(camera)) = (self.renderer.as_mut(), self.camera.as_mut()) {
                 if demo::ocean_active() {
                     demo::build_ocean_overview(renderer, camera);
+                } else if demo::river_active() {
+                    demo::build_river(renderer, camera);
                 } else if demo::biomes_active() {
                     demo::build_overview(camera);
                 } else if demo::collide_active() {

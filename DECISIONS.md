@@ -2464,6 +2464,45 @@ reparto; `layer` biome/height/continental), `save.rs` (v10). 241 tests; clippy
 limpio. Preview: 7 biomas con regiones coherentes; verificado en juego caminando
 varios chunks sin crash. Siguiente: FASE 5 hidrologia/rios.
 
+### 2026-10-05 (v0.19.0) — Worldgen FASE 5: hidrologia (rios y lagos)
+
+**Contexto.** Tras continentes/biomas, faltaba la capa que convierte relieve en
+agua. La auditoria pide rios estructurales (cauces, anchos variables) y no
+`noise > umbral => river`.
+
+**Decision.** Hidrologia analitica y determinista dentro de `WorldGen::sample`:
+- La **linea del rio** es una **cresta** (`ridge = 1 - |river_noise|`) deformada
+  por su propio **domain warping** → trazados sinuosos y alargados.
+- **Caudal** `flow = 0.35·humedad + 0.65·ruido_ancho`; de ahi el ancho y la
+  profundidad (`lerp(min,max,flow)`).
+- **Cauce**: `river_proximity = smoothstep(1-width, 1, ridge) · landness`;
+  `cut = proximity^power · depth`; el terreno baja `cut` y el material pasa a
+  arena/grava donde el cauce es claro.
+- **Nivel de agua** `h - depth·0.30` (contenido bajo el borde); cerca del mar,
+  `max(agua, sea)`; cualquier columna bajo el mar se inunda a mar.
+- **Lagos**: `valle · humedad · cuenca` sobre un umbral → depresion rellena.
+- `TerrainSample` gana `river_proximity` y `surface_water`; `generate_column`
+  rellena agua hasta `surface_water` (mar/rio/lago).
+
+**Alternativas descartadas.**
+- Rejilla hidrologica + routing de caudal (niveles A-D del audit): objetivo
+  "completo" (afluentes/orden), requiere simulacion por region y cache; se
+  pospone. La version analitica da rios creibles y baratos.
+- `Perlin` simple sin cresta: lineas redondeadas sin cauce.
+- Meter el agua de mundo al automata de fluidos: el audit pide agua de worldgen
+  **estable**; aqui nace fuera del active set (solo las ediciones lo alimentan),
+  asi que un rio quieto cuesta 0 CPU.
+
+**Tradeoffs.** Sin afluentes/orden de rio ni lagos oxbow (PARTIAL). En pendientes
+el nivel de agua puede variar por columna, pero queda contenido por las paredes
+solidas y no se simula hasta que el jugador lo toca. `GENERATOR_VERSION -> 11`.
+
+**Consecuencia.** `worldgen/{mod,config}.rs`, `world/terrain.rs` (relleno por
+`surface_water`, lecho de arena), `engine/demo.rs` + `app.rs` (`SOLARIA_RIVER`),
+`examples/worldgen_preview.rs` (capa `river`), `save.rs` (v11). 244 tests; clippy
+limpio. Preview: rios serpenteantes que llegan al mar. Verificado en juego sin
+crash. Siguiente: FASE 6 (cuevas jerarquicas).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

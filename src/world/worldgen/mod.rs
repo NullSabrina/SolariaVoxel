@@ -103,8 +103,13 @@ pub struct TerrainSample {
     pub humidity: f32,
     /// Bioma seleccionado por scoring.
     pub biome: Biome,
-    /// Altura base continua del terreno, en bloques (antes de clampear).
+    /// Altura del terreno **ya cavada** por rios/lagos, en bloques.
     pub base_height: f32,
+    /// Proximidad al cauce de un rio (0 = fuera, 1 = centro). Para material y
+    /// depuracion.
+    pub river_proximity: f32,
+    /// Nivel hasta el que llenar agua (0 = sin agua). Incluye mar, rios y lagos.
+    pub surface_water: f32,
 }
 
 /// Deriva una semilla por campo a partir de la del mundo. No usa estado global
@@ -156,6 +161,11 @@ pub struct WorldGen {
     /// Clima (FASE 3): temperatura y humedad.
     temperature: Fbm<Perlin>,
     humidity: Fbm<Perlin>,
+    /// Hidrologia (FASE 5): cresta de rio, su warping, ancho y cuencas de lago.
+    river_ridge: Perlin,
+    river_warp: Perlin,
+    river_width: Perlin,
+    lake_basin: Perlin,
     /// Contador de evaluaciones de ruido (tests de coste). Atomico para seguir
     /// siendo `Send + Sync`.
     noise_calls: AtomicU32,
@@ -201,6 +211,10 @@ impl WorldGen {
                 .set_octaves(3)
                 .set_frequency(1.0)
                 .set_persistence(0.5),
+            river_ridge: Perlin::new(derive(seed, 113)),
+            river_warp: Perlin::new(derive(seed, 114)),
+            river_width: Perlin::new(derive(seed, 115)),
+            lake_basin: Perlin::new(derive(seed, 116)),
             noise_calls: AtomicU32::new(0),
             config,
             seed,
@@ -342,6 +356,66 @@ impl WorldGen {
 
         let biome = biomes::select(temperature, humidity, elevation);
 
+        // --- Hidrologia (FASE 5): rios y lagos ---
+        // El rio sigue una cresta (1 - |n|) con su propio domain warp: da
+        // trazados sinuosos y alargados, no una linea recta. El caudal sale de
+        // la humedad + un ruido de baja frecuencia (ancho/profundidad variables).
+        self.bump();
+        let rw = self
+            .river_warp
+            .get([sx * cfg.river_warp_scale, sz * cfg.river_warp_scale]) as f32;
+        let rwx = sx + (rw * cfg.river_warp_strength) as f64;
+        self.bump();
+        let ridge_n = self
+            .river_ridge
+            .get([rwx * cfg.river_scale, sz * cfg.river_scale]) as f32;
+        let ridge = 1.0 - ridge_n.abs(); // 1 en el eje del rio, 0 lejos
+
+        self.bump();
+        let width_n =
+            self.river_width
+                .get([sx * cfg.river_scale * 0.5, sz * cfg.river_scale * 0.5]) as f32
+                * 0.5
+                + 0.5;
+        let flow = (0.35 * humidity + 0.65 * width_n).clamp(0.0, 1.0);
+        let width = math::lerp(cfg.river_min_width, cfg.river_max_width, flow);
+        // 1 dentro del cauce, 0 fuera (en unidades de cresta).
+        let river_proximity = math::smoothstep(1.0 - width, 1.0, ridge) * landness;
+
+        let max_depth = math::lerp(cfg.river_min_depth, cfg.river_max_depth, flow);
+        let cut = river_proximity.powf(cfg.river_depth_power) * max_depth;
+
+        // Lagos: depresion cerrada en valles humedos.
+        self.bump();
+        let basin = self
+            .lake_basin
+            .get([sx * cfg.lake_scale, sz * cfg.lake_scale]) as f32
+            * 0.5
+            + 0.5;
+        let lake_ness = valley
+            * math::smoothstep(0.45, 0.75, humidity)
+            * math::smoothstep(cfg.lake_threshold, 1.0, basin)
+            * landness;
+        let lake_cut = lake_ness * cfg.lake_depth;
+
+        let carved = h - cut - lake_cut;
+
+        // Nivel de agua: el mar en el oceano; si no, el nivel del cauce/lago,
+        // siempre un poco por debajo del borde (para que quede contenido).
+        let mut surface_water = 0.0f32;
+        if cut > 0.20 {
+            surface_water = surface_water.max(h - max_depth * 0.30);
+        }
+        if lake_ness > 0.02 {
+            surface_water = surface_water.max(h - lake_cut * 0.35);
+        }
+        // Cualquier columna cuya superficie quede por debajo del nivel del mar
+        // se inunda hasta ahi (oceano, plataforma o una depresion costera). En un
+        // rio de altura, su nivel (> mar) manda; el mar solo rellena lo mas bajo.
+        if carved < SEA_LEVEL as f32 {
+            surface_water = surface_water.max(SEA_LEVEL as f32);
+        }
+
         TerrainSample {
             continentalness,
             land,
@@ -352,7 +426,9 @@ impl WorldGen {
             temperature,
             humidity,
             biome,
-            base_height: h,
+            base_height: carved,
+            river_proximity,
+            surface_water,
         }
     }
 }
@@ -417,6 +493,48 @@ mod tests {
         }
         assert!(ocean, "no hay oceano");
         assert!(land, "no hay tierra");
+    }
+
+    #[test]
+    fn los_rios_aparecen_en_tierra_y_llevan_agua() {
+        let g = WorldGen::new(13_371);
+        let (mut rios, mut con_agua, mut muestras) = (0u32, 0u32, 0u32);
+        for x in (-5000..5000).step_by(37) {
+            for z in (-5000..5000).step_by(53) {
+                let s = g.sample(x as f64, z as f64);
+                muestras += 1;
+                if s.river_proximity > 0.7 {
+                    rios += 1;
+                    if s.surface_water > s.base_height {
+                        con_agua += 1;
+                    }
+                }
+            }
+        }
+        assert!(rios > 0, "no se genero ningun cauce en un area enorme");
+        assert_eq!(rios, con_agua, "hay cauces sin nivel de agua");
+        assert!(
+            rios * 8 < muestras,
+            "demasiados cauces (spam): {rios}/{muestras}"
+        );
+    }
+
+    #[test]
+    fn el_agua_generada_esta_acotada_y_es_finita() {
+        let g = WorldGen::new(99);
+        for x in (-4000..4000).step_by(43) {
+            for z in (-4000..4000).step_by(61) {
+                let s = g.sample(x as f64, z as f64);
+                assert!(s.surface_water.is_finite());
+                assert!(
+                    (0.0..=260.0).contains(&s.surface_water),
+                    "{}",
+                    s.surface_water
+                );
+                assert!(s.river_proximity.is_finite());
+                assert!((0.0..=1.0).contains(&s.river_proximity));
+            }
+        }
     }
 
     #[test]

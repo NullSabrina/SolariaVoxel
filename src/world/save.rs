@@ -65,7 +65,9 @@ pub const FORMAT_VERSION: u32 = 5;
 /// * v10: **bioma por region celular** (FASE 3): definiciones con scoring,
 ///   mezcla con el centro de la celda y lapse de altitud. Los materiales y la
 ///   vegetacion cambian (el relieve es el mismo que v9).
-pub const GENERATOR_VERSION: u32 = 10;
+/// * v11: **hidrologia** (FASE 5): rios serpenteantes (cresta con domain warp)
+///   que cavan cauces y se llenan de agua, mas lagos en cuencas humedas.
+pub const GENERATOR_VERSION: u32 = 11;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";

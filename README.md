@@ -8,7 +8,29 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.18.0` — Worldgen FASE 3: bioma por región celular
+## Estado actual: `v0.19.0` — Worldgen FASE 5: hidrología (ríos y lagos)
+
+Ríos **estructurales**, no `noise > umbral`:
+
+- La línea del río sigue una **cresta** (`1 − |n|`) con su propio **domain warp**
+  → trazados sinuosos y alargados.
+- **Caudal** = humedad + ruido de baja frecuencia → ancho y profundidad
+  variables (ríos pequeños a grandes).
+- El cauce **cava** el terreno (`cut = prox^power · depth`) y se rellena de agua
+  hasta un nivel contenido bajo el borde; el material pasa a arena/grava.
+- **Lagos**: depresión cerrada en valles húmedos.
+- El agua de worldgen nace **estable**: no entra en el autómata de fluidos.
+
+Escena demo y preview:
+
+```bash
+SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
+cargo run --release --example worldgen_preview -- 13371 512 4 river
+```
+
+`GENERATOR_VERSION → 11`.
+
+## v0.18.0 — Worldgen FASE 3: bioma por región celular
 
 El bioma deja de ser una cascada de `if` sobre umbrales de clima:
 

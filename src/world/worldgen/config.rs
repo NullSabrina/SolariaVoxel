@@ -69,6 +69,25 @@ pub struct WorldGenConfig {
     /// Domain warping: frecuencia y fuerza (bloques) para romper la regularidad.
     pub warp_scale: f64,
     pub warp_strength: f32,
+
+    // --- Hidrologia (FASE 5) ---
+    /// Frecuencia de la cresta que define las lineas de rio.
+    pub river_scale: f64,
+    /// Domain warping propio del rio (trazado sinuoso).
+    pub river_warp_scale: f64,
+    pub river_warp_strength: f32,
+    /// Ancho (en unidades de cresta) de un rio seco / caudaloso.
+    pub river_min_width: f32,
+    pub river_max_width: f32,
+    /// Profundidad del cauce (bloques) segun caudal.
+    pub river_min_depth: f32,
+    pub river_max_depth: f32,
+    /// Exponente del perfil del cauce (mas alto = mas estrecho y profundo).
+    pub river_depth_power: f32,
+    /// Lagos: frecuencia del campo de cuencas, umbral y profundidad.
+    pub lake_scale: f64,
+    pub lake_threshold: f32,
+    pub lake_depth: f32,
 }
 
 impl Default for WorldGenConfig {
@@ -108,6 +127,18 @@ impl Default for WorldGenConfig {
 
             warp_scale: 0.0016,
             warp_strength: 55.0,
+
+            river_scale: 0.0013,
+            river_warp_scale: 0.0007,
+            river_warp_strength: 90.0,
+            river_min_width: 0.030,
+            river_max_width: 0.115,
+            river_min_depth: 2.0,
+            river_max_depth: 9.0,
+            river_depth_power: 1.7,
+            lake_scale: 0.0025,
+            lake_threshold: 0.62,
+            lake_depth: 5.0,
         }
     }
 }
@@ -138,10 +169,22 @@ impl WorldGenConfig {
             ("mountain_scale", self.mountain_scale as f32),
             ("valley_scale", self.valley_scale as f32),
             ("warp_scale", self.warp_scale as f32),
+            ("river_scale", self.river_scale as f32),
+            ("river_warp_scale", self.river_warp_scale as f32),
+            ("lake_scale", self.lake_scale as f32),
         ] {
             if v <= 0.0 {
                 return Err(ConfigError::NotPositive(name));
             }
+        }
+        if self.river_min_width <= 0.0 || self.river_max_width < self.river_min_width {
+            return Err(ConfigError::Unordered("river_min_width <= river_max_width"));
+        }
+        if self.river_min_depth <= 0.0 || self.river_max_depth < self.river_min_depth {
+            return Err(ConfigError::Unordered("river_min_depth <= river_max_depth"));
+        }
+        if !(0.0..=1.0).contains(&self.lake_threshold) {
+            return Err(ConfigError::OutOfRange("lake_threshold"));
         }
         if !(0.0..=1.0).contains(&self.cell_jitter) {
             return Err(ConfigError::OutOfRange("cell_jitter"));

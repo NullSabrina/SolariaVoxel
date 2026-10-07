@@ -196,6 +196,35 @@ pub fn cave_active() -> bool {
     std::env::var("SOLARIA_CAVE").is_ok()
 }
 
+/// ¿Mostrar un rio? (`SOLARIA_RIVER`).
+pub fn river_active() -> bool {
+    std::env::var("SOLARIA_RIVER").is_ok()
+}
+
+/// Escena de **rio** (`SOLARIA_RIVER=1`): busca agua por encima del nivel del mar
+/// (un cauce generado) en el area cargada y coloca la camara elevada mirandolo.
+/// Si no encuentra ninguno, cae a una vista generica.
+pub fn build_river(renderer: &mut Renderer, camera: &mut Camera) {
+    let mut found: Option<[i32; 3]> = None;
+    'scan: for z in (-60..60).step_by(2) {
+        for x in (-60..60).step_by(2) {
+            for y in (SEA_LEVEL + 1..SEA_LEVEL + 30).rev() {
+                if renderer.block_at([x, y, z]) == Block::Water {
+                    found = Some([x, y, z]);
+                    break 'scan;
+                }
+            }
+        }
+    }
+    let [x, y, z] = found.unwrap_or([8, SEA_LEVEL + 1, 20]);
+    camera.position = Vec3::new(x as f32 + 0.5, (y + 12) as f32, z as f32 + 18.0);
+    camera.yaw_deg = 0.0;
+    camera.pitch_deg = -30.0;
+    camera.update_view();
+    renderer.set_highlight(None);
+    println!("[engine] demo: rio en ({x},{y},{z})");
+}
+
 /// Escena de cueva (`SOLARIA_CAVE=1`): busca una poza de lava real generada
 /// por el terreno, vacia una sala a su alrededor y coloca la camara dentro
 /// mirandola. Si no hay ninguna cerca, talla una de muestra y lo avisa.

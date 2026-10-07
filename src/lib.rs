@@ -10,7 +10,23 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.18.0 - Worldgen FASE 3: bioma por region celular
+//! ## Estado actual: v0.19.0 - Worldgen FASE 5: hidrologia (rios y lagos)
+//!
+//! Rios **estructurales**, no `noise > umbral`:
+//! * La linea del rio sigue una **cresta** (`1 - |n|`) con su propio **domain
+//!   warp** → trazados sinuosos y alargados.
+//! * **Caudal** = humedad + ruido de baja frecuencia → ancho y profundidad
+//!   variables (rios pequenos a grandes).
+//! * El cauce **cava** el terreno (`cut = prox^power * depth`) y se rellena de
+//!   agua hasta un nivel contenido bajo el borde; el material pasa a arena/grava.
+//! * **Lagos**: depresion cerrada en valles humedos (`valle · humedad · cuenca`).
+//! * El agua de worldgen nace **estable**: no entra en el active set del automata
+//!   (solo las ediciones del jugador lo hacen).
+//!
+//! `GENERATOR_VERSION → 11`. Escena demo `SOLARIA_RIVER=1`; capa `river` en
+//! `worldgen_preview`. Hereda de v0.18.0 (FASE 3).
+//!
+//! ## v0.18.0 - Worldgen FASE 3: bioma por region celular
 //!
 //! El bioma deja de ser una cascada de `if` sobre umbrales de clima:
 //! * `worldgen/biomes.rs`: `BiomeDefinition` (rangos de temperatura/humedad/
