@@ -3029,6 +3029,41 @@ crepusculo nautico (`#182851`/`#5B21B6`), ya presente desde v0.30.0.
 `v0.31.1_{belt_of_venus,halo}.png`. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos
 (16/5).
 
+## v0.33.0 - Distancia de vista, simulacion y niebla
+
+### 2026-10-07 - Radios separados, carga circular y niebla por modo
+
+**Decision.** Nuevo `world::ViewSettings` (puro, pensado para `options`):
+`render_radius` (12), `simulation_radius` (6), `unload_radius` (=render+2,
+histeresis) y `FogMode` (off/far/normal/short). La **carga es circular** (radio
+euclideo, ~21 % menos columnas que el cuadrado). `fog_end = (render-1)*16`
+(x factor del modo) y `fog_start = fog_end * ratio`; el culling usa
+`render*16`. El arranque calienta en sincrono solo `WARM_RADIUS=4` columnas y el
+resto lo trae el streaming asincrono. Los fluidos solo simulan dentro de
+`simulation_radius`; al cambiar de centro se re-despiertan (`wake_sim_water`).
+
+**Motivo.** El usuario reportaba "se ve pequeno y hay mucha niebla": el radio por
+defecto era **4** y la niebla era un gris a media distancia. Subir a 12 con carga
+circular y niebla al horizonte da vista larga sin reventar memoria. La histeresis
+evita el bucle cargar/descargar en los bordes.
+
+**Alternativas descartadas.** `generation_radius = render+1` (corona extra sin
+malla): **no hace falta** porque la niebla termina en `(render-1)*16`, asi que el
+anillo exterior nunca se ve; anadirlo rompia los tests de radio 0 y no aportaba.
+Carga cuadrada: se cambia a circular por el ahorro medido. LOD lejano: fuera de
+alcance sin diseno escrito; ver "cuellos pendientes" en `docs/performance.md`.
+
+**Tradeoffs.** R12 suma ~477 MB (CPU+GPU), dentro del objetivo < 500 MB; **R16 lo
+supera (~871 MB)** por el numero de triangulos (sin LOD) y la reserva
+`next_power_of_two` de buffers. Documentado con numeros reales. El cambio de radio
+en caliente solo esta por entorno; la UI (Prompt 2) lo expondra.
+
+**Consecuencia.** `world/view.rs`, `world/store.rs` (plan circular + histeresis +
+`warm_streaming` acotado + simulacion), `render/renderer.rs` (fog/culling de
+`ViewSettings`), `engine/app.rs` (F3: `VIEW: R.. S.. MODE`). 292 tests; clippy
+limpio. Capturas `v0.33.0_{view_r12,view_r16,fog_short}.png`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

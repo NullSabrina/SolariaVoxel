@@ -25,6 +25,7 @@ use super::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Column, SECTION_COUNT, WORLD_HEIGHT
 use super::save::{ChunkPos, ChunkRecord};
 use super::streaming::{GenResult, TerrainScheduler};
 use super::terrain::TerrainGenerator;
+use super::view::ViewSettings;
 use super::water::{self, Fluid, FluidBudget, FluidGrid, MAX_LEVEL};
 
 /// Un mundo vivo: columnas cargadas + cache + generador.
@@ -42,8 +43,8 @@ pub struct World {
     modified: HashMap<ChunkPos, ChunkRecord>,
     /// Columnas cargadas con ediciones aun no volcadas a `modified`.
     dirty: HashSet<ChunkPos>,
-    /// Distancia de carga en chunks (radio, no diametro).
-    view_radius: i32,
+    /// Distancia de carga/malla/simulacion (radios separados + niebla).
+    view: ViewSettings,
     /// Ultimo centro de carga (para no recalcular si no cambio).
     last_center: Option<ChunkPos>,
     /// **Active set** del agua: celdas pendientes de simular, con deduplicacion.
@@ -61,16 +62,39 @@ pub struct World {
     next_request: u64,
 }
 
+/// Radio que se carga **sincronamente** al arrancar (el resto por streaming).
+const WARM_RADIUS: i32 = 4;
+
+/// ¿Esta `pos` dentro del radio `r` (euclideo, en chunks) de `center`?
+fn in_radius(pos: ChunkPos, center: ChunkPos, r: i32) -> bool {
+    let dx = pos.x - center.x;
+    let dz = pos.z - center.z;
+    dx * dx + dz * dz <= r * r
+}
+
 impl World {
     /// Crea un mundo para una semilla, restaurando los chunks editados que se
-    /// hayan cargado de disco.
+    /// hayan cargado de disco. La simulacion iguala al render (usado por tests).
     pub fn new(seed: u32, view_radius: i32, restored: Vec<(ChunkPos, ChunkRecord)>) -> Self {
+        Self::with_view(
+            seed,
+            ViewSettings::from_render_radius(view_radius),
+            restored,
+        )
+    }
+
+    /// Crea un mundo con ajustes de vista completos (la app usa este).
+    pub fn with_view(
+        seed: u32,
+        view: ViewSettings,
+        restored: Vec<(ChunkPos, ChunkRecord)>,
+    ) -> Self {
         let mut world = Self {
             generator: Arc::new(TerrainGenerator::new(seed)),
             columns: HashMap::new(),
             modified: HashMap::new(),
             dirty: HashSet::new(),
-            view_radius,
+            view,
             last_center: None,
             water_queue: water::DirtyQueue::new(),
             scheduler: None,
@@ -95,9 +119,14 @@ impl World {
         self.generator.biome_at(x, z)
     }
 
-    /// Radio de carga actual.
+    /// Radio de render actual.
     pub fn view_radius(&self) -> i32 {
-        self.view_radius
+        self.view.render_radius
+    }
+
+    /// Ajustes de vista actuales.
+    pub fn view(&self) -> ViewSettings {
+        self.view
     }
 
     /// Coordenadas de mundo (en bloques) del origen de un chunk.
@@ -720,14 +749,19 @@ impl World {
 
     /// Descarga lo que sale del radio (volcando antes sus ediciones), cancela
     /// peticiones que ya no interesan y devuelve `(faltantes, descargadas)`.
+    ///
+    /// La carga es **circular** y con **histéresis**: se carga hasta
+    /// `generation_radius` pero solo se descarga mas alla de `unload_radius`, de
+    /// modo que caminar por un borde no carga/descarga en bucle.
     fn plan_center(&mut self, center: ChunkPos) -> (Vec<ChunkPos>, Vec<ChunkPos>) {
         // Guardar las ediciones pendientes ANTES de descargar.
         self.sync_modified();
-        let r = self.view_radius;
+        let load_r = self.view.generation_radius();
+        let unload_r = self.view.unload_radius();
 
         let mut unloaded = Vec::new();
         self.columns.retain(|pos, _| {
-            let inside = (pos.x - center.x).abs() <= r && (pos.z - center.z).abs() <= r;
+            let inside = in_radius(*pos, center, unload_r);
             if !inside {
                 unloaded.push(*pos);
             }
@@ -735,18 +769,38 @@ impl World {
         });
         // Descarta peticiones fuera del radio (su resultado se ignorara igual).
         self.pending
-            .retain(|pos, _| (pos.x - center.x).abs() <= r && (pos.z - center.z).abs() <= r);
+            .retain(|pos, _| in_radius(*pos, center, load_r));
 
         let mut missing = Vec::new();
-        for dz in -r..=r {
-            for dx in -r..=r {
+        for dz in -load_r..=load_r {
+            for dx in -load_r..=load_r {
+                if dx * dx + dz * dz > load_r * load_r {
+                    continue;
+                }
                 let pos = ChunkPos::new(center.x + dx, center.z + dz);
                 if !self.columns.contains_key(&pos) && !self.pending.contains_key(&pos) {
                     missing.push(pos);
                 }
             }
         }
+        // Al cambiar de centro, re-despierta el agua dentro del radio de
+        // simulacion (las celdas fuera de el se congelan al procesarse).
+        self.wake_sim_water(center);
         (missing, unloaded)
+    }
+
+    /// Despierta el agua de las columnas cargadas dentro del radio de simulacion.
+    fn wake_sim_water(&mut self, center: ChunkPos) {
+        let sim = self.view.simulation_radius;
+        let positions: Vec<ChunkPos> = self
+            .columns
+            .keys()
+            .filter(|pos| in_radius(**pos, center, sim))
+            .copied()
+            .collect();
+        for pos in positions {
+            self.wake_column_water(pos);
+        }
     }
 
     /// Streaming **sincrono** (tests y usos que necesitan carga inmediata):
@@ -766,16 +820,33 @@ impl World {
         StreamChange { loaded, unloaded }
     }
 
-    /// Carga **sincrona forzada** de un area (arranque): cancela las peticiones
-    /// async pendientes y genera todo el area en el hilo actual. Garantiza que el
-    /// area del jugador esta completa antes del primer frame (con streaming async,
-    /// si no, el suelo aun no existe y el jugador cae).
+    /// Carga **sincrona forzada** del area del jugador (arranque). Solo calienta
+    /// un radio pequeno (`WARM_RADIUS`) para no bloquear el arranque; el resto del
+    /// area de vista lo trae el streaming asincrono en frames posteriores. Deja
+    /// `last_center` a `None` para que el primer `plan_streaming` pida el circulo
+    /// completo.
     pub fn warm_streaming(&mut self, player_pos: [f32; 3]) -> StreamChange {
-        // Descarta lo que haya pedido el streaming async: sus resultados se
-        // ignoraran (ya no estan en `pending`) y aqui lo cargamos todo en sync.
         self.pending.clear();
         self.last_center = None;
-        self.update_streaming(player_pos)
+        let center = Self::stream_center(player_pos);
+        let r = self.view.render_radius.min(WARM_RADIUS);
+        let mut loaded = Vec::new();
+        for dz in -r..=r {
+            for dx in -r..=r {
+                if dx * dx + dz * dz > r * r {
+                    continue;
+                }
+                let pos = ChunkPos::new(center.x + dx, center.z + dz);
+                if !self.columns.contains_key(&pos) {
+                    self.load_column(pos);
+                    loaded.push(pos);
+                }
+            }
+        }
+        StreamChange {
+            loaded,
+            unloaded: Vec::new(),
+        }
     }
 
     /// Streaming **asincrono**: planifica y encola la generacion en los workers.
@@ -815,10 +886,10 @@ impl World {
                 continue; // obsoleto (se pidio otra vez o ya no interesa)
             }
             self.pending.remove(&result.pos);
-            let inside = self.last_center.is_none_or(|c| {
-                (result.pos.x - c.x).abs() <= self.view_radius
-                    && (result.pos.z - c.z).abs() <= self.view_radius
-            });
+            let load_r = self.view.generation_radius();
+            let inside = self
+                .last_center
+                .is_none_or(|c| in_radius(result.pos, c, load_r));
             if !inside || self.columns.contains_key(&result.pos) {
                 continue;
             }
@@ -1051,6 +1122,14 @@ impl World {
             if !self.columns.contains_key(&pos) {
                 continue;
             }
+            // Fuera del radio de simulacion el agua queda congelada (pero se
+            // guarda): se descarta la celda de la cola hasta que el jugador vuelva
+            // (al cambiar de centro se re-despierta con `wake_sim_water`).
+            if let Some(center) = self.last_center
+                && !in_radius(pos, center, self.view.simulation_radius)
+            {
+                continue;
+            }
             // Oceanos/fuentes en equilibrio: coste cero.
             if self.water_in_equilibrium(p) {
                 continue;
@@ -1236,8 +1315,12 @@ mod tests {
     fn el_warm_streaming_carga_el_radio_completo_en_sync() {
         let mut world = World::new(7, 4, vec![]);
         let change = world.warm_streaming([0.0, 64.0, 0.0]);
-        assert_eq!(change.loaded.len(), 81, "deberia cargar 9x9 columnas");
-        assert_eq!(world.loaded_positions().count(), 81);
+        assert_eq!(
+            change.loaded.len(),
+            49,
+            "deberia cargar 49 columnas (circulo r=4)"
+        );
+        assert_eq!(world.loaded_positions().count(), 49);
         // El spawn tiene terreno solido en algun `y` (con el relieve continental
         // el origen puede ser tierra o mar, asi que no se fija una altura).
         let solido = (0..WORLD_HEIGHT as i32).any(|y| world.is_solid([0, y, 0]));
@@ -1261,14 +1344,14 @@ mod tests {
         let mut world = World::new(7, 4, vec![]);
         world.plan_streaming([0.0, 64.0, 0.0]);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while world.loaded_positions().count() < 81 && std::time::Instant::now() < deadline {
+        while world.loaded_positions().count() < 49 && std::time::Instant::now() < deadline {
             world.poll_generation();
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         assert_eq!(
             world.loaded_positions().count(),
-            81,
-            "no se cargaron las 81 columnas por streaming asincrono"
+            49,
+            "no se cargaron las 49 columnas por streaming asincrono"
         );
     }
 
@@ -1276,8 +1359,8 @@ mod tests {
     fn cargar_y_editar_en_cualquier_columna() {
         let mut world = World::new(7, 1, vec![]);
         world.update_streaming([0.0, 64.0, 0.0]);
-        // 3x3 = 9 columnas cargadas.
-        assert_eq!(world.loaded_positions().count(), 9);
+        // Circulo r=1: 5 columnas cargadas.
+        assert_eq!(world.loaded_positions().count(), 5);
 
         // Editamos un bloque en una columna vecina (chunk 1,0).
         let target = [CHUNK_SIZE as i32 + 2, 70, 3];
@@ -1293,7 +1376,7 @@ mod tests {
         let mut world = World::new(7, 1, vec![]);
         world.update_streaming([-20.0, 64.0, -20.0]); // centro de chunk (-2, -2)
         assert!(world.is_loaded(ChunkPos::new(-2, -2)));
-        assert_eq!(world.loaded_positions().count(), 9);
+        assert_eq!(world.loaded_positions().count(), 5);
         // Editar en coordenadas negativas funciona y marca el chunk correcto.
         assert!(world.set_block([-20, 70, -20], Block::Stone));
         assert!(world.is_modified(ChunkPos::new(-2, -2)));

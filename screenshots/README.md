@@ -70,3 +70,11 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.31.0_stars.png` | Cielo nocturno con estrellas y luna. |
 | `v0.31.1_belt_of_venus.png` | Cinturon de Venus (banda rosa anti-sol) y hora azul. |
 | `v0.31.1_halo.png` | Halo solar con funcion de fase de Henyey-Greenstein. |
+
+## Distancia de vista y niebla (`v0.33`)
+
+| Captura | Que muestra |
+| ------- | ----------- |
+| `v0.33.0_view_r12.png` | Radio de render 12 (defecto): vista larga, niebla al horizonte. |
+| `v0.33.0_view_r16.png` | Radio 16: mas detalle lejano (~871 MB, por encima del presupuesto). |
+| `v0.33.0_fog_short.png` | Modo de niebla `short`. |

@@ -28,6 +28,7 @@ pub mod save;
 pub mod store;
 pub mod streaming;
 pub mod terrain;
+pub mod view;
 pub mod water;
 pub mod worldgen;
 
@@ -44,4 +45,5 @@ pub use save::{
 };
 pub use store::{FluidDirty, StreamChange, VoxelAvailability, World};
 pub use terrain::{Biome, SEA_LEVEL, TerrainGenerator};
+pub use view::{FogMode, ViewSettings};
 pub use water::{Fluid, FluidBudget, MAX_LEVEL};

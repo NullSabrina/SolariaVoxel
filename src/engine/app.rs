@@ -702,6 +702,10 @@ impl App {
         let stats = self.renderer.as_ref().map(|r| r.frame_stats());
         let memory = self.renderer.as_ref().map(|r| r.world_memory());
         let gpu = self.renderer.as_ref().map_or(0, |r| r.gpu_mesh_bytes());
+        let view = self
+            .renderer
+            .as_ref()
+            .map_or(crate::world::ViewSettings::default(), |r| r.view());
         let queued = self
             .renderer
             .as_ref()
@@ -740,6 +744,12 @@ impl App {
             right.push(format!("MEMORY: {:.1} MB", mib(m.total_bytes())));
         }
         right.push(format!("GPU MESH: {:.1} MB", mib(gpu as usize)));
+        right.push(format!(
+            "VIEW: R{} S{} {}",
+            view.render_radius,
+            view.simulation_radius,
+            view.fog.name()
+        ));
         right.push(format!("FLUID QUEUE: {queued}"));
         right.push(format!(
             "SAVE: {}",

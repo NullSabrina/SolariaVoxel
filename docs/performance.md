@@ -170,3 +170,32 @@ caso medido que lo justifique.
 5. Sin **batching por columna/material** ni **LOD**: draw calls bajarían aún más
    al subir el radio (FASE 11 pendiente).
 6. Sin **render interpolado** para el timestep fijo (FASE 12 pendiente).
+
+## Distancia de vista, simulacion y niebla (v0.32/v0.33, Parte B)
+
+Se separan los radios (`world::ViewSettings`): **render**, **simulacion**,
+**unload** (render+2, histeresis) y **niebla**. La carga pasa a ser **circular**
+(radio euclideo) y la niebla termina en `(render-1)` chunks para disimular el
+borde. Presets `low/medium/high`; env `SOLARIA_VIEW_RADIUS`, `SOLARIA_SIM_RADIUS`,
+`SOLARIA_FOG=off|far|normal|short`.
+
+Vista fija de demo (`SOLARIA_DEMO=1 SOLARIA_STATS=1`, dev, opt-level 1), tras
+dejar asentar el streaming:
+
+| ajuste | columnas | memoria mundo (CPU) | GPU malla | draw calls | triangulos | render |
+|---|---|---|---|---|---|---|
+| R12 S6 NORMAL (defecto) | 441 | 120.3 MB | 357.6 MB | 955 | 1.09 M | ~5.5 ms |
+| R16 S6 NORMAL | 797 | 216.0 MB | 655.5 MB | 1742 | 2.11 M | ~8.9 ms |
+
+**Presupuesto (< 500 MB)**: el defecto R12 suma ~**477 MB** (CPU+GPU), dentro del
+objetivo. **R16 lo supera (~871 MB)**: la causa es el numero de triangulos por
+columna a plena vista (sin **LOD**) y la reserva de buffers GPU al alza
+(`next_power_of_two` por seccion, que puede casi duplicar el uso real). Candidatos
+pendientes (solo con medicion que los justifique): empaquetar vertices (posicion
+`f32`->`i16` relativa), una sola malla por columna en vez de por seccion, y **LOD**
+lejano.
+
+El **arranque** solo carga en sincrono un radio de 4 columnas (`WARM_RADIUS`); el
+resto del circulo lo trae el streaming asincrono con presupuesto de meshing
+(~6 ms/frame). Los **fluidos** solo se simulan dentro de `simulation_radius`: fuera
+quedan congelados pero guardados; al cambiar de centro se re-despiertan.

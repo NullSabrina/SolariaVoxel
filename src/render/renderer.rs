@@ -34,7 +34,7 @@ use crate::scene::{DayCycle, SkyParams, SkyState};
 use crate::world::mesh_snapshot::section_snapshot;
 use crate::world::{
     Block, CHUNK_SIZE, ChunkPos, ChunkRecord, FluidBudget, FluidDirty, RayHit, SECTION_COUNT,
-    StreamChange, World, raycast,
+    StreamChange, ViewSettings, World, raycast,
 };
 
 /// Reutiliza la malla `slot` con la nueva geometria (o la crea si falta). Los
@@ -109,20 +109,6 @@ struct SectionMeshes {
 
 /// Mallas de una columna: una `SectionMeshes` por seccion.
 type ColumnMeshes = [SectionMeshes; SECTION_COUNT];
-
-/// Radio de carga/culling por defecto, en chunks. Configurable con
-/// `SOLARIA_VIEW_RADIUS` (1..=12). La niebla y el culling por distancia se atan a
-/// el, asi que subirlo alarga la vista sin tocar nada mas.
-const DEFAULT_VIEW_RADIUS: i32 = 4;
-
-/// Radio de vista desde el entorno, acotado para no reventar la memoria.
-fn view_radius_from_env() -> i32 {
-    std::env::var("SOLARIA_VIEW_RADIUS")
-        .ok()
-        .and_then(|s| s.parse::<i32>().ok())
-        .unwrap_or(DEFAULT_VIEW_RADIUS)
-        .clamp(1, 12)
-}
 
 /// Presupuesto de meshing por frame, en milisegundos. Al descubrir chunks se
 /// encolan las columnas y se meshean a este ritmo en lugar de todas de golpe: el
@@ -307,6 +293,8 @@ pub struct Renderer {
     sky_state: SkyState,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
     day_factor: f32,
+    /// Ajustes de distancia de vista/simulacion/niebla del frame.
+    view: ViewSettings,
     /// Distancia (bloques) a la que empieza la niebla. Atada al radio de vista.
     fog_start: f32,
     /// Distancia (bloques) a la que la niebla es total: borde del area cargada.
@@ -398,17 +386,23 @@ impl Renderer {
             .collect();
         let char_pivots = body.iter().map(|p| p.pivot).collect();
 
-        // Radio de vista configurable (`SOLARIA_VIEW_RADIUS`, por defecto 4).
-        // La niebla termina justo en el borde del area cargada (radio * 16), asi
-        // que lo funde con el cielo, y el culling por distancia usa ese valor.
-        let view_radius = view_radius_from_env();
-        let fog_end = view_radius as f32 * CHUNK_SIZE as f32;
-        let fog_start = fog_end * 0.625; // mismo ratio que 40/64
+        // Distancia de vista/simulacion/niebla (SOLARIA_VIEW_RADIUS, SOLARIA_SIM_RADIUS,
+        // SOLARIA_FOG). La carga es circular y la niebla termina dentro del area
+        // cargada para disimular el borde.
+        let view = ViewSettings::from_env();
+        let fog_start = view.fog_start();
+        let fog_end = view.fog_end();
         println!(
-            "[render] radio de vista: {view_radius} chunks (niebla {fog_start:.0}..{fog_end:.0})"
+            "[render] vista: render {} / sim {} / unload {} chunks | niebla {:.0}..{:.0} ({})",
+            view.render_radius,
+            view.simulation_radius,
+            view.unload_radius(),
+            fog_start,
+            fog_end,
+            view.fog.name()
         );
         let restored_count = restored.len();
-        let world = World::new(seed, view_radius, restored);
+        let world = World::with_view(seed, view, restored);
         if restored_count > 0 {
             println!("[world] {restored_count} chunks restaurados de disco");
         }
@@ -447,6 +441,7 @@ impl Renderer {
             sky,
             sky_state: default_sky_state(),
             day_factor: 1.0,
+            view,
             fog_start,
             fog_end,
             start: Instant::now(),
@@ -1058,6 +1053,11 @@ impl Renderer {
         self.stats
     }
 
+    /// Ajustes de distancia de vista/simulacion/niebla (overlay F3).
+    pub fn view(&self) -> ViewSettings {
+        self.view
+    }
+
     /// Actualiza el cielo del frame. La unica fuente de verdad es
     /// [`crate::scene::SkyState`]: de aqui salen el `day_factor`, el color del
     /// clear (horizonte) y los colores del pase de cielo.
@@ -1163,7 +1163,12 @@ impl Renderer {
             columns: self.meshes.len() as u32,
             ..Default::default()
         };
-        let cull_dist2 = self.fog_end * self.fog_end;
+        // Culling por distancia: descartamos secciones mas alla del area cargada
+        // (la niebla ya las tapa; dibujarlas no aporta).
+        let cull_dist2 = {
+            let d = self.view.cull_distance();
+            d * d
+        };
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

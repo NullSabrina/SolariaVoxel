@@ -8,26 +8,21 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.31.1` — Cielo y atmosfera
+## Estado actual: `v0.33.0` — Distancia de vista y niebla
 
-- **Cielo con gradiente** (`v0.30.0`): el fondo plano pasa a un pase de cielo
-  (`render/sky.wgsl`) con gradiente **cenit <-> horizonte** que depende de la
-  **elevacion solar** y del **azimut** (naranja hacia el sol, diferente en el lado
-  opuesto). Bajo el horizonte se funde con el color de **niebla**. Con dithering
-  para evitar el banding en degradados oscuros.
-- **Niebla direccional** (`v0.30.1`): el color de la niebla ya no es un gris unico
-  sino el **horizonte del cielo en la direccion de mirada** (misma funcion que el
-  pase de cielo), asi que **no hay costura** entre cielo y terreno lejano. El agua
-  usa la misma niebla y el especular sigue la direccion real del sol.
-- **Sol y luna 3D + estrellas** (`v0.31.0`): el sol y la luna son **cubos 3D**
-  (interseccion rayo-caja orientada en el shader) que giran alrededor del jugador,
-  en lados opuestos, con **sombreado por cara** y **giro propio**; se ocultan bajo
-  el horizonte. La luna tiene **fase** (ciclo de 8 dias de juego via `day_count`).
-  El cielo nocturno tiene ~1500 **estrellas** deterministas por hash, con
-  parpadeo. Rig celeste de referencia en Blockbench (`assets/src/models/`).
-- **Fenomenos atmosfericos** (`v0.31.1`): halo solar con funcion de fase de
-  Henyey-Greenstein, **Cinturon de Venus** (banda rosa en el lado opuesto al sol
-  durante el crepusculo) y **hora azul** por la paleta de crepusculo nautico.
+- **Radios separados** (`world::ViewSettings`): distancia de **render** (12 por
+  defecto, hasta 32), de **simulacion** (6), **unload** con histeresis y **niebla**.
+  La carga es **circular** (radio euclideo). Presets `low/medium/high`. Env
+  `SOLARIA_VIEW_RADIUS`, `SOLARIA_SIM_RADIUS`, `SOLARIA_FOG=off|far|normal|short`.
+- **Niebla** (`v0.30.1`): color = horizonte del cielo en la direccion de mirada,
+  termina en `(render-1)` chunks. Los fluidos solo se simulan dentro del radio de
+  simulacion (fuera quedan congelados pero guardados).
+- **Arranque**: se calienta en sincrono solo un radio pequeno; el resto lo trae el
+  streaming asincrono. Medido: R12 defecto ~477 MB (CPU+GPU), 182 fps, ~955 dc.
+  Ver [`docs/performance.md`](./docs/performance.md).
+- **Cielo y atmosfera** (`v0.30`–`v0.31.1`): gradiente cenit <-> horizonte por
+  fases (OKLab), sol y luna como **cubos 3D** con fases lunares, estrellas, halo
+  (Henyey-Greenstein), Cinturon de Venus y hora azul.
 - **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte
   (noche profunda, crepusculos astronomico/nautico/civil, golden hour, manana/tarde,
   mediodia), mezcladas en **OKLab** con `smoothstep` para que recorrer 24 h no de
@@ -104,7 +99,9 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_COLLIDE` | Demo de colision. |
 | `SOLARIA_STATS` | Muestra el overlay de diagnostico al arrancar (`F3`). |
 | `SOLARIA_THIRD` | Arranca en tercera persona (`F5`). |
-| `SOLARIA_VIEW_RADIUS` | Radio de vista en columnas (niebla y culling atados). |
+| `SOLARIA_VIEW_RADIUS` | Radio de render en columnas (2–32; por defecto 12). |
+| `SOLARIA_SIM_RADIUS` | Radio de simulacion de fluidos (1–12; por defecto 6). |
+| `SOLARIA_FOG` | Modo de niebla: `off`, `far`, `normal` (def.), `short`. |
 | `SOLARIA_FLUID_BUDGET_CELLS` | Celdas de fluido simuladas por tick. |
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
 | `SOLARIA_TIME` | Hora inicial del ciclo dia/noche (0..1). |
@@ -124,8 +121,9 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-288 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
-fluidos estilo Minecraft, raycast, worldgen, cuevas y cielo/color). Lint:
+292 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color y distancia de
+vista). Lint:
 
 ```bash
 cargo fmt
@@ -220,6 +218,7 @@ src/
     ├── recipe.rs       Recetas de crafteo (rejilla 3x3 -> resultado).
     ├── water.rs        Simulacion de agua (niveles, propagacion, 10 Hz).
     ├── streaming.rs    Carga/descarga de columnas por radio (StreamChange).
+    ├── view.rs         ViewSettings (radios de render/simulacion/niebla).
     ├── memory.rs       Contabilidad de memoria del mundo por categorias.
     ├── bench.rs        Benchmarks reproducibles (solo tests).
     ├── save.rs         Versionado + guardado/carga del mundo (bincode + LZ4).
