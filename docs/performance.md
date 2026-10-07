@@ -38,6 +38,18 @@ Benchmarks heredados (`world::store::tests`):
 | `update_streaming` (cruce, +9/-9) | 22.6 ms | generación síncrona en el benchmark |
 | greedy 27 columnas (125 secciones) | 37.7 ms | meshing CPU de una región |
 
+### Optimizacion v0.19.1 — greedy sin despacho dinamico
+
+`greedy_*` recibia las consultas de bloque/luz como `&dyn Fn`, lo que hacia una
+llamada **indirecta** por celda de mascara (~74 k por seccion). Pasarlas a
+**genericos** (`impl Fn`) deja al compilador inlinar las closures que leen la
+columna. Medido en `dev` (opt-level 1), misma maquina:
+
+| benchmark | antes | despues | ratio |
+|---|---|---|---|
+| `mesh_greedy_section` (4 secciones no vacias) | 2.088 ms | 1.564 ms | **-25 %** |
+| greedy 27 columnas (110 secciones) | 33.60 ms | 23.45 ms | **-30 %** |
+
 ## Memoria (FASE 10)
 
 `World::memory_report()` con radio 4 (**81 columnas**), mundo de terreno:

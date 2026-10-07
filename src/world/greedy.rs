@@ -92,12 +92,16 @@ pub fn greedy_section(
 /// Devuelve `(vertices_opacos, indices_opacos, vertices_agua, indices_agua)`: el
 /// agua va aparte porque se dibuja en un **pase translucido** distinto.
 #[allow(clippy::type_complexity)]
-pub fn greedy_section_query(
-    query: &dyn Fn(i32, i32, i32) -> Block,
-    light: &dyn Fn(i32, i32, i32) -> (u8, u8),
+pub fn greedy_section_query<F, L>(
+    query: &F,
+    light: &L,
     section: usize,
     origin: [f32; 3],
-) -> (Vec<Vertex>, Vec<u32>, Vec<Vertex>, Vec<u32>) {
+) -> (Vec<Vertex>, Vec<u32>, Vec<Vertex>, Vec<u32>)
+where
+    F: Fn(i32, i32, i32) -> Block,
+    L: Fn(i32, i32, i32) -> (u8, u8),
+{
     let y_start = section * CHUNK_SIZE;
     let y_end = (y_start + CHUNK_SIZE).min(WORLD_HEIGHT);
     greedy_range(query, light, y_start, y_end, origin)
@@ -114,13 +118,17 @@ pub fn greedy_section_query(
 /// Por eso el rango vertical acota `v` en caras verticales y `c` en las
 /// horizontales, y el "alto" del rectangulo nunca cruza el limite de seccion.
 #[allow(clippy::type_complexity)]
-fn greedy_range(
-    query: &dyn Fn(i32, i32, i32) -> Block,
-    light: &dyn Fn(i32, i32, i32) -> (u8, u8),
+fn greedy_range<F, L>(
+    query: &F,
+    light: &L,
     y_start: usize,
     y_end: usize,
     origin: [f32; 3],
-) -> (Vec<Vertex>, Vec<u32>, Vec<Vertex>, Vec<u32>) {
+) -> (Vec<Vertex>, Vec<u32>, Vec<Vertex>, Vec<u32>)
+where
+    F: Fn(i32, i32, i32) -> Block,
+    L: Fn(i32, i32, i32) -> (u8, u8),
+{
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     let mut water_vertices = Vec::new();
@@ -252,14 +260,18 @@ fn greedy_range(
 /// * Para caras +X/-X: `u` recorre el eje Z, `v` el eje Y, `c` el eje X.
 /// * Para caras +Z/-Z: `u` recorre el eje X, `v` el eje Y, `c` el eje Z.
 /// * Para caras +Y/-Y: `u` recorre el eje X, `v` el eje Z, `c` el eje Y.
-fn mask_value(
-    query: &dyn Fn(i32, i32, i32) -> Block,
-    light: &dyn Fn(i32, i32, i32) -> (u8, u8),
+fn mask_value<F, L>(
+    query: &F,
+    light: &L,
     face: Face,
     u: usize,
     v: usize,
     c: usize,
-) -> Option<FaceKey> {
+) -> Option<FaceKey>
+where
+    F: Fn(i32, i32, i32) -> Block,
+    L: Fn(i32, i32, i32) -> (u8, u8),
+{
     // Coordenadas del voxel segun la cara.
     let (x, y, z) = match face {
         Face::PosX | Face::NegX => (c, v, u),
