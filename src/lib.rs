@@ -10,7 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.19.1 - Limpieza y orden del repositorio
+//! ## Estado actual: v0.20.0 - Worldgen FASE 6: cuevas jerarquicas
+//!
+//! `world/caves.rs` pasa de un unico campo de densidad a **varios sistemas**
+//! (tubos spaghetti que se cruzan, tuneles regionales, camaras `cheese`, pozos
+//! verticales y canones) con una **mascara de preservacion** (pilares/puentes) y
+//! **entradas** raras que rompen la corteza. La densidad se atenua por
+//! profundidad (`surface - y`) y se refuerza bajo montanas (`mountain_mask`,
+//! anadido a `TerrainSample`). El trabajo 2D (region de camaras, pozos, canones
+//! y entradas) se calcula una vez por columna en `CaveContext`.
+//!
+//! `GENERATOR_VERSION → 12`. Hereda de v0.19.1.
+//!
+//! ## v0.19.1 - Limpieza y orden del repositorio
 //!
 //! Pasada de higiene antes de seguir con el worldgen (FASE 6+): se elimina
 //! codigo muerto, los backups de arte van a `assets/backup/`, `Cargo.toml` gana

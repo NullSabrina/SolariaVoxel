@@ -12,9 +12,11 @@
 //!   mas relieve macro, cordilleras (mascara de rango y cresta), valles, domain
 //!   warping y helpers de math.
 //!
-//! * `DEFERRED`: bioma por region celular (FASE 3; hoy el bioma sigue siendo por
-//!   clima), hidrologia y rios (FASE 5), jerarquia de cuevas (FASE 6),
-//!   decoracion por reglas (FASE 7), previews y benchmarks (FASE 9).
+//! * `IMPLEMENTED` ademas: bioma por region celular (FASE 3), hidrologia (FASE 5)
+//!   y cuevas jerarquicas (FASE 6, en `world/caves.rs`).
+//!
+//! * `DEFERRED`: decoracion por reglas (FASE 7), landforms (FASE 4) y tooling de
+//!   previews/metricas (FASE 9).
 //!
 //! Todo es determinista: `(seed, x, z)` da siempre el mismo resultado, sin RNG
 //! con estado. La GPU no se toca.
@@ -95,6 +97,9 @@ pub struct TerrainSample {
     pub cell_edge: f32,
     /// 1 en la linea de costa, 0 tierra adentro o mar adentro.
     pub coast_factor: f32,
+    /// Mascara de montana `0..1` (cordillera x cresta x interior x tierra).
+    /// Reutilizada por el relieve y por las cuevas (mas cuevas bajo montanas).
+    pub mountain_mask: f32,
     /// `[0, 1)` por celda: decide el ancho de costa (estrecha/ancha).
     pub coast_roll: f32,
     /// Temperatura efectiva (tras mezcla de celda y lapse de altitud), `[0, 1]`.
@@ -324,7 +329,8 @@ impl WorldGen {
             as f32;
         let ridge = (1.0 - ridge_n.abs()).max(0.0).powf(cfg.ridge_power);
         let interior = math::smoothstep(0.10, 0.55, continentalness);
-        h += range_mask * ridge * cfg.mountain_amplitude * interior * landness;
+        let mountain_mask = (range_mask * ridge * interior * landness).clamp(0.0, 1.0);
+        h += mountain_mask * cfg.mountain_amplitude;
 
         self.bump();
         let valley_n = self
@@ -422,6 +428,7 @@ impl WorldGen {
             cell_id: cell.id,
             cell_edge: cell.edge,
             coast_factor,
+            mountain_mask,
             coast_roll,
             temperature,
             humidity,

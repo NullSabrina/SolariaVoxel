@@ -8,17 +8,28 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.19.1` — Limpieza y orden del repositorio
+## Estado actual: `v0.20.0` — Worldgen FASE 6: cuevas jerarquicas
 
-Pasada de higiene antes de continuar el worldgen (FASE 6+), sin tocar el mundo
-ni el formato: codigo muerto fuera, backups de arte a `assets/backup/`,
-metadatos en `Cargo.toml`, licencia dual, `.gitattributes` y
-`README`/`docs` al dia.
+`world/caves.rs` deja de ser un unico campo de densidad y pasa a **varios
+sistemas** que se suman, cada uno con su escala:
 
-- **Worldgen** (`v0.17`–`v0.19`): `GENERATOR_VERSION = 11`. Fases 1/2
-  (continentes, costas, cordilleras), 3 (bioma por region celular) y 5
-  (hidrologia: rios serpenteantes y lagos) completadas. Ver
-  [`docs/worldgen.md`](./docs/worldgen.md).
+- **Spaghetti** (dos campos de tubos que se cruzan) y **tuneles regionales**
+  (mas anchos, baja frecuencia).
+- **Camaras `cheese`** (blobs grandes, profundos), **pozos verticales** y
+  **canones** (largos en X, en banda media).
+- **Mascara de preservacion** (pilares/puentes) y **entradas** raras
+  (grietas/sinkholes) que rompen la corteza.
+- Densidad **atenuada por profundidad** (`surface - y`) y **reforzada bajo
+  montanas** (`mountain_mask`). El trabajo 2D se calcula una vez por columna
+  (`CaveContext`), y el caso sin cueva sale pronto.
+
+`GENERATOR_VERSION → 12`.
+
+- **Worldgen** (`v0.17`–`v0.20`): fases 1/2 (continentes, costas, cordilleras),
+  3 (bioma por region celular), 5 (hidrologia: rios y lagos) y 6 (cuevas
+  jerarquicas) completadas. Ver [`docs/worldgen.md`](./docs/worldgen.md).
+- **Repo** (`v0.19.1`): limpieza y orden (codigo muerto fuera, backups de arte a
+  `assets/backup/`, metadatos, licencia dual, `.gitattributes`).
 - **Formato de guardado** (`FORMAT_VERSION = 5`): independiente del generador,
   con migradores y test de datos del jugador.
 - **Render**: greedy meshing con face culling, pase de agua translucida
@@ -91,8 +102,8 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-244 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
-fluidos, raycast, worldgen). Lint:
+246 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+fluidos, raycast, worldgen y cuevas). Lint:
 
 ```bash
 cargo fmt
@@ -214,8 +225,8 @@ modulo `render` habla con la GPU.
 | 5. Pulido | `v1.0.0` | Menus, audio, particulas, data packs, release | pendiente |
 
 - La **Etapa 1** cerro en `v0.7.9`; las **Fases 7, 9–13** de la auditoría en
-  `v0.16.1`. Pendiente del worldgen: cuevas jerarquicas (FASE 6), decoracion por
-  reglas (FASE 7), landforms (FASE 4) y tooling/metricas (FASE 9).
+  `v0.16.1`. Pendiente del worldgen: decoracion por reglas (FASE 7), landforms
+  (FASE 4) y tooling/metricas (FASE 9).
 
 ## Licencia
 

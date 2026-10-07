@@ -2532,6 +2532,43 @@ mundo, asi que `GENERATOR_VERSION`/`FORMAT_VERSION` quedan intactos (11 / 5).
 **Consecuencia.** Solo cambios de repo/docs; mismos 244 tests y clippy limpio.
 Disco liberado: ~3.5 GB. `Cargo.toml` y el titulo pasan a `v0.19.1`.
 
+## v0.20.0 — Worldgen FASE 6: cuevas jerarquicas
+
+### 2026-10-07 — Cuevas por capas (no un unico campo de densidad)
+
+**Decision.** Sustituir el campo unico (`tunnels*0.7 + chambers*0.3`) por varios
+sistemas que se suman, cada uno con su escala y su activacion barata:
+- **Spaghetti**: dos campos `Fbm` de tubos que se cruzan -> red de galerias.
+- **Tubos regionales**: mas anchos y de baja frecuencia.
+- **Camaras `cheese`**: blobs grandes (frecuencia muy baja), profundos y en
+  regiones aptas.
+- **Pozos verticales** (campo que varia lento en Y) y **canones** anisotropos
+  (largos en X, en banda media).
+- **Pilares/puentes**: mascara de preservacion dentro de las camaras.
+- **Entradas**: grietas/sinkholes **raras** que rompen la corteza.
+- Densidad **atenuada por profundidad** (`surface - y`) y **reforzada bajo
+  montanas** (`mountain_mask`, campo nuevo en `TerrainSample`).
+- El trabajo 2D (region de camaras, pozos, canones, entradas) se calcula **una
+  vez por columna** en `CaveContext`; el bucle por voxel solo paga los 3D activos.
+
+**Motivo.** El audit pide cuevas **jerarquicas** (FASE 6): variedad de formas y
+control (entradas, pilares) en vez de una nube homogenea de huecos.
+
+**Alternativas descartadas.** Un solo campo con mas octavas (poca variedad de
+formas); recalcular el contexto 2D por voxel (coste inutil); evaluar todos los
+campos 3D en cada celda (se evita con el contexto 2D y el early-out).
+
+**Tradeoffs.** `terrain_generate_column` pasa de 3.74 a ~6.3 ms/columna (~1.7x).
+Se amortigua sacando `pillar` del camino comun (solo se evalua si un sistema ya
+propone cavar) y evaluando `tubes_b` solo cerca de la banda cero de `tubes_a`.
+Sin afluentes de cueva ni biomas subterraneos (fuera de alcance).
+
+**Consecuencia.** `world/caves.rs` reescrito; `world/worldgen/mod.rs`
+(`mountain_mask`); `world/terrain.rs` (contexto por columna); `world/save.rs`
+(`GENERATOR_VERSION -> 12`). 246 tests (determinismo, corteza salvo entradas,
+refuerzo por montana, pozos verticales); clippy limpio. Fraccion de aire
+subterraneo medida ~4 %. Siguiente: FASE 7 (decoracion por reglas).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

@@ -67,7 +67,10 @@ pub const FORMAT_VERSION: u32 = 5;
 ///   vegetacion cambian (el relieve es el mismo que v9).
 /// * v11: **hidrologia** (FASE 5): rios serpenteantes (cresta con domain warp)
 ///   que cavan cauces y se llenan de agua, mas lagos en cuencas humedas.
-pub const GENERATOR_VERSION: u32 = 11;
+/// * v12: **cuevas jerarquicas** (FASE 6): tubos spaghetti, tuneles regionales,
+///   camaras `cheese`, pozos verticales, canones, pilares de preservacion y
+///   entradas que rompen la corteza; densidad por profundidad y por montana.
+pub const GENERATOR_VERSION: u32 = 12;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";

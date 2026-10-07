@@ -50,6 +50,22 @@ columna. Medido en `dev` (opt-level 1), misma maquina:
 | `mesh_greedy_section` (4 secciones no vacias) | 2.088 ms | 1.564 ms | **-25 %** |
 | greedy 27 columnas (110 secciones) | 33.60 ms | 23.45 ms | **-30 %** |
 
+### FASE 6 — coste de las cuevas jerarquicas
+
+`terrain_generate_column` (dev, opt-level 1), mismo equipo:
+
+| version | tiempo |
+|---|---|
+| v0.19.1 (2 campos 3D) | 3.74 ms/columna |
+| v0.20.0 (FASE 6) | ~6.3 ms/columna |
+
+El sistema jerarquico evalua `tubes_a` + `regional` siempre, y activa `cheese`,
+`shaft` y `canyon` solo donde su contexto 2D (`CaveContext`) lo permite;
+`tubes_b` se evalua cerca de la banda cero de `tubes_a` (donde se cruzan) y
+`pillar` solo cuando algun sistema ya propone cavar. Coste ~1.7x a cambio de
+cuevas mucho mas variadas. La generacion es asincrona; el `warm_streaming`
+inicial (81 columnas) pasaria de ~291 ms a ~470 ms.
+
 ## Memoria (FASE 10)
 
 `World::memory_report()` con radio 4 (**81 columnas**), mundo de terreno:

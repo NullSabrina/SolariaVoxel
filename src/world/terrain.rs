@@ -7,13 +7,13 @@
 //!    altura base con relieve macro + cordilleras + valles). El relieve ya **no**
 //!    depende del bioma.
 //! 2. **Clima 2D** — dos mapas `Fbm` (temperatura y humedad) en 0..1.
-//! 3. **Bioma** — se deriva del par (temperatura, humedad); decide materiales y
-//!    vegetacion. *(Regionalizar el bioma por celula es la FASE 3, pendiente.)*
+//! 3. **Bioma** — se deriva del par (temperatura, humedad) con regionalizacion
+//!    por celula (FASE 3); decide materiales y vegetacion.
 //! 4. **Superficie** — un ruido de alta frecuencia elige la variante de bloque.
 //! 5. **Cuevas/acuiferos** — [`crate::world::caves`] decide que celda se cava y
-//!    si nace llena de agua.
+//!    si nace llena de agua (FASE 6: cuevas jerarquicas).
 //!
-//! `GENERATOR_VERSION` sube a 9 porque el relieve cambia por completo.
+//! `GENERATOR_VERSION` va por 12 (FASE 6).
 //!
 //! [`TerrainSample`]: super::worldgen::TerrainSample
 
@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use noise::{NoiseFn, Perlin};
 
 use super::block::Block;
-use super::caves::{Carve, CaveSystem};
+use super::caves::{Carve, CaveContext, CaveSystem};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 use super::worldgen::{WorldGen, biomes};
 
@@ -165,6 +165,7 @@ impl TerrainGenerator {
     /// cavar justo debajo, que se horneara a obsidiana).
     fn is_lava_here(
         caves: &CaveSystem,
+        ctx: &CaveContext,
         x: i32,
         y: usize,
         z: i32,
@@ -174,7 +175,7 @@ impl TerrainGenerator {
         Self::is_lava_band(y)
             && Self::is_lava_pool(x, z)
             && y > 0
-            && caves.carve(x, y as i32 - 1, z, surface, aquifer) == Carve::None
+            && caves.carve(ctx, x, y as i32 - 1, z, surface, aquifer) == Carve::None
     }
 
     /// Muestra geografica de una columna (continentalness, celda, costa,
@@ -246,20 +247,27 @@ impl TerrainGenerator {
                 // Cerca del borde de una celda se mezclan materiales con el vecino.
                 let border = geo.cell_edge < 0.35;
                 let has_caves = self.has_caves(wx, wz);
+                // Contexto 2D de cuevas de la columna (4 ruidos); solo se calcula
+                // si la mascara abre la puerta, para no pagarlo en columnas macizas.
+                let caves_ctx = has_caves.then(|| self.caves.context(wx, wz, geo.mountain_mask));
                 // Superficie "costera": playa/fondo marino o **lecho de rio**
                 // (arena/grava) donde el cauce es claro.
                 let coastal = height <= (SEA_LEVEL as usize) + 1 || geo.river_proximity > 0.45;
 
                 for y in 0..height {
                     // Cuevas y acuiferos antes de colocar el terreno.
-                    if has_caves {
-                        match self.caves.carve(wx, y as i32, wz, height as i32, aquifer) {
+                    if let Some(ctx) = &caves_ctx {
+                        match self
+                            .caves
+                            .carve(ctx, wx, y as i32, wz, height as i32, aquifer)
+                        {
                             Carve::Air => {
                                 // ¿Poza de lava? Cueva con suelo firme en la
                                 // banda profunda: se rellena de lava y el suelo
                                 // se "hornea" a obsidiana.
                                 if Self::is_lava_here(
                                     &self.caves,
+                                    ctx,
                                     wx,
                                     y,
                                     wz,
@@ -276,6 +284,7 @@ impl TerrainGenerator {
                                 // del acuifero: tambien nace lava.
                                 if Self::is_lava_here(
                                     &self.caves,
+                                    ctx,
                                     wx,
                                     y,
                                     wz,

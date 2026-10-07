@@ -45,7 +45,7 @@ Column (24 secciones de 16^3 + luz de cielo / luz de bloque)
 | 2 | Celular + continentes + costas + relieves. | `IMPLEMENTED` |
 | 3 | Bioma por region celular + lapse de altitud. | `IMPLEMENTED` |
 | 5 | Hidrologia (rios serpenteantes + lagos). | `IMPLEMENTED` |
-| 6 | Cuevas jerarquicas (micro/regional/spaghetti, camaras, shafts, canones, pilares, entradas). | ver `DECISIONS.md` |
+| 6 | Cuevas jerarquicas (spaghetti, regionales, `cheese`, pozos, canones, pilares, entradas). | `IMPLEMENTED` |
 | 7 | Decoracion por reglas (clusters, rocas, evitar flotantes). | `DEFERRED` |
 | 4 | Landforms (cliffs, terrazas, overhangs, mesetas). | `DEFERRED` |
 | 9 | Tooling: previews de cuevas, seed gallery, metricas, benchmarks. | parcial (`worldgen_preview`) |
@@ -66,4 +66,4 @@ Escenas demo del motor: `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_RIVER`,
 - `GENERATOR_VERSION` (resultado del mundo) y `FORMAT_VERSION` (binario) son
   **independientes**. Cambiar el mundo sube `GENERATOR_VERSION`; cambiar el
   guardado sube `FORMAT_VERSION` con migrador + test.
-- Actual: `GENERATOR_VERSION = 11`, `FORMAT_VERSION = 5`.
+- Actual: `GENERATOR_VERSION = 12`, `FORMAT_VERSION = 5`.
