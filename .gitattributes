@@ -1,0 +1,12 @@
+# Normaliza finales de linea a LF en el repositorio (se acaban los avisos de
+# CRLF al commitear) sin tocar los binarios.
+* text=auto eol=lf
+
+# Binarios: sin conversion de texto.
+*.png binary
+*.bbmodel binary
+*.vf binary
+*.exe binary
+
+# PowerShell puede requerir CRLF segun la version; se deja como texto.
+*.ps1 text eol=crlf

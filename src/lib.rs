@@ -10,7 +10,15 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.19.0 - Worldgen FASE 5: hidrologia (rios y lagos)
+//! ## Estado actual: v0.19.1 - Limpieza y orden del repositorio
+//!
+//! Pasada de higiene antes de seguir con el worldgen (FASE 6+): se elimina
+//! codigo muerto, los backups de arte van a `assets/backup/`, `Cargo.toml` gana
+//! metadatos, se anaden licencia dual y `.gitattributes`, y se alinean
+//! `README`/`docs`. No cambia el mundo: `GENERATOR_VERSION`/`FORMAT_VERSION`
+//! intactos (11/5). Sigue a v0.19.0.
+//!
+//! ## v0.19.0 - Worldgen FASE 5: hidrologia (rios y lagos)
 //!
 //! Rios **estructurales**, no `noise > umbral`:
 //! * La linea del rio sigue una **cresta** (`1 - |n|`) con su propio **domain

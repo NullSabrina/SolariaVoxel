@@ -1,0 +1,10 @@
+Solaria Voxel se distribuye bajo los terminos de la licencia MIT o la
+Apache License, Version 2.0, a tu eleccion (dual-licensed).
+
+- Texto MIT:        ver [LICENSE-MIT](./LICENSE-MIT)
+- Texto Apache-2.0: ver [LICENSE-APACHE](./LICENSE-APACHE)
+
+Salvo que se indique lo contrario, cualquier contribucion enviada al proyecto
+se entendera licenciada bajo estos mismos terminos, sin condiciones adicionales.
+
+SPDX-License-Identifier: MIT OR Apache-2.0

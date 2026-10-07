@@ -2503,6 +2503,35 @@ solidas y no se simula hasta que el jugador lo toca. `GENERATOR_VERSION -> 11`.
 limpio. Preview: rios serpenteantes que llegan al mar. Verificado en juego sin
 crash. Siguiente: FASE 6 (cuevas jerarquicas).
 
+## v0.19.1 — Limpieza y orden del repositorio
+
+### 2026-10-07 — Higiene antes de seguir con el worldgen
+
+**Decision.** Antes de continuar el worldgen (FASE 6+) hacemos una pasada de
+orden, sin tocar el mundo ni el formato:
+- Se elimina codigo **demostrablemente** muerto (`raycast::_unused`,
+  `terrain::max_height`; `MAX_HEIGHT` si se usa, se queda).
+- Los backups de arte (`*_pre28`, `*_med`, los mapas de atlas en texto y el
+  `.bbmodel` previo) se mueven a `assets/backup/` (reversible) y cada asset se
+  documenta en `assets/README.md`.
+- `Cargo.toml` gana metadatos (repository/authors/keywords/categories/readme);
+  se anade licencia dual (`LICENSE`, `LICENSE-MIT`, `LICENSE-APACHE`),
+  `.gitattributes` (`* text=auto eol=lf`) y `docs/worldgen.md`.
+- `README.md` y `screenshots/README.md` al dia (controles, variables, estructura,
+  indice de capturas).
+
+**Motivo.** Dejar el repo autoexplicativo y ligero antes de anadir mas worldgen.
+Tambien se libera disco de desarrollo (`target/debug/incremental`, ~3.5 GB).
+
+**Alternativas descartadas.** Reorganizar `screenshots/` en carpetas por version:
+mucho churn y rompe los enlaces a las imagenes; en su lugar, un indice
+(`screenshots/README.md`). **Borrar** los backups de arte: es arte del usuario y
+se prefiere moverlo (reversible). Bump artificial de versiones: no cambia el
+mundo, asi que `GENERATOR_VERSION`/`FORMAT_VERSION` quedan intactos (11 / 5).
+
+**Consecuencia.** Solo cambios de repo/docs; mismos 244 tests y clippy limpio.
+Disco liberado: ~3.5 GB. `Cargo.toml` y el titulo pasan a `v0.19.1`.
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...
