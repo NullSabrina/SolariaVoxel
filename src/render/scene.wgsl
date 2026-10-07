@@ -5,19 +5,21 @@
 // * El fragment shader muestrea el atlas de texturas en esas UV para pintar el
 //   bloque. El atlas y el sampler llegan por el bind group.
 
-// Uniform: la matriz que la CPU actualiza cada frame, mas el factor dia/noche.
-// El relleno (`pad0..2`) mantiene el tamano en multiplo de 16 bytes y evita que
-// WGSL alinee un `vec3` a 16 (lo que descuadraria el layout respecto a Rust).
+// Uniform: la matriz que la CPU actualiza cada frame, mas el factor dia/noche y
+// los colores del horizonte para la **niebla direccional**. El relleno mantiene
+// el tamano en multiplo de 16 bytes y evita que WGSL alinee un `vec3` a 16.
 struct Uniforms {
     mvp: mat4x4<f32>,
     camera_pos: vec3<f32>,
     day_factor: f32,
-    fog_color: vec3<f32>,
+    horizon_sun: vec3<f32>,
     fog_start: f32,
+    horizon_anti: vec3<f32>,
     fog_end: f32,
-    pad0: f32,
+    sun_dir: vec3<f32>,
+    time: f32,
+    pad0: vec3<f32>,
     pad1: f32,
-    pad2: f32,
 };
 
 @group(0) @binding(0)
@@ -78,10 +80,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let ambient = 0.15;
     let shade = ambient + (1.0 - ambient) * light;
     let lit = tex.rgb * shade;
-    // Niebla a distancia: funde el terreno lejano con el color del cielo, lo que
-    // ademas disimula el borde del area cargada.
-    let dist = length(input.world_pos - uniforms.camera_pos);
+    // Niebla a distancia con el **color del horizonte en la direccion de mirada**
+    // (misma funcion que usa el pase de cielo): asi no hay costura entre el
+    // terreno lejano y el cielo.
+    let to_frag = input.world_pos - uniforms.camera_pos;
+    let hd = normalize(vec3<f32>(to_frag.x, 0.0, to_frag.z) + vec3<f32>(1.0e-5, 0.0, 1.0e-5));
+    let sun_hd = normalize(vec3<f32>(uniforms.sun_dir.x, 0.0, uniforms.sun_dir.z) + vec3<f32>(1.0e-5, 0.0, 1.0e-5));
+    let fog_color = mix(uniforms.horizon_anti, uniforms.horizon_sun, smoothstep(-1.0, 1.0, dot(hd, sun_hd)));
+    let dist = length(to_frag);
     let span = max(uniforms.fog_end - uniforms.fog_start, 0.001);
     let fog = clamp((dist - uniforms.fog_start) / span, 0.0, 1.0);
-    return vec4<f32>(mix(lit, uniforms.fog_color, fog), tex.a);
+    return vec4<f32>(mix(lit, fog_color, fog), tex.a);
 }

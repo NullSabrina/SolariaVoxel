@@ -63,3 +63,5 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.30.0_sky_night.png` | Noche profunda: azul muy oscuro. |
 | `v0.30.0_sky_twilight.png` | Hora azul (crepusculo nautico): violeta profundo. |
 | `sky_preview.png` | Preview offline (`examples/sky_preview.rs`): tira de 24 h + hemisferio. |
+| `v0.30.1_fog_directional.png` | Atardecer con niebla direccional (color de horizonte por azimut). |
+| `v0.30.1_fog_horizonte.png` | Amanecer: sin costura entre cielo y terreno lejano. |

@@ -8,13 +8,17 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.30.0` — Cielo y atmosfera
+## Estado actual: `v0.30.1` — Cielo y atmosfera
 
 - **Cielo con gradiente** (`v0.30.0`): el fondo plano pasa a un pase de cielo
   (`render/sky.wgsl`) con gradiente **cenit <-> horizonte** que depende de la
   **elevacion solar** y del **azimut** (naranja hacia el sol, diferente en el lado
   opuesto). Bajo el horizonte se funde con el color de **niebla**. Con dithering
   para evitar el banding en degradados oscuros.
+- **Niebla direccional** (`v0.30.1`): el color de la niebla ya no es un gris unico
+  sino el **horizonte del cielo en la direccion de mirada** (misma funcion que el
+  pase de cielo), asi que **no hay costura** entre cielo y terreno lejano. El agua
+  usa la misma niebla y el especular sigue la direccion real del sol.
 - **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte
   (noche profunda, crepusculos astronomico/nautico/civil, golden hour, manana/tarde,
   mediodia), mezcladas en **OKLab** con `smoothstep` para que recorrer 24 h no de

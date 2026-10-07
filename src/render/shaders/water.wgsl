@@ -1,19 +1,19 @@
 // Shader del AGUA (v0.8.8): lamina animada, translucida y con brillo especular.
 //
-// Comparte el bind group de la escena (uniform + atlas + sampler), pero usa un
-// struct de uniform con un campo `time` en el hueco de relleno (offset 100), de
-// modo que el buffer sigue midiendo 112 bytes y el layout coincide byte a byte.
+// Comparte el bind group de la escena (uniform + atlas + sampler): el struct
+// `Uniforms` DEBE coincidir byte a byte con el de `scene.wgsl` (144 bytes).
 
 struct Uniforms {
     mvp: mat4x4<f32>,
     camera_pos: vec3<f32>,
     day_factor: f32,
-    fog_color: vec3<f32>,
+    horizon_sun: vec3<f32>,
     fog_start: f32,
+    horizon_anti: vec3<f32>,
     fog_end: f32,
-    // Tiempo (s) para animar las UV; ocupa el primer `pad` del shader de escena.
+    sun_dir: vec3<f32>,
     time: f32,
-    pad0: f32,
+    pad0: vec3<f32>,
     pad1: f32,
 };
 
@@ -78,8 +78,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         normal = -normal;
     }
 
-    // Blinn-Phong: especular con una direccion de sol fija + la de la camara.
-    let light_dir = normalize(vec3<f32>(0.4, 1.0, 0.3));
+    // Blinn-Phong: especular con la direccion real del sol + la de la camara.
+    let light_dir = normalize(uniforms.sun_dir + vec3<f32>(0.0, 0.15, 0.0));
     let view_dir = normalize(uniforms.camera_pos - input.world_pos);
     let half_vec = normalize(light_dir + view_dir);
     let spec = pow(max(dot(normal, half_vec), 0.0), 48.0);
@@ -91,11 +91,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     color = color * shade
         + vec3<f32>(1.0, 1.0, 1.0) * spec * 0.5 * (0.25 + 0.75 * lum);
 
-    // Niebla por distancia, igual que la escena, para fundir con el cielo.
-    let dist = length(input.world_pos - uniforms.camera_pos);
+    // Niebla direccional por distancia (mismo horizonte que cielo y escena).
+    let to_frag = input.world_pos - uniforms.camera_pos;
+    let hd = normalize(vec3<f32>(to_frag.x, 0.0, to_frag.z) + vec3<f32>(1.0e-5, 0.0, 1.0e-5));
+    let sun_hd = normalize(vec3<f32>(uniforms.sun_dir.x, 0.0, uniforms.sun_dir.z) + vec3<f32>(1.0e-5, 0.0, 1.0e-5));
+    let fog_color = mix(uniforms.horizon_anti, uniforms.horizon_sun, smoothstep(-1.0, 1.0, dot(hd, sun_hd)));
+    let dist = length(to_frag);
     let span = max(uniforms.fog_end - uniforms.fog_start, 0.001);
     let fog = clamp((dist - uniforms.fog_start) / span, 0.0, 1.0);
-    color = mix(color, uniforms.fog_color, fog);
+    color = mix(color, fog_color, fog);
 
     let alpha = clamp(a.a * 0.85 + 0.15, 0.0, 1.0);
     return vec4<f32>(color, alpha);

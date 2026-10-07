@@ -2949,6 +2949,32 @@ rayo: descartado; pasar la base de la camara es mas barato y exacto.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Siguiente: `v0.30.1`
 (niebla con color de horizonte **por direccion**).
 
+## v0.30.1 - Niebla direccional (color del horizonte)
+
+### 2026-10-07 - La niebla toma el color del horizonte en la direccion de mirada
+
+**Decision.** El uniform de escena (compartido por `scene.wgsl` y `water.wgsl`) pasa
+a llevar `horizon_sun`, `horizon_anti` y `sun_dir` en lugar de un `fog_color`
+plano (mide 144 bytes). El fragment calcula
+`mix(horizon_anti, horizon_sun, smoothstep(dot(h_view, sun_h)))`, la **misma
+funcion** que usa el pase de cielo en `h ~ 0`. El agua usa esa niebla y ademas el
+especular sigue la direccion real del sol.
+
+**Motivo.** El usuario reportaba "mucha niebla / pared gris": con un color unico,
+el terreno lejano y el cielo no casaban y se veia una banda. Ahora la niebla es
+literalmente el horizonte, asi que el borde del area cargada desaparece.
+
+**Alternativas descartadas.** Pasar solo el color hacia el sol y aproximar el
+resto (menos fiel). Calcular la niebla **antes** de todo el modelo de color
+(oscureceria el agua). Mantener `fog_color` como override: se elimina para no
+tener dos caminos.
+
+**Consecuencia.** `render/pipeline.rs` (layout + `update_uniforms(&SkyState)`),
+`render/scene.wgsl`, `render/shaders/water.wgsl`,
+`render/renderer.rs`. La ventana toma la version de `CARGO_PKG_VERSION`.
+287 tests; clippy limpio. Capturas `v0.30.1_fog_directional.png` y
+`v0.30.1_fog_horizonte.png`. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

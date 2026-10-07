@@ -1099,17 +1099,11 @@ impl Renderer {
             self.start.elapsed().as_secs_f32(),
         );
 
-        let fog_color = [
-            self.clear_color.r as f32,
-            self.clear_color.g as f32,
-            self.clear_color.b as f32,
-        ];
         self.pipeline.update_uniforms(
             &self.queue,
             view_projection,
             [camera_pos.x, camera_pos.y, camera_pos.z],
-            self.day_factor,
-            fog_color,
+            &self.sky_state,
             self.fog_start,
             self.fog_end,
             self.start.elapsed().as_secs_f32(),

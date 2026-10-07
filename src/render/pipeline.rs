@@ -15,7 +15,7 @@ use crate::render::mesh::Vertex;
 use crate::world::atlas;
 
 /// Datos que la CPU envia a la GPU cada frame. El layout DEBE coincidir con el
-/// `struct Uniforms` del shader `scene.wgsl`.
+/// `struct Uniforms` del shader `scene.wgsl` (y de `water.wgsl`).
 ///
 /// Cuidado con la alineacion: en WGSL un `vec3<f32>` exige offset multiple de 16
 /// (aunque ocupe 12), por eso el orden y el relleno estan pensados para que Rust
@@ -30,17 +30,21 @@ struct Uniforms {
     /// Factor dia/noche (0..1) que multiplica la **luz de cielo**. La luz de
     /// bloque (antorchas) no se ve afectada.
     day_factor: f32,
-    /// Color del cielo (lineal) al que se funde la niebla.
-    fog_color: [f32; 3],
+    /// Color del horizonte hacia el sol (lineal). Base de la niebla direccional.
+    horizon_sun: [f32; 3],
     /// Distancia a la que empieza la niebla.
     fog_start: f32,
+    /// Color del horizonte en el lado opuesto al sol (lineal).
+    horizon_anti: [f32; 3],
     /// Distancia a la que la niebla es total.
     fog_end: f32,
-    /// Tiempo (s) para animar el agua. Ocupa el primer `pad` del shader de
-    /// escena; asi el uniform sigue midiendo 112 bytes.
+    /// Direccion del sol (unitaria). El shader deriva el azimut para la niebla y
+    /// puede usarla para el especular del agua.
+    sun_dir: [f32; 3],
+    /// Tiempo (s) para animar el agua.
     time: f32,
-    /// Relleno para que el uniform mida un multiplo de 16 bytes.
-    _pad: [f32; 2],
+    /// Relleno para que el uniform mida 144 bytes (multiplo de 16).
+    _pad: [f32; 4],
 }
 
 /// Pipeline de dibujo de la escena (voxeles texturizados con el atlas).
@@ -315,8 +319,7 @@ impl ScenePipeline {
         queue: &wgpu::Queue,
         mvp: &Mat4,
         camera_pos: [f32; 3],
-        day_factor: f32,
-        fog_color: [f32; 3],
+        sky: &crate::scene::SkyState,
         fog_start: f32,
         fog_end: f32,
         time: f32,
@@ -324,12 +327,22 @@ impl ScenePipeline {
         let uniforms = Uniforms {
             mvp: mvp.to_cols_array(),
             camera_pos,
-            day_factor,
-            fog_color,
+            day_factor: sky.day_factor,
+            horizon_sun: [
+                sky.horizon_sun_side.x,
+                sky.horizon_sun_side.y,
+                sky.horizon_sun_side.z,
+            ],
             fog_start,
+            horizon_anti: [
+                sky.horizon_anti_side.x,
+                sky.horizon_anti_side.y,
+                sky.horizon_anti_side.z,
+            ],
             fog_end,
+            sun_dir: [sky.sun_dir.x, sky.sun_dir.y, sky.sun_dir.z],
             time,
-            _pad: [0.0; 2],
+            _pad: [0.0; 4],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
@@ -370,9 +383,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn el_uniform_mide_112_bytes() {
-        // El shader (scene.wgsl) asume esta medida exacta; si cambia el layout
-        // hay que actualizar alli tambien.
-        assert_eq!(std::mem::size_of::<Uniforms>(), 112);
+    fn el_uniform_mide_144_bytes() {
+        // Los shaders (scene.wgsl, water.wgsl) asumen esta medida exacta; si
+        // cambia el layout hay que actualizarlos alli tambien.
+        assert_eq!(std::mem::size_of::<Uniforms>(), 144);
     }
 }
