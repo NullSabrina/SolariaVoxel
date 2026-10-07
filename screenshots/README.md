@@ -68,3 +68,5 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.31.0_sun_cube.png` | Sol como cubo 3D (se ve la cara superior y el giro). |
 | `v0.31.0_moon_cube.png` | Luna cubo 3D con fase y campo de estrellas. |
 | `v0.31.0_stars.png` | Cielo nocturno con estrellas y luna. |
+| `v0.31.1_belt_of_venus.png` | Cinturon de Venus (banda rosa anti-sol) y hora azul. |
+| `v0.31.1_halo.png` | Halo solar con funcion de fase de Henyey-Greenstein. |

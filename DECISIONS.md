@@ -3008,6 +3008,27 @@ referencia de arte. Si mas adelante se quiere textura, el camino es el mismo pas
 `v0.31.0_{sun_cube,moon_cube,stars}.png`. `GENERATOR_VERSION`/`FORMAT_VERSION`
 intactos (16/5).
 
+## v0.31.1 - Fenomenos atmosfericos
+
+### 2026-10-07 - Halo HG, Cinturon de Venus y hora azul
+
+**Decision.** El halo solar usa la funcion de fase de **Henyey-Greenstein**
+(g = 0.76) en lugar de `pow(cos, 8)`; el **Cinturon de Venus** se dibuja como una
+banda gaussiana rosa a pocos grados sobre el horizonte del lado **opuesto al sol**
+(`anti = 1 - towards_sun`), gobernada por `SkyState::belt_of_venus` (ventana de
+elevacion solar -8 a +2). La **hora azul** sigue viniendo de la paleta de
+crepusculo nautico (`#182851`/`#5B21B6`), ya presente desde v0.30.0.
+
+**Motivo.** Cerrar los fenomenos de la seccion 4.8 de la guia con coste casi nulo
+(todo en el mismo pase de cielo, sin LUTs).
+
+**Alternativas descartadas.** Rayleigh/Mie fisico con LUTs (nivel 3) queda como
+`v0.32` **opcional**; se deja desactivado por defecto si no iguala la tabla.
+
+**Consecuencia.** `render/sky.wgsl`. 288 tests; clippy limpio. Capturas
+`v0.31.1_{belt_of_venus,halo}.png`. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos
+(16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

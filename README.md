@@ -8,7 +8,7 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.31.0` — Cielo y atmosfera
+## Estado actual: `v0.31.1` — Cielo y atmosfera
 
 - **Cielo con gradiente** (`v0.30.0`): el fondo plano pasa a un pase de cielo
   (`render/sky.wgsl`) con gradiente **cenit <-> horizonte** que depende de la
@@ -25,6 +25,9 @@ versionado del mundo y la generacion procedural.
   el horizonte. La luna tiene **fase** (ciclo de 8 dias de juego via `day_count`).
   El cielo nocturno tiene ~1500 **estrellas** deterministas por hash, con
   parpadeo. Rig celeste de referencia en Blockbench (`assets/src/models/`).
+- **Fenomenos atmosfericos** (`v0.31.1`): halo solar con funcion de fase de
+  Henyey-Greenstein, **Cinturon de Venus** (banda rosa en el lado opuesto al sol
+  durante el crepusculo) y **hora azul** por la paleta de crepusculo nautico.
 - **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte
   (noche profunda, crepusculos astronomico/nautico/civil, golden hour, manana/tarde,
   mediodia), mezcladas en **OKLab** con `smoothstep` para que recorrer 24 h no de

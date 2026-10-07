@@ -204,10 +204,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let tgrad = smoothstep(0.0, 1.0, pow(h, sky.exponent));
     var col = mix(horizon, sky.zenith, tgrad);
 
-    // Halo solar (lobulo Mie hacia adelante): calido cerca del horizonte.
+    // Halo solar: lobulo de Mie hacia adelante (Henyey-Greenstein, g < 1), que
+    // concentra la luz alrededor del sol y deja un halo calido cerca del horizonte.
     let cos_sun = dot(dir, sky.sun_dir);
-    let glow = pow(max(cos_sun, 0.0), 8.0) * sky.sun_glow;
-    col += sky.sun_color * (glow * 0.35);
+    let g = 0.76;
+    let mu = cos_sun;
+    let hg = (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
+    col += sky.sun_color * (hg * sky.sun_glow * 0.5);
+
+    // Cinturon de Venus: banda rosa sobre la sombra de la Tierra, en el lado
+    // opuesto al sol, poco despues del atardecer / antes del amanecer.
+    let anti = 1.0 - towards_sun;
+    let band = exp(-pow((dir.y - 0.06) / 0.045, 2.0));
+    col += vec3<f32>(0.85, 0.30, 0.55) * (band * sky.belt * anti * 0.35);
 
     // Estrellas (solo de noche y por encima del horizonte).
     let above = smoothstep(-0.05, 0.2, dir.y);
