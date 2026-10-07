@@ -48,7 +48,7 @@ fn update_mesh(
         Some(mesh) => mesh.update(device, queue, vertices, indices),
         None => {
             if !vertices.is_empty() {
-                *slot = Some(Mesh::new(device, label, vertices, indices));
+                *slot = Some(Mesh::new(device, queue, label, vertices, indices));
             }
         }
     }
@@ -856,7 +856,7 @@ impl Renderer {
                 h.block[2] as f32 + 0.5,
                 0.002,
             );
-            Mesh::new(&self.device, "highlight", &v, &i)
+            Mesh::new(&self.device, &self.queue, "highlight", &v, &i)
         });
     }
 

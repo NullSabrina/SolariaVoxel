@@ -10,7 +10,18 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.17.0 - Worldgen por etapas (FASE 1/2)
+//! ## Estado actual: v0.17.1 - Fix: overrun del buffer de malla
+//!
+//! `Mesh::new` creaba los buffers GPU con el tamano **exacto** de los datos pero
+//! registraba `capacity = next_power_of_two()` (mayor). Al re-meshear una seccion
+//! que crecia dentro de ese rango, `Mesh::update` creia que cabia y
+//! `write_buffer` se salia del buffer (`wgpu Validation Error`), cerrando el
+//! juego. El nuevo worldgen (variabilidad de mallas) lo destapo. Ahora el buffer
+//! se crea con la capacidad reservada; test de la invariante `capacidad >= bytes`.
+//!
+//! Hereda de v0.17.0 (worldgen FASE 1/2). Siguiente: FASE 3 (bioma por celda).
+//!
+//! ## v0.17.0 - Worldgen por etapas (FASE 1/2)
 //!
 //! Primer rediseno del generador de mundo (auditoria de worldgen). Nuevo modulo
 //! [`world::worldgen`] con:

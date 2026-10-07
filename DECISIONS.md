@@ -2393,6 +2393,36 @@ oceano 31-55% segun seed, abisal presente, picos hasta el techo de mundo.
 
 ---
 
+### 2026-10-05 (v0.17.1) — Fix: overrun del buffer GPU de malla
+
+**Contexto.** Al caminar hacia tierra, el juego se cerraba con
+`wgpu Validation Error: In Queue::write_buffer ... would end up overrunning the
+bounds of the Destination buffer of size 84352` (copia de 84992 bytes). El nuevo
+worldgen produce mallas de seccion de tamano mas variable y destapo el bug.
+
+**Causa.** `Mesh::new` (v0.8.18) creaba los buffers con `create_buffer_init`
+(tamano = datos exactos) pero guardaba `vertex_capacity = bytes.next_power_of_two()`
+(mayor). `Mesh::update` decidia recrear solo si `bytes > capacity`; entre el
+tamano exacto y la potencia de dos, creia que cabia y `write_buffer` escribia mas
+alla del buffer real.
+
+**Decision.** Crear los buffers con la capacidad **reservada** (`buffer_capacity`,
+potencia de dos) y subir los datos con `write_buffer`; asi `capacity` refleja el
+tamano real. Helper `buffer_capacity(bytes)` con test de la invariante
+`capacidad >= bytes` y potencia de dos.
+
+**Alternativas descartadas.** `create_buffer_init` con `contents` rellenado a la
+capacidad: sube CPU por una copia extra sin necesidad. No reservar holgura
+(crear siempre del tamano exacto): vuelve al churn de buffers por edicion.
+
+**Consecuencia.** `render/mesh.rs` (`buffer_capacity`, `new` con `queue`,
+`update`), `render/renderer.rs` (llamadas con `queue`). 237 tests; clippy limpio.
+Verificado reproduciendo la caminata real (varios cruces de chunk) sin crash.
+**Leccion**: es un bug latente de v0.8.18 que un cambio de datos (worldgen) hizo
+visible; el test de la invariante evita que reaparezca.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

@@ -8,7 +8,16 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.17.0` — Worldgen por etapas (FASE 1/2)
+## Estado actual: `v0.17.1` — Fix: overrun del buffer de malla
+
+`Mesh::new` creaba los buffers GPU con el tamaño **exacto** de los datos pero
+registraba `capacity = next_power_of_two()` (mayor). Al re-meshear una sección que
+crecía dentro de ese rango, `Mesh::update` creía que cabía y `write_buffer` se
+salía del buffer (`wgpu Validation Error`) → el juego se cerraba al caminar hacia
+tierra. El nuevo worldgen (mallas de tamaño más variable) lo destapó. Ahora el
+buffer se crea con la capacidad reservada; test de la invariante `capacidad >= bytes`.
+
+## v0.17.0 — Worldgen por etapas (FASE 1/2)
 
 Primer rediseño del generador de mundo (auditoría de worldgen). Nuevo módulo
 `world/worldgen/` con:

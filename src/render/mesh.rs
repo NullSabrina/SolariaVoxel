@@ -5,7 +5,6 @@
 //! ([`crate::world::mesh_chunk`]), que genera un vertice por esquina de cara.
 
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 
 /// Un vertice tal y como lo ve la GPU.
 ///
@@ -75,6 +74,17 @@ impl Vertex {
     }
 }
 
+/// Capacidad reservada para `bytes`: la potencia de dos siguiente (>= `bytes`).
+///
+/// Invariante critica: el buffer GPU se crea con **este** tamano (no con el
+/// tamano exacto de los datos). Si se creara con el exacto, `update` creeria que
+/// cabe una malla mayor y `write_buffer` se saldria del buffer (crash de
+/// validacion de wgpu).
+#[inline]
+pub fn buffer_capacity(bytes: u64) -> u64 {
+    bytes.next_power_of_two().max(1)
+}
+
 /// Una malla subida a la GPU.
 ///
 /// Los buffers se crean con holgura (`next_power_of_two`) y se **reutilizan** al
@@ -90,21 +100,41 @@ pub struct Mesh {
 
 impl Mesh {
     /// Crea la malla a partir de vertices e indices (u32).
-    pub fn new(device: &wgpu::Device, label: &str, vertices: &[Vertex], indices: &[u32]) -> Self {
+    ///
+    /// Los buffers se crean con la capacidad **reservada** (`next_power_of_two`),
+    /// no con el tamano exacto de los datos. Si se crearan con el tamano exacto,
+    /// `vertex_capacity` mentiria: `update` creeria que cabe una malla mas grande
+    /// y `write_buffer` se saldria del buffer (overrun de la GPU). Ese era el
+    /// crash que aparecia al re-meshear una seccion que crecia.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: &str,
+        vertices: &[Vertex],
+        indices: &[u32],
+    ) -> Self {
         let vbytes = std::mem::size_of_val(vertices) as u64;
         let ibytes = std::mem::size_of_val(indices) as u64;
-        let vertex_capacity = vbytes.next_power_of_two().max(1);
-        let index_capacity = ibytes.next_power_of_two().max(1);
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vertex_capacity = buffer_capacity(vbytes);
+        let index_capacity = buffer_capacity(ibytes);
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label}.vertices")),
-            contents: bytemuck::cast_slice(vertices),
+            size: vertex_capacity,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label}.indices")),
-            contents: bytemuck::cast_slice(indices),
+            size: index_capacity,
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
+        if vbytes > 0 {
+            queue.write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(vertices));
+        }
+        if ibytes > 0 {
+            queue.write_buffer(&index_buffer, 0, bytemuck::cast_slice(indices));
+        }
         Self {
             vertex_buffer,
             index_buffer,
@@ -126,7 +156,7 @@ impl Mesh {
         let vbytes = std::mem::size_of_val(vertices) as u64;
         let ibytes = std::mem::size_of_val(indices) as u64;
         if vbytes > self.vertex_capacity {
-            self.vertex_capacity = vbytes.next_power_of_two();
+            self.vertex_capacity = buffer_capacity(vbytes);
             self.vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mesh.vertices"),
                 size: self.vertex_capacity,
@@ -135,7 +165,7 @@ impl Mesh {
             });
         }
         if ibytes > self.index_capacity {
-            self.index_capacity = ibytes.next_power_of_two();
+            self.index_capacity = buffer_capacity(ibytes);
             self.index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mesh.indices"),
                 size: self.index_capacity,
@@ -171,5 +201,24 @@ impl Mesh {
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.index_count, 0, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn la_capacidad_cubre_los_datos_y_es_potencia_de_dos() {
+        // Regresion del overrun: la capacidad reservada debe ser SIEMPRE >= que
+        // los bytes escritos, o `write_buffer` se sale del buffer GPU.
+        for bytes in [0u64, 1, 3, 4, 4096, 84_352, 84_992, 100_000, 1 << 20] {
+            let cap = buffer_capacity(bytes);
+            assert!(cap >= bytes, "capacidad {cap} < bytes {bytes}");
+            assert!(
+                cap.is_power_of_two(),
+                "capacidad {cap} no es potencia de dos"
+            );
+        }
     }
 }
