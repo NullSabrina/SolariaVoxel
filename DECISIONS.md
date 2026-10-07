@@ -2603,6 +2603,42 @@ clippy limpio. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (12/5): no cambia
 el mundo ni el guardado, solo la simulacion. Tick de agua ~9x mas barato
 (0.238 -> 0.027 ms) al alcanzar el equilibrio. Siguiente: FASE 7 (decoracion).
 
+## v0.21.1 — El agua generada se asienta sola y tick a 10 Hz
+
+### 2026-10-07 — Despertar el agua de worldgen al cargar
+
+**Decision.**
+- El agua de **worldgen** (rios/lagos) nacia como fuente y **nunca entraba al
+  active set**: se veia congelada hasta que el jugador editaba algo cerca. Ahora
+  el generador **registra la superficie de agua** por columna vertical (campo de
+  runtime `Column::water_surface`, no se guarda) y `World::wake_column_water`
+  encola, al cargar la columna, las celdas de superficie que **no estan en
+  equilibrio**. Asi el agua generada se asienta sola al llegar.
+- El tick de agua baja de 20 a **10 Hz** (`WATER_PERIOD = 0.1`): colocar agua se
+  veia "nervioso" (se iba a los lados demasiado rapido).
+
+**Motivo.** El usuario reporto que el agua de un lugar aparecia quieta y solo se
+actualizaba al colocar un bloque, y que al colocar agua con el cubo se expandia
+demasiado rapido. Lo primero era que el agua generada no se encolaba; lo segundo,
+el tick a 20 Hz.
+
+**Alternativas descartadas.** Escanear la columna entera al cargar buscando agua
+(costaba ~230 ms extra en el `warm_streaming` de 81 columnas): se sustituyo por
+el registro en generacion, que es O(celdas de agua). Encolar *todo* el agua
+generada (los oceanos en equilibrio se saltan igual, pero se encolarian cientos
+de miles de celdas): se filtran con `water_in_equilibrium`.
+
+**Tradeoffs.** Un mundo guardado antes de este cambio no trae `water_surface`
+(el campo no se persiste), asi que su agua no se despertara automaticamente
+hasta una edicion; es aceptable (el registro se regenera al volver a generar).
+
+**Consecuencia.** `world/chunk.rs` (campo `water_surface` + acceso),
+`world/terrain.rs` (lo rellena al generar), `world/store.rs`
+(`wake_column_water` en `load_column` y `poll_generation`),
+`engine/app.rs` (`WATER_PERIOD` a 10 Hz). 250 tests (nuevos: la superficie de
+agua se registra y el agua generada converge). Sin cambio de mundo ni guardado
+(12/5).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

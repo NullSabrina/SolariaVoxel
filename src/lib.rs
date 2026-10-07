@@ -10,7 +10,18 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.21.0 - Agua estilo Minecraft (fuente -> distancia)
+//! ## Estado actual: v0.21.1 - El agua generada se asienta sola
+//!
+//! El agua de **worldgen** (rios/lagos) nacia como fuente y **nunca se
+//! encolaba**: se quedaba congelada hasta que el jugador editaba algo cerca. Al
+//! cargar una columna ahora se registra su **superficie de agua** (en `Column`,
+//! una pista de runtime que no se guarda) y se encola la parte que **no esta en
+//! equilibrio**, asi que se **asienta sola** al llegar. Ademas el tick baja a
+//! **10 Hz** para que colocar agua no se vea nervioso.
+//!
+//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (12/5). Hereda de v0.21.0.
+//!
+//! ## v0.21.0 - Agua estilo Minecraft (fuente -> distancia)
 //!
 //! `world/water.rs` deja de ser un **igualador que conserva volumen** (se
 //! comportaba como una banera) y pasa al modelo de **Minecraft**:

@@ -318,6 +318,10 @@ impl TerrainGenerator {
                             column.set(x, y, z, Block::Water);
                         }
                     }
+                    // Pista de runtime: la superficie de agua, para despertarla al
+                    // cargar la columna (que el agua generada se asiente sola).
+                    let top_y = water_top.min(WORLD_HEIGHT).saturating_sub(1);
+                    column.push_water_surface(x, z, top_y);
                 }
 
                 // Decoracion: candidato a arbol (interior, densidad, pendiente).
@@ -790,6 +794,19 @@ mod tests {
             }
         }
         assert!(agua_subterranea > 0, "los acuiferos no llenaron cuevas");
+    }
+
+    #[test]
+    fn el_agua_de_superficie_se_registra_para_despertarla() {
+        let g = TerrainGenerator::new(13_371);
+        let mut total = 0usize;
+        for cz in -6..6 {
+            for cx in -6..6 {
+                let column = g.generate_column(cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
+                total += column.water_surface().len();
+            }
+        }
+        assert!(total > 0, "no se registro agua de superficie en la region");
     }
 
     const BEDROCK: usize = 6;

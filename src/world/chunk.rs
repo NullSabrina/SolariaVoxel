@@ -107,6 +107,11 @@ pub struct Column {
     /// barrido de emisores era el grueso del coste al cruzar de chunk). Se
     /// invalida en [`Column::set`] (cambia un bloque).
     emitters: Option<Vec<(u32, u8)>>,
+    /// Agua de **superficie** de worldgen, una entrada `[x, z, y]` por columna
+    /// vertical que tenga agua. Es una **pista de runtime** (no se guarda): la
+    /// usa `World::wake_column_water` para encolar el agua generada al cargar la
+    /// columna y que se asiente sola. Evita re-escanear la columna entera.
+    water_surface: Vec<[u8; 3]>,
 }
 
 impl Column {
@@ -119,7 +124,19 @@ impl Column {
             surface: [0; CHUNK_SIZE * CHUNK_SIZE],
             fluid: None,
             emitters: None,
+            water_surface: Vec::new(),
         }
+    }
+
+    /// Registra la celda de agua de superficie de `(x, z)` a la altura `y`.
+    pub fn push_water_surface(&mut self, x: usize, z: usize, y: usize) {
+        self.water_surface
+            .push([x as u8, z as u8, y.min(255) as u8]);
+    }
+
+    /// Celdas de agua de superficie registradas al generar (una por columna).
+    pub fn water_surface(&self) -> &[[u8; 3]] {
+        &self.water_surface
     }
 
     /// Indice plano de la luz.

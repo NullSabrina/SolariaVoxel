@@ -365,6 +365,29 @@ impl World {
         // de bloque se calcula a nivel de **mundo** (cruza chunks), no aqui.
         column.compute_skylight();
         self.columns.insert(pos, Box::new(column));
+        self.wake_column_water(pos);
+    }
+
+    /// Despierta el agua **generada** de una columna recien cargada: encola la
+    /// celda de agua superior de cada `(x, z)` que no este ya en equilibrio, para
+    /// que el agua de worldgen (rios/lagos) se **asiente sola** al llegar en vez
+    /// de quedarse congelada hasta que el jugador edite algo.
+    fn wake_column_water(&mut self, pos: ChunkPos) {
+        let ox = pos.x * CHUNK_SIZE as i32;
+        let oz = pos.z * CHUNK_SIZE as i32;
+        let cells: Vec<[i32; 3]> = match self.columns.get(&pos) {
+            Some(column) => column
+                .water_surface()
+                .iter()
+                .map(|&[x, z, y]| [ox + x as i32, y as i32, oz + z as i32])
+                .collect(),
+            None => return,
+        };
+        for c in cells {
+            if !self.water_in_equilibrium(c) {
+                self.enqueue_water(c);
+            }
+        }
     }
 
     /// Recalcula la **luz de cielo** con propagacion **lateral** (BFS a nivel de
@@ -800,6 +823,7 @@ impl World {
             }
             column.compute_skylight();
             self.columns.insert(result.pos, column);
+            self.wake_column_water(result.pos);
             loaded.push(result.pos);
         }
         loaded
@@ -1551,6 +1575,24 @@ mod tests {
         // Un tick mas no reporta ningun chunk sucio ni procesa nada visible.
         assert!(world.tick_water(100_000).is_empty());
         assert!(world.water_at([8, 101, 8]).is_source());
+    }
+
+    #[test]
+    fn el_agua_generada_se_asienta_al_cargar_y_converge() {
+        // Cargar un area con rios/lagos (worldgen) encola su agua de superficie;
+        // el automata debe asentarla y **converger** (active set a 0).
+        let mut world = World::new(13_371, 3, vec![]);
+        world.warm_streaming([0.0, 64.0, 0.0]);
+        let mut ticks = 0;
+        while world.pending_water_cells() > 0 && ticks < 2000 {
+            world.tick_water(100_000);
+            ticks += 1;
+        }
+        assert_eq!(
+            world.pending_water_cells(),
+            0,
+            "el agua generada no convergio en {ticks} ticks"
+        );
     }
 
     #[test]

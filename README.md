@@ -8,10 +8,9 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.21.0` — Agua estilo Minecraft
+## Estado actual: `v0.21.1` — Agua estilo Minecraft
 
-La simulacion de agua (`world/water.rs`) se reescribio al modelo de **Minecraft
-(Java)**:
+La simulacion de agua (`world/water.rs`) usa el modelo de **Minecraft (Java)**:
 
 - **Nivel 8 = fuente**; el flujo vale `8 − distancia` (alcance **7 bloques**).
 - El nivel de una celda de flujo se **recalcula** desde sus vecinos
@@ -20,7 +19,11 @@ La simulacion de agua (`world/water.rs`) se reescribio al modelo de **Minecraft
   conservaba volumen).
 - **Fuentes infinitas** (2+ vecinos fuente), **caida** a nivel 8 (el agua
   prefiere bajar) y el flujo huerfano se seca.
-- Tick **mas rapido** que Minecraft: **20 Hz** (Minecraft usa 0.25 s por paso).
+- El agua **generada** (rios/lagos) se **asienta sola al cargar la columna** (se
+  registra su superficie y se encola la parte fuera de equilibrio), en vez de
+  quedarse congelada hasta editar algo.
+- Tick **10 Hz**: mas rapido que Minecraft (0.25 s por paso) pero sin verse
+  nervioso al colocar agua.
 
 No cambia el mundo ni el guardado (`GENERATOR_VERSION`/`FORMAT_VERSION` = 12/5).
 
@@ -102,7 +105,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-248 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+250 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash
