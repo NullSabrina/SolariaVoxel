@@ -121,6 +121,7 @@ fn render_map(
 ) {
     let (mut n_ocean, mut n_land, mut n_deep) = (0u64, 0u64, 0u64);
     let mut n_river = 0u64;
+    let mut n_coast = 0u64;
     let mut heights: Vec<i32> = Vec::with_capacity(pixels * pixels);
     let mut cells: std::collections::HashSet<u64> = std::collections::HashSet::new();
     let mut biome_counts: HashMap<Biome, u64> = HashMap::new();
@@ -139,6 +140,9 @@ fn render_map(
                 _ => n_land += 1,
             }
             heights.push(h as i32);
+            if (h as i32 - SEA_LEVEL).abs() <= 3 {
+                n_coast += 1;
+            }
             if s.surface_water > s.base_height + 0.5 {
                 n_river += 1;
             }
@@ -212,10 +216,11 @@ fn render_map(
     let total = (pixels * pixels) as f64;
     heights.sort_unstable();
     println!(
-        "[preview] oceano {:.1}% (abisal {:.1}%) | tierra {:.1}% | agua superficial {:.1}%",
+        "[preview] oceano {:.1}% (abisal {:.1}%) | tierra {:.1}% | franja costa {:.1}% | agua superficial {:.1}%",
         100.0 * (n_ocean + n_deep) as f64 / total,
         100.0 * n_deep as f64 / total,
         100.0 * n_land as f64 / total,
+        100.0 * n_coast as f64 / total,
         100.0 * n_river as f64 / total
     );
     println!(

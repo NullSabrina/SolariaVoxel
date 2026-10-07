@@ -182,15 +182,18 @@ fn derive(seed: u32, salt: u32) -> u32 {
 /// suave y controlable desde un solo sitio.
 fn continental_base(c: f32) -> f32 {
     // Cruza el 0 en `c = ocean_threshold` (0.0): ahi esta la linea de costa.
+    // Perfil `continentalness -> altura relativa al mar`. El tramo cerca de 0 se
+    // hace **empinado** para que la playa/plataforma sea estrecha (antes el
+    // gradiente suave dejaba costas muy anchas y planas).
     let points: [(f32, f32); 9] = [
-        (-1.00, -64.0),
-        (-0.60, -40.0),
-        (-0.30, -22.0),
-        (-0.10, -8.0),
+        (-1.00, -72.0),
+        (-0.55, -46.0),
+        (-0.28, -24.0),
+        (-0.10, -9.0),
         (0.00, 0.0),
-        (0.12, 10.0),
-        (0.45, 42.0),
-        (0.75, 86.0),
+        (0.05, 8.0),
+        (0.20, 24.0),
+        (0.60, 70.0),
         (1.00, 140.0),
     ];
     math::spline(&points, c)
@@ -400,8 +403,11 @@ impl WorldGen {
         let h_cell = self.climate_field(&self.humidity, ccx, ccz, cfg.humidity_scale);
         // En el interior de la celda domina el centro; cerca del borde, lo local.
         let blend = math::smoothstep(0.15, 0.55, cell.edge);
-        let temperature = math::lerp(t_local, t_cell, blend);
-        let humidity = math::lerp(h_local, h_cell, blend);
+        // Contraste climatico: empuja el clima hacia los extremos (mas biomas
+        // frios/calidos y secos/humedos; antes todo caia cerca de 0.5).
+        let contrast = |v: f32| math::saturate(0.5 + (v - 0.5) * cfg.climate_contrast);
+        let temperature = contrast(math::lerp(t_local, t_cell, blend));
+        let humidity = contrast(math::lerp(h_local, h_cell, blend));
 
         // --- Landforms (FASE 4): mesetas/terrazas/acantilados ---
         self.bump();
@@ -619,6 +625,23 @@ mod tests {
             max = max.max(s.coast_roll);
         }
         assert!(max - min > 0.3, "coast_roll poco variado: {min}..{max}");
+    }
+
+    #[test]
+    fn el_clima_llega_a_los_extremos() {
+        // Con el contraste climatico debe haber regiones claramente frias y
+        // calidas (si no, los biomas frios/calidos serian raros).
+        let g = WorldGen::new(13_371);
+        let (mut tmin, mut tmax) = (1.0f32, 0.0f32);
+        for x in (-3000..3000).step_by(101) {
+            for z in (-3000..3000).step_by(103) {
+                let t = g.sample(x as f64, z as f64).temperature;
+                tmin = tmin.min(t);
+                tmax = tmax.max(t);
+            }
+        }
+        assert!(tmin < 0.25, "no hay clima frio: {tmin}");
+        assert!(tmax > 0.75, "no hay clima calido: {tmax}");
     }
 
     #[test]

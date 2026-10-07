@@ -11,7 +11,7 @@
 //! parametros".
 
 /// Version de la configuracion de worldgen.
-pub const WORLDGEN_CONFIG_VERSION: u32 = 2;
+pub const WORLDGEN_CONFIG_VERSION: u32 = 3;
 
 /// Parametros de la generacion de mundo. Valores iniciales a calibrar.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,6 +45,10 @@ pub struct WorldGenConfig {
     pub altitude_lapse_start: f32,
     /// Altura (bloques) a la que la normalizacion de altitud llega a 1.
     pub altitude_top: f32,
+    /// Contraste del clima: > 1 empuja temperatura/humedad a los extremos
+    /// (mas desiertos, tundras y selvas; antes el clima quedaba casi todo en el
+    /// centro `0.5` y los biomas frios/calidos eran raros).
+    pub climate_contrast: f32,
 
     /// Frecuencia y amplitud del relieve macro (colinas grandes).
     pub macro_scale: f64,
@@ -120,6 +124,7 @@ impl Default for WorldGenConfig {
             altitude_lapse_rate: 0.16,
             altitude_lapse_start: 0.20,
             altitude_top: 180.0,
+            climate_contrast: 1.5,
 
             macro_scale: 0.0018,
             macro_amplitude: 26.0,
@@ -192,6 +197,7 @@ impl WorldGenConfig {
             ("plateau_step", self.plateau_step),
             ("terrace_step", self.terrace_step),
             ("cliff_step", self.cliff_step),
+            ("climate_contrast", self.climate_contrast),
         ] {
             if v <= 0.0 {
                 return Err(ConfigError::NotPositive(name));

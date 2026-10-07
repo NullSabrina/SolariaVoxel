@@ -78,4 +78,5 @@ Escenas demo del motor: `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_RIVER`,
 - `GENERATOR_VERSION` (resultado del mundo) y `FORMAT_VERSION` (binario) son
   **independientes**. Cambiar el mundo sube `GENERATOR_VERSION`; cambiar el
   guardado sube `FORMAT_VERSION` con migrador + test.
-- Actual: `GENERATOR_VERSION = 15`, `FORMAT_VERSION = 5`.
+- Actual: `GENERATOR_VERSION = 16`, `FORMAT_VERSION = 5`,
+  `WORLDGEN_CONFIG_VERSION = 3`.

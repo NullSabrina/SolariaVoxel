@@ -78,7 +78,10 @@ pub const FORMAT_VERSION: u32 = 5;
 /// * v15: **tooling** (FASE 9) + calibracion de landforms: previews de cuevas
 ///   (slices), seed gallery y metricas; umbrales de landform ajustados para que
 ///   mesetas/terrazas/acantilados aparezcan con una proporcion util.
-pub const GENERATOR_VERSION: u32 = 15;
+/// * v16: **tuning del clima y la costa**: contraste climatico (mas biomas
+///   frios/aridos) y perfil continental mas empinado cerca de la costa (playas y
+///   plataformas mas estrechas).
+pub const GENERATOR_VERSION: u32 = 16;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";

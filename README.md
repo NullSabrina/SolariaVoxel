@@ -8,24 +8,27 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.24.0` — Worldgen FASE 9: tooling y calibracion
+## Estado actual: `v0.25.0` — Tuning del clima y la costa
 
-Herramientas offline para equilibrar el generador **con datos**:
+Calibracion con las metricas de la FASE 9:
 
-- `worldgen_preview` gana la capa `landform` (colorea el perfil de cada region)
-  y **slices de cuevas**: `cave` (horizontal a `y=30`) y `cave_yz` (vertical).
-- Metricas nuevas: alturas p50/p95/p99, agua superficial % y aire subterraneo %.
-- `seed_gallery`: mosaico de mapas de bioma de 8 semillas en un PNG.
-- `TerrainGenerator::cave_carve_at`: consulta barata de cueva para previews.
-- Umbrales de landform **calibrados** (antes casi todo el mundo era `Rolling`).
+- **Contraste climatico** (`climate_contrast`): temperatura y humedad se empujan
+  a los extremos. Antes el clima quedaba casi todo cerca de `0.5` y los biomas
+  frios/aridos eran raros (Tundra+Taiga `~1.5 %`); ahora hay regiones frias,
+  calidas, secas y humedas.
+- **Costa mas estrecha**: el perfil `continentalness -> altura` es mas empinado
+  cerca de 0, asi que playas y plataformas son mas cortas (antes el gradiente
+  suave dejaba costas muy anchas y planas).
 
-`GENERATOR_VERSION → 15`. `FORMAT_VERSION` intacto (5).
+Reparto medido (2048x2048, seed 13371): Plains 30 % / Forest 24 % / Savanna 17 %
+/ Desert 11 % / Swamp 10 % / Tundra 6 % / Taiga 3 %.
 
-- **Landforms** (`v0.23.0`, FASE 4): perfiles de relieve por region — `Plateau`
-  (mesetas), `Terraced` (terrazas), `Cliffs` (acantilados), `Rolling`; via
-  `terrace(h, step, sharpness)`. `WORLDGEN_CONFIG_VERSION → 2`.
-- **Decoracion** (`v0.22.0`, FASE 7): reglas (`DecorationRule`), arboles con
-  claros (clusters) y rocas; rejilla de muestras con padding.
+`GENERATOR_VERSION → 16`. `WORLDGEN_CONFIG_VERSION → 3`. `FORMAT_VERSION = 5`.
+
+- **Tooling** (`v0.24.0`, FASE 9): slices de cuevas (`cave`, `cave_yz`), capa
+  `landform`, `seed_gallery` y metricas (p50/p95/p99, costa, aire subterraneo).
+- **Landforms** (`v0.23.0`, FASE 4): `Plateau`/`Terraced`/`Cliffs`/`Rolling`.
+- **Decoracion** (`v0.22.0`, FASE 7): reglas (`DecorationRule`), claros y rocas.
 - **Agua** (`v0.21.0`–`v0.21.1`): modelo de Minecraft (fuente→distancia),
   fuentes infinitas, caida; el agua **generada se asienta sola** al cargar la
   columna y el tick va a 10 Hz.
@@ -105,7 +108,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-259 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+260 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash

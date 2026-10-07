@@ -2741,6 +2741,36 @@ dibujar etiquetas de seed en la galeria (requiere fuente bitmap).
 tests (nuevo: `cave_carve_at` determinista y encuentra cuevas); clippy limpio.
 Previews: `worldgen_preview_13371_{landform,cave,cave_yz}.png`, `seed_gallery.png`.
 
+## v0.25.0 — Tuning del clima y la costa
+
+### 2026-10-07 — Mas contraste climatico y costas mas estrechas
+
+**Decision.** Calibrar el generador con las metricas de la FASE 9:
+- **Contraste climatico** (`climate_contrast = 1.5`, config): `t' = 0.5 +
+  (t - 0.5) * contraste` sobre temperatura y humedad (tras la mezcla de celda,
+  antes del lapse).
+- **Perfil continental mas empinado** cerca de 0: la spline
+  `continentalness -> altura` sube de 0 a +8 en `[0, 0.05]` (antes +10 en
+  `[0, 0.12]`), y la plataforma cae mas rapido hacia el talud.
+
+**Motivo.** Dos problemas medidos: (1) el clima se concentraba cerca de `0.5`
+(el `Fbm` de 3 octavas da un rango estrecho), asi que Tundra+Taiga sumaban < 2 %
+y el resto era templado; (2) el gradiente continental es suave (frecuencia
+0.00045), asi que playas y plataformas ocupaban cientos de bloques.
+
+**Alternativas descartadas.** Ensanchar las bandas de los biomas frios (parche
+que no arregla el clima); subir la frecuencia continental global (encogeria los
+continentes); solo bajar los umbrales de bioma (menos natural).
+
+**Tradeoffs.** Cambia el mundo (`GENERATOR_VERSION -> 16`). El contraste es un
+parametro de config (`WORLDGEN_CONFIG_VERSION -> 3`); subirlo mas exagera desiertos
+y tundras. La p50 de altura sigue cerca del mar (hay mucho oceano/plataforma).
+
+**Consecuencia.** `worldgen/{config,mod}.rs`. 260 tests (nuevo: el clima llega a
+extremos < 0.25 y > 0.75); clippy limpio. Reparto de biomas (seed 13371) pasa de
+Plains 38 / Forest 33 / Savanna 18 / Desert 4 / Swamp 6 / Tundra 0.8 / Taiga 0.7
+a Plains 30 / Forest 24 / Savanna 17 / Desert 11 / Swamp 10 / Tundra 6 / Taiga 3.
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

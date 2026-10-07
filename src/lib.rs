@@ -10,7 +10,21 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.24.0 - Worldgen FASE 9: tooling y calibracion
+//! ## Estado actual: v0.25.0 - Tuning del clima y la costa
+//!
+//! Pasada de calibracion del generador con las metricas de la FASE 9:
+//! * **Contraste climatico** (`climate_contrast`, config): empuja temperatura y
+//!   humedad a los extremos; antes el clima quedaba casi todo cerca de `0.5` y
+//!   los biomas frios/aridos eran raros (Tundra+Taiga < 2 %). Ahora hay regiones
+//!   claramente frias, calidas, secas y humedas.
+//! * **Perfil continental mas empinado** cerca de 0 (la costa): playas y
+//!   plataformas mas **estrechas** (antes el gradiente suave dejaba costas muy
+//!   anchas y planas).
+//!
+//! `GENERATOR_VERSION -> 16`. `WORLDGEN_CONFIG_VERSION -> 3`.
+//! `FORMAT_VERSION` intacto (5). Hereda de v0.24.0.
+//!
+//! ## v0.24.0 - Worldgen FASE 9: tooling y calibracion
 //!
 //! Herramientas offline para **equilibrar el generador con datos**:
 //! * `worldgen_preview` gana capas `landform` (colorea el perfil de cada region)
