@@ -10,7 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.26.0 - Interpolacion de render (timestep fijo)
+//! ## Estado actual: v0.27.0 - Overlay F3 en pantalla (fuente bitmap)
+//!
+//! La pantalla de diagnostico **F3** deja de ir en el titulo de la ventana y se
+//! dibuja **en pantalla**, al estilo de Minecraft: dos columnas con fondo oscuro
+//! (izquierda: version, fps/tiempos, XYZ/bloque/chunk, orientacion, bioma, luz,
+//! hora, semilla; derecha: draw calls, triangulos, culling, chunks, memoria,
+//! GPU, cola de fluidos y guardado). Para dibujar texto anadimos una **fuente
+//! bitmap 5x7** (`render/font.rs`) empaquetada en un atlas de una textura; cada
+//! caracter es un quad que samples su celda.
+//!
+//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Hereda de v0.26.0.
+//!
+//! ## v0.26.0 - Interpolacion de render (timestep fijo)
 //!
 //! La fisica del jugador corre a **timestep fijo** (120 Hz) pero el render puede
 //! ir a mas FPS. Antes la camara usaba directamente la posicion de la fisica, asi

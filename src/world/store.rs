@@ -90,6 +90,11 @@ impl World {
         self.generator.seed()
     }
 
+    /// Bioma del generador en `(x, z)` (para el overlay F3).
+    pub fn biome_at(&self, x: i32, z: i32) -> super::terrain::Biome {
+        self.generator.biome_at(x, z)
+    }
+
     /// Radio de carga actual.
     pub fn view_radius(&self) -> i32 {
         self.view_radius

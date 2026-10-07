@@ -21,6 +21,7 @@ use winit::window::Window;
 
 use crate::math::{Frustum, Mat4, Vec3};
 use crate::render::color::srgb_to_linear;
+use crate::render::font;
 use crate::render::gui;
 use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
@@ -239,9 +240,11 @@ pub struct Renderer {
     /// sigue apuntando al mismo bloque (se recreaba cada frame).
     highlight_hit: Option<[i32; 3]>,
 
-    /// Pipeline de la interfaz 2D (hotbar/inventario) y su textura.
+    /// Pipeline de la interfaz 2D (hotbar/inventario) y sus texturas.
     ui: UiPipeline,
     _gui_texture: wgpu::Texture,
+    /// Atlas de la fuente bitmap (overlay F3).
+    _font_texture: wgpu::Texture,
 
     /// El mundo en memoria.
     world: World,
@@ -324,12 +327,14 @@ impl Renderer {
             config.format,
             Self::DEPTH_FORMAT,
         );
-        // Textura de interfaz + su pipeline (comparte la vista del atlas).
+        // Textura de interfaz + fuente + su pipeline (comparte la vista del atlas).
         let (gui_texture, gui_view) = Self::create_gui_texture(&device, &queue);
+        let (font_texture, font_view) = Self::create_font_texture(&device, &queue);
         let ui = UiPipeline::new(
             &device,
             pipeline.atlas_view(),
             &gui_view,
+            &font_view,
             config.format,
             Self::DEPTH_FORMAT,
         );
@@ -365,6 +370,7 @@ impl Renderer {
             highlight_hit: None,
             ui,
             _gui_texture: gui_texture,
+            _font_texture: font_texture,
             world,
             meshes: HashMap::new(),
             mesh_queue: VecDeque::new(),
@@ -417,6 +423,46 @@ impl Renderer {
                 offset: 0,
                 bytes_per_row: Some(gui::GUI_W * 4),
                 rows_per_image: Some(gui::GUI_H),
+            },
+            size,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
+    }
+
+    /// Crea el atlas de la **fuente bitmap** (overlay F3).
+    fn create_font_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let size = wgpu::Extent3d {
+            width: font::FONT_W,
+            height: font::FONT_H,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("solaria.font"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let pixels = font::build_pixels();
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(font::FONT_W * 4),
+                rows_per_image: Some(font::FONT_H),
             },
             size,
         );
@@ -874,6 +920,28 @@ impl Renderer {
     /// Semilla del mundo.
     pub fn seed(&self) -> u32 {
         self.world.seed()
+    }
+
+    /// Tamano de la **superficie** de render, en pixels fisicos. Es el que usa
+    /// la conversion a NDC de la interfaz, asi que el layout (centrar, alinear)
+    /// debe basarse en el, no en el tamano de la ventana.
+    pub fn surface_size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    /// Luz de cielo (0..15) en coordenadas de voxel (overlay F3).
+    pub fn sky_light_at(&self, voxel: [i32; 3]) -> u8 {
+        self.world.sky_light_at(voxel)
+    }
+
+    /// Luz de bloque (0..15) en coordenadas de voxel (overlay F3).
+    pub fn block_light_at(&self, voxel: [i32; 3]) -> u8 {
+        self.world.block_light_at(voxel)
+    }
+
+    /// Bioma en `(x, z)` (overlay F3).
+    pub fn biome_at(&self, x: i32, z: i32) -> crate::world::Biome {
+        self.world.biome_at(x, z)
     }
 
     /// Informe de memoria del mundo (CPU) por categorias. Ver [`crate::world::memory`].

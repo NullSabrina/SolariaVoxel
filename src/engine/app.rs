@@ -100,15 +100,18 @@ pub struct App {
     /// captura. La fisica y el resaltado se desactivan para que la vista no se
     /// desplace antes de la foto.
     demo: bool,
-    /// Overlay de diagnostico (**F3** o `SOLARIA_STATS=1`): el titulo pasa a
-    /// mostrar tiempos, draw calls, colas, memoria y estado de guardado, y se
-    /// traza una linea `[stats]` por consola. No hay render de texto (no hay
-    /// fuente aun), asi que el "overlay" usa el titulo de la ventana.
+    /// Overlay de diagnostico (**F3** o `SOLARIA_STATS=1`): dibuja en pantalla
+    /// dos columnas de texto (jugador/mundo a la izquierda, render/sistema a la
+    /// derecha) con la fuente bitmap, al estilo de la pantalla de depuracion de
+    /// Minecraft. Ademas traza una linea `[stats]` por consola.
     show_stats: bool,
     /// Duracion del ultimo `update` (ms).
     update_ms: f32,
     /// Duracion del ultimo `render` (ms).
     render_ms: f32,
+    /// Ultimos FPS calculados (el titulo los refresca cada ~0.5 s; el overlay F3
+    /// los reutiliza).
+    last_fps: f32,
 }
 
 /// Ruta del archivo de mundo por defecto (junto al ejecutable de trabajo).
@@ -472,34 +475,9 @@ impl App {
             .unwrap_or((1.0, 1.0))
     }
 
-    /// Texto de la barra de titulo. Con el overlay **F3** (`show_stats`) incluye
-    /// tiempos, draw calls, columna/cola y memoria; si no, solo fps y draw calls.
-    fn title_line(
-        &self,
-        fps: f32,
-        stats: Option<crate::render::FrameStats>,
-        memory: Option<crate::world::WorldMemory>,
-        gpu_bytes: u64,
-        queued: usize,
-    ) -> String {
-        if self.show_stats
-            && let (Some(s), Some(m)) = (stats, memory)
-        {
-            use crate::world::memory::mib;
-            return format!(
-                "{} | {fps:.0}fps up{:.1} rnd{:.1}ms | {}dc {}tri | {}col q{} | mundo {:.1}MB gpu {:.1}MB | guardado {}",
-                window::TITLE,
-                self.update_ms,
-                self.render_ms,
-                s.draw_calls,
-                s.triangles,
-                m.columns,
-                queued,
-                mib(m.total_bytes()),
-                mib(gpu_bytes as usize),
-                if self.save_requested { "pend" } else { "ok" },
-            );
-        }
+    /// Texto de la barra de titulo (solo lo esencial: el detalle va en el overlay
+    /// **F3** en pantalla).
+    fn title_line(&self, fps: f32, stats: Option<crate::render::FrameStats>) -> String {
         match stats {
             Some(s) => format!(
                 "{}  |  {fps:.0} fps  |  {} dc  |  {} tri",
@@ -650,6 +628,130 @@ impl App {
                     layer: item.face_tile(Face::PosY) as i32,
                 });
             }
+        }
+
+        // Overlay de diagnostico **F3**: dos columnas con fondo oscuro.
+        if self.show_stats {
+            quads.extend(self.f3_overlay(win_w));
+        }
+        quads
+    }
+
+    /// Quads del overlay **F3** (estilo pantalla de depuracion de Minecraft):
+    /// columna izquierda con jugador/mundo, derecha con render/sistema, cada una
+    /// sobre un fondo oscuro translucido.
+    fn f3_overlay(&self, win_w: f32) -> Vec<crate::render::UiQuad> {
+        use crate::render::{UiQuad, font, gui, region_uv};
+        use crate::world::memory::mib;
+        let scale = UI_SCALE;
+        let advance = (font::GLYPH_H as f32 + 2.0) * scale;
+        let pad = 5.0;
+        // Ancho minimo reservado a la columna derecha (margen a la derecha).
+        const RIGHT_COL_W: f32 = 300.0;
+
+        let p = self.player_pos;
+        let feet_y = (p.y - crate::player::EYE_HEIGHT).floor() as i32;
+        let (bx, bz) = (p.x.floor() as i32, p.z.floor() as i32);
+        let (cx, cz) = (bx.div_euclid(16), bz.div_euclid(16));
+        let (rx, rz) = (cx.div_euclid(32), cz.div_euclid(32));
+        let (yaw, pitch) = self
+            .camera
+            .as_ref()
+            .map_or((0.0, 0.0), |c| (c.yaw_deg, c.pitch_deg));
+        let facing = if yaw.abs() < 45.0 {
+            "NORTH"
+        } else if yaw.abs() > 135.0 {
+            "SOUTH"
+        } else if yaw > 0.0 {
+            "EAST"
+        } else {
+            "WEST"
+        };
+        let (sky, blk) = self.renderer.as_ref().map_or((0, 0), |r| {
+            (
+                r.sky_light_at([bx, feet_y, bz]),
+                r.block_light_at([bx, feet_y, bz]),
+            )
+        });
+        let biome = self.renderer.as_ref().map_or("?", |r| {
+            crate::world::worldgen::biomes::definition(r.biome_at(bx, bz)).name
+        });
+        let tod = self.day_cycle.time_of_day * 24.0;
+        let stats = self.renderer.as_ref().map(|r| r.frame_stats());
+        let memory = self.renderer.as_ref().map(|r| r.world_memory());
+        let gpu = self.renderer.as_ref().map_or(0, |r| r.gpu_mesh_bytes());
+        let queued = self
+            .renderer
+            .as_ref()
+            .map_or(0, |r| r.pending_mesh_sections());
+
+        let left = [
+            format!("SOLARIA VOXEL {}", env!("CARGO_PKG_VERSION")),
+            format!(
+                "{:.0} FPS  UP {:.1}MS  RND {:.1}MS",
+                self.last_fps, self.update_ms, self.render_ms
+            ),
+            format!("XYZ: {:.2} / {:.2} / {:.2}", p.x, p.y, p.z),
+            format!("BLOCK: {bx} {feet_y} {bz}"),
+            format!("CHUNK: {cx} {cz} IN {rx} {rz}"),
+            format!("FACING: {facing} ({yaw:.1} / {pitch:.1})"),
+            format!("BIOME: {biome}"),
+            format!("LIGHT: {} ({sky} SKY, {blk} BLOCK)", sky.max(blk)),
+            format!("TIME: {:02}:{:02}", tod as u32, (tod * 60.0) as u32 % 60),
+            format!("SEED: {}", self.seed),
+        ];
+        let mut right: Vec<String> = Vec::new();
+        if let Some(s) = stats {
+            right.push(format!("DRAW CALLS: {}", s.draw_calls));
+            right.push(format!("TRIANGLES: {}", s.triangles));
+            right.push(format!(
+                "CULLED: F{} D{}",
+                s.culled_frustum, s.culled_distance
+            ));
+        }
+        if let Some(m) = memory {
+            right.push(format!("CHUNKS: {}", m.columns));
+            right.push(format!("MEMORY: {:.1} MB", mib(m.total_bytes())));
+        }
+        right.push(format!("GPU MESH: {:.1} MB", mib(gpu as usize)));
+        right.push(format!("FLUID QUEUE: {queued}"));
+        right.push(format!(
+            "SAVE: {}",
+            if self.save_requested { "PENDING" } else { "OK" }
+        ));
+
+        let mut quads: Vec<UiQuad> = Vec::new();
+        // Izquierda: ancho segun el texto.
+        let lw = left
+            .iter()
+            .map(|l| font::text_width(l, scale))
+            .fold(0.0, f32::max);
+        let lh = left.len() as f32 * advance;
+        quads.push(UiQuad {
+            rect: [pad - 3.0, pad - 3.0, lw + 6.0, lh + 5.0],
+            uv: region_uv(gui::DIM),
+            layer: -1,
+        });
+        for (i, line) in left.iter().enumerate() {
+            quads.extend(font::text_quads(line, pad, pad + i as f32 * advance, scale));
+        }
+        // Derecha: **ancho fijo** con margen holgado a la derecha (no depende del
+        // tamano exacto de la ventana, que puede diferir del de la superficie).
+        let rw = RIGHT_COL_W.max(
+            right
+                .iter()
+                .map(|l| font::text_width(l, scale))
+                .fold(0.0, f32::max),
+        );
+        let rxx = (win_w - 20.0 - rw).max(win_w * 0.5);
+        let rh = right.len() as f32 * advance;
+        quads.push(UiQuad {
+            rect: [rxx - 3.0, pad - 3.0, rw + 6.0, rh + 5.0],
+            uv: region_uv(gui::DIM),
+            layer: -1,
+        });
+        for (i, line) in right.iter().enumerate() {
+            quads.extend(font::text_quads(line, rxx, pad + i as f32 * advance, scale));
         }
         quads
     }
@@ -1144,7 +1246,16 @@ impl ApplicationHandler for App {
                 let sky = self.day_cycle.sky_color();
                 // Interfaz (hotbar/inventario) construida antes de prestar el
                 // renderer para no mezclar prestamos.
-                let (win_w, win_h) = self.window_size_f();
+                // El layout de la interfaz usa el tamano de la **superficie**
+                // (el mismo que la conversion a NDC), no el de la ventana.
+                let (win_w, win_h) = self
+                    .renderer
+                    .as_ref()
+                    .map(|r| {
+                        let (w, h) = r.surface_size();
+                        (w as f32, h as f32)
+                    })
+                    .unwrap_or_else(|| self.window_size_f());
                 let ui = self.build_ui(win_w, win_h);
                 self.update_ms = t_update.elapsed().as_secs_f32() * 1000.0;
                 let t_render = Instant::now();
@@ -1164,14 +1275,13 @@ impl ApplicationHandler for App {
                 self.fps_accum += raw_dt;
                 if self.fps_accum >= 0.5 {
                     let fps = self.fps_frames as f32 / self.fps_accum;
+                    self.last_fps = fps;
                     let stats = self.renderer.as_ref().map(|r| r.frame_stats());
-                    let memory = self.renderer.as_ref().map(|r| r.world_memory());
-                    let gpu = self.renderer.as_ref().map_or(0, |r| r.gpu_mesh_bytes());
                     let queued = self
                         .renderer
                         .as_ref()
                         .map_or(0, |r| r.pending_mesh_sections());
-                    let title = self.title_line(fps, stats, memory, gpu, queued);
+                    let title = self.title_line(fps, stats);
                     if let Some(window) = self.window.as_ref() {
                         window.set_title(&title);
                     }

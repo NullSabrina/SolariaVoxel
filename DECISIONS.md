@@ -2801,6 +2801,39 @@ interpolacion en `update`, `simulate_player`, `save_world`), `math/vec3.rs`
 (`Vec3::lerp` y `Default`). 261 tests (nuevo: `Vec3::lerp`); clippy limpio.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.27.0 — Overlay F3 en pantalla (fuente bitmap)
+
+### 2026-10-07 — Pantalla de depuracion estilo Minecraft + fuente bitmap
+
+**Decision.** Mover el diagnostico **F3** del titulo de la ventana a un overlay
+**en pantalla** con dos columnas (izquierda: version, fps/tiempos, XYZ/bloque/
+chunk, orientacion, bioma, luz, hora, semilla; derecha: draw calls, triangulos,
+culling, chunks, memoria, GPU, cola de fluidos, guardado), con fondo oscuro
+translucido. Para dibujar texto, una **fuente bitmap 5x7** propia
+(`render/font.rs`): glifos definidos como rejillas `5x7`, empaquetados en un
+atlas de una textura (blanco sobre transparente); cada caracter es **un quad**
+que samples su celda (la forma la da el alfa).
+
+**Motivo.** El usuario pidio la F3 "como la de Minecraft", abrible con **F3**. Un
+HUD de texto necesita dibujar texto, y no habia rasterizador de fuentes.
+
+**Alternativas descartadas.** Dependencia externa de fuentes (evitamos deps
+pesadas); dibujar pixel a pixel cada glifo como quads (muchos vertices: se usa 1
+quad por caracter con una celda de atlas); fuente `.ttf` (sobreingenieria).
+
+**Tradeoffs.** Fuente limitada a ASCII en MAYUSCULAS (los rotulos se convierten
+con `to_ascii_uppercase`), sin kerning ni tamano variable. El layout de la UI se
+calcula con el tamano de la **superficie** de render (no el de la ventana), y la
+columna derecha usa ancho fijo con margen holgado para no depender del tamano
+exacto de la ventana.
+
+**Consecuencia.** `render/font.rs` (nuevo), `render/ui.rs` (binding de fuente),
+`render/ui.wgsl` (capa `-2`), `render/renderer.rs` (textura de fuente +
+`surface_size` y accesores `sky_light_at`/`block_light_at`/`biome_at`),
+`world/store.rs` (`biome_at`), `engine/app.rs` (`f3_overlay`, titulo simplificado,
+layout con tamano de superficie). 264 tests (4 de fuente); clippy limpio.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

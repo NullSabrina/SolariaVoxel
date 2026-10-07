@@ -20,6 +20,7 @@ struct UiOutput {
 @group(0) @binding(0) var atlas: texture_2d_array<f32>;
 @group(0) @binding(1) var gui: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
+@group(0) @binding(3) var font: texture_2d<f32>;
 
 @vertex
 fn vs_main(input: UiInput) -> UiOutput {
@@ -32,6 +33,10 @@ fn vs_main(input: UiInput) -> UiOutput {
 
 @fragment
 fn fs_main(input: UiOutput) -> @location(0) vec4<f32> {
+    // Capa -2: fuente bitmap (texto del overlay F3).
+    if (input.layer == -2) {
+        return textureSample(font, samp, input.uv);
+    }
     if (input.layer < 0) {
         return textureSample(gui, samp, input.uv);
     }

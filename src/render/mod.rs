@@ -12,6 +12,7 @@
 //! En v0.1.2 el renderer ya dibuja un cubo 3D con z-buffer sobre el cielo.
 
 mod color;
+pub(crate) mod font;
 pub(crate) mod gui;
 mod highlight;
 // `mesh` es pub(crate) porque el mesher del mundo (`crate::world::mesh_chunk`)
