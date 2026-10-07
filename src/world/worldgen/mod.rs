@@ -19,16 +19,20 @@
 //! Todo es determinista: `(seed, x, z)` da siempre el mismo resultado, sin RNG
 //! con estado. La GPU no se toca.
 
+pub mod biomes;
 pub mod cells;
 pub mod config;
 pub mod math;
 
+pub use biomes::BiomeDefinition;
 pub use cells::CellSample;
 pub use config::{ConfigError, WORLDGEN_CONFIG_VERSION, WorldGenConfig};
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 
-use super::terrain::SEA_LEVEL;
+use super::terrain::{Biome, SEA_LEVEL};
 
 /// Clasificacion continental de una muestra (macro-geografia).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,10 +91,18 @@ pub struct TerrainSample {
     pub land: LandClass,
     /// Id estable de la celda de bioma (para features/coherencia regional).
     pub cell_id: u64,
+    /// `saturate((F2-F1)/cell_distance)`: 0 en la frontera de celda, ~1 dentro.
+    pub cell_edge: f32,
     /// 1 en la linea de costa, 0 tierra adentro o mar adentro.
     pub coast_factor: f32,
     /// `[0, 1)` por celda: decide el ancho de costa (estrecha/ancha).
     pub coast_roll: f32,
+    /// Temperatura efectiva (tras mezcla de celda y lapse de altitud), `[0, 1]`.
+    pub temperature: f32,
+    /// Humedad efectiva (tras mezcla de celda), `[0, 1]`.
+    pub humidity: f32,
+    /// Bioma seleccionado por scoring.
+    pub biome: Biome,
     /// Altura base continua del terreno, en bloques (antes de clampear).
     pub base_height: f32,
 }
@@ -141,6 +153,12 @@ pub struct WorldGen {
     valley: Perlin,
     warp_x: Perlin,
     warp_z: Perlin,
+    /// Clima (FASE 3): temperatura y humedad.
+    temperature: Fbm<Perlin>,
+    humidity: Fbm<Perlin>,
+    /// Contador de evaluaciones de ruido (tests de coste). Atomico para seguir
+    /// siendo `Send + Sync`.
+    noise_calls: AtomicU32,
 }
 
 impl WorldGen {
@@ -175,9 +193,34 @@ impl WorldGen {
             valley: Perlin::new(derive(seed, 108)),
             warp_x: Perlin::new(derive(seed, 109)),
             warp_z: Perlin::new(derive(seed, 110)),
+            temperature: Fbm::<Perlin>::new(derive(seed, 111))
+                .set_octaves(3)
+                .set_frequency(1.0)
+                .set_persistence(0.5),
+            humidity: Fbm::<Perlin>::new(derive(seed, 112))
+                .set_octaves(3)
+                .set_frequency(1.0)
+                .set_persistence(0.5),
+            noise_calls: AtomicU32::new(0),
             config,
             seed,
         }
+    }
+
+    /// Cuenta una evaluacion de ruido (solo para tests de coste).
+    #[inline]
+    fn bump(&self) {
+        self.noise_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Evaluaciones de ruido 2D desde el ultimo reset.
+    pub fn noise_calls(&self) -> u32 {
+        self.noise_calls.load(Ordering::Relaxed)
+    }
+
+    /// Reinicia el contador de ruido.
+    pub fn reset_noise_calls(&self) {
+        self.noise_calls.store(0, Ordering::Relaxed);
     }
 
     /// La configuracion en uso.
@@ -190,13 +233,21 @@ impl WorldGen {
         self.seed
     }
 
+    /// Campo de clima normalizado a `[0, 1]` en `(x, z)`.
+    fn climate_field(&self, noise: &Fbm<Perlin>, x: f64, z: f64, scale: f64) -> f32 {
+        self.bump();
+        ((noise.get([x * scale, z * scale]) as f32) * 0.5 + 0.5).clamp(0.0, 1.0)
+    }
+
     /// Muestrea la geografia en `(x, z)`. Es la unica fuente de verdad del
-    /// relieve: `terrain.rs` solo la convierte a bloques.
+    /// relieve y del bioma: `terrain.rs` solo la convierte a bloques.
     pub fn sample(&self, x: f64, z: f64) -> TerrainSample {
         let cfg = &self.config;
 
         // Domain warping sobre las coordenadas para romper patrones regulares.
+        self.bump();
         let wx = self.warp_x.get([x * cfg.warp_scale, z * cfg.warp_scale]);
+        self.bump();
         let wz = self
             .warp_z
             .get([x * cfg.warp_scale + 19.3, z * cfg.warp_scale + 7.1]);
@@ -204,9 +255,11 @@ impl WorldGen {
         let sz = z + wz * cfg.warp_strength as f64;
 
         // Continentalness: macro + detalle, normalizado a [-1, 1].
+        self.bump();
         let c_macro =
             self.continental_macro
                 .get([sx * cfg.continental_scale, sz * cfg.continental_scale]) as f32;
+        self.bump();
         let c_detail = self.continental_detail.get([
             sx * cfg.continental_detail_scale,
             sz * cfg.continental_detail_scale,
@@ -237,17 +290,20 @@ impl WorldGen {
         // Altura: base continental + relieve macro + cordilleras - valles.
         let mut h = SEA_LEVEL as f32 + continental_base(continentalness);
 
+        self.bump();
         let macro_n = self
             .macro_relief
             .get([sx * cfg.macro_scale, sz * cfg.macro_scale]) as f32;
         h += macro_n * cfg.macro_amplitude * landness;
 
+        self.bump();
         let range_n = self
             .mountain_ranges
             .get([sx * cfg.mountain_scale, sz * cfg.mountain_scale]) as f32
             * 0.5
             + 0.5;
         let range_mask = math::smoothstep(cfg.range_low, cfg.range_high, range_n);
+        self.bump();
         let ridge_n = self
             .ridge
             .get([sx * cfg.mountain_scale * 1.7, sz * cfg.mountain_scale * 1.7])
@@ -256,18 +312,46 @@ impl WorldGen {
         let interior = math::smoothstep(0.10, 0.55, continentalness);
         h += range_mask * ridge * cfg.mountain_amplitude * interior * landness;
 
+        self.bump();
         let valley_n = self
             .valley
             .get([sx * cfg.valley_scale, sz * cfg.valley_scale]) as f32;
         let valley = 1.0 - math::smoothstep(cfg.valley_low, cfg.valley_high, valley_n.abs());
         h -= valley * cfg.valley_amplitude * landness;
 
+        // --- Clima y bioma (FASE 3) ---
+        // Clima local.
+        let t_local = self.climate_field(&self.temperature, x, z, cfg.temperature_scale);
+        let h_local = self.climate_field(&self.humidity, x, z, cfg.humidity_scale);
+        // Clima del **centro de la celda**: da coherencia regional al bioma.
+        let (ccx, ccz) = (cell.center_x as f64, cell.center_z as f64);
+        let t_cell = self.climate_field(&self.temperature, ccx, ccz, cfg.temperature_scale);
+        let h_cell = self.climate_field(&self.humidity, ccx, ccz, cfg.humidity_scale);
+        // En el interior de la celda domina el centro; cerca del borde, lo local.
+        let blend = math::smoothstep(0.15, 0.55, cell.edge);
+        let temperature = math::lerp(t_local, t_cell, blend);
+        let humidity = math::lerp(h_local, h_cell, blend);
+
+        // Altura normalizada (0 en el mar, 1 en `altitude_top`).
+        let elevation =
+            math::smoothstep(SEA_LEVEL as f32, cfg.altitude_top, h.max(SEA_LEVEL as f32));
+        // Lapse: hace mas frio con la altura (nieve en cumbres).
+        let lapse = cfg.altitude_lapse_rate * (elevation - cfg.altitude_lapse_start).max(0.0);
+        let temperature = (temperature - lapse).clamp(0.0, 1.0);
+        let humidity = humidity.clamp(0.0, 1.0);
+
+        let biome = biomes::select(temperature, humidity, elevation);
+
         TerrainSample {
             continentalness,
             land,
             cell_id: cell.id,
+            cell_edge: cell.edge,
             coast_factor,
             coast_roll,
+            temperature,
+            humidity,
+            biome,
             base_height: h,
         }
     }

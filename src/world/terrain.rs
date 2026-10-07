@@ -19,12 +19,12 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
+use noise::{NoiseFn, Perlin};
 
 use super::block::Block;
 use super::caves::{Carve, CaveSystem};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
-use super::worldgen::WorldGen;
+use super::worldgen::{WorldGen, biomes};
 
 /// Altura media del terreno, en bloques (nivel del mar).
 pub const SEA_LEVEL: i32 = 64;
@@ -33,8 +33,8 @@ pub const SEA_LEVEL: i32 = 64;
 pub const MIN_HEIGHT: i32 = 8;
 pub const MAX_HEIGHT: i32 = 200;
 
-/// Los biomas del mundo, derivados del clima.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Los biomas del mundo (FASE 3: seleccionados por scoring en `worldgen::biomes`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Biome {
     /// Calido y seco: dunas de arena.
     Desert,
@@ -53,60 +53,18 @@ pub enum Biome {
 }
 
 impl Biome {
-    /// Densidad de arboles por columna (fraccion de columnas con arbol).
+    /// Densidad de arboles por columna (fraccion de columnas con arbol). Sale de
+    /// la **definicion** del bioma (FASE 3), no de un `match` aparte.
     fn tree_density(self) -> f32 {
-        match self {
-            Biome::Forest => 0.07,
-            Biome::Taiga => 0.05,
-            Biome::Swamp => 0.03,
-            Biome::Plains => 0.01,
-            Biome::Desert | Biome::Savanna | Biome::Tundra => 0.0,
-        }
+        biomes::definition(self).tree_density
     }
-}
-
-/// Bioma a partir del par clima (Whittaker simplificado). Funcion **pura**: no
-/// toca ruido, de modo que `generate_column` reutiliza el clima ya calculado.
-fn biome_of(t: f64, h: f64) -> Biome {
-    if t < 0.32 {
-        if h > 0.55 {
-            Biome::Taiga
-        } else {
-            Biome::Tundra
-        }
-    } else if t > 0.68 {
-        if h < 0.38 {
-            Biome::Desert
-        } else {
-            Biome::Savanna
-        }
-    } else if h > 0.72 {
-        Biome::Swamp
-    } else if h < 0.35 {
-        Biome::Plains
-    } else {
-        Biome::Forest
-    }
-}
-
-/// ¿El clima esta cerca de un borde de bioma? Sirve para **mezclar** materiales
-/// en la transicion (parches del bioma vecino) sin evaluar biomas vecinos.
-fn near_climate_edge(t: f64, h: f64) -> bool {
-    const EDGES: [f64; 6] = [0.32, 0.68, 0.35, 0.38, 0.55, 0.72];
-    EDGES
-        .iter()
-        .any(|&e| (t - e).abs() < 0.035 || (h - e).abs() < 0.035)
 }
 
 /// Generador deterministico: la misma semilla produce siempre el mismo mundo.
 pub struct TerrainGenerator {
-    /// Clima (2D): temperatura.
-    temperature: Fbm<Perlin>,
-    /// Clima (2D): humedad.
-    humidity: Fbm<Perlin>,
-    /// Generador de mundo por etapas (FASE 1/2): continentalness, celular,
-    /// costas, relieve macro y cordilleras. **Sustituye** a los antiguos ruidos
-    /// `continent`/`detail`/`ridged` (el relieve ya no depende del bioma).
+    /// Generador de mundo por etapas (FASE 1/2/3): continentalness, celular,
+    /// costas, relieve, clima y **bioma**. **Sustituye** a los antiguos ruidos y
+    /// al clasificador de bioma por umbrales.
     worldgen: WorldGen,
     /// Ruido de alta frecuencia que varia la capa de superficie.
     surface_detail: Perlin,
@@ -132,14 +90,6 @@ impl TerrainGenerator {
     pub fn new(seed: u32) -> Self {
         let mix = |k: u32| seed.wrapping_mul(0x9E37_79B9).wrapping_add(k);
         Self {
-            temperature: Fbm::<Perlin>::new(mix(1))
-                .set_octaves(3)
-                .set_frequency(1.0)
-                .set_persistence(0.5),
-            humidity: Fbm::<Perlin>::new(mix(2))
-                .set_octaves(3)
-                .set_frequency(1.0)
-                .set_persistence(0.5),
             worldgen: WorldGen::new(seed),
             surface_detail: Perlin::new(mix(6)),
             aquifer: Perlin::new(mix(7)),
@@ -161,38 +111,28 @@ impl TerrainGenerator {
         self.noise_calls.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Evaluaciones de ruido 2D desde el ultimo reset.
+    /// Evaluaciones de ruido 2D desde el ultimo reset (las propias + las del
+    /// `WorldGen`).
     pub fn noise_calls(&self) -> u32 {
-        self.noise_calls.load(Ordering::Relaxed)
+        self.noise_calls.load(Ordering::Relaxed) + self.worldgen.noise_calls()
     }
 
-    /// Reinicia el contador de ruido 2D.
+    /// Reinicia los contadores de ruido 2D.
     pub fn reset_noise_calls(&self) {
         self.noise_calls.store(0, Ordering::Relaxed);
+        self.worldgen.reset_noise_calls();
     }
 
-    /// Clima de `(x, z)` -> `(temperatura, humedad)` en 0..1.
+    /// Clima efectivo de `(x, z)` -> `(temperatura, humedad)` en 0..1. Incluye la
+    /// mezcla con el centro de la celda y el lapse de altitud (FASE 3).
     pub fn climate(&self, world_x: i32, world_z: i32) -> (f64, f64) {
-        // Frecuencia espacial baja (0.004): las franjas climaticas ocupan cientos
-        // de bloques, no unos pocos.
-        self.bump();
-        let t = self
-            .temperature
-            .get([world_x as f64 * 0.004, world_z as f64 * 0.004]);
-        self.bump();
-        let h = self
-            .humidity
-            .get([world_x as f64 * 0.004, world_z as f64 * 0.004]);
-        (
-            (t * 0.5 + 0.5).clamp(0.0, 1.0),
-            (h * 0.5 + 0.5).clamp(0.0, 1.0),
-        )
+        let s = self.worldgen.sample(world_x as f64, world_z as f64);
+        (s.temperature as f64, s.humidity as f64)
     }
 
-    /// Bioma en `(x, z)` a partir del clima (diagrama de Whittaker simplificado).
+    /// Bioma en `(x, z)` seleccionado por scoring (FASE 3).
     pub fn biome_at(&self, world_x: i32, world_z: i32) -> Biome {
-        let (t, h) = self.climate(world_x, world_z);
-        biome_of(t, h)
+        self.worldgen.sample(world_x as f64, world_z as f64).biome
     }
 
     /// Nivel del acuifero en `(x, z)`, en 30..56. Por debajo se llenan de agua
@@ -295,16 +235,16 @@ impl TerrainGenerator {
             for x in 0..CHUNK_SIZE {
                 let wx = world_x + x as i32;
                 let wz = world_z + z as i32;
-                // --- Ruido 2D: UNA sola vez por (x, z) ---
-                let (t, h) = self.climate(wx, wz);
-                let biome = biome_of(t, h);
-                // Geografia por etapas (FASE 1/2): la altura sale del WorldGen.
+                // --- Muestra geografica: UNA sola vez por (x, z) ---
+                // Geografia (FASE 1/2) + clima/bioma (FASE 3) del WorldGen.
                 let geo = self.worldgen.sample(wx as f64, wz as f64);
+                let biome = geo.biome;
                 let height =
                     (geo.base_height.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize;
                 let aquifer = self.aquifer_level(wx, wz);
                 let variant = self.surface_variant(wx, wz);
-                let border = near_climate_edge(t, h);
+                // Cerca del borde de una celda se mezclan materiales con el vecino.
+                let border = geo.cell_edge < 0.35;
                 let has_caves = self.has_caves(wx, wz);
                 // Cerca del mar la superficie es arena (playa/fondo marino).
                 let coastal = height <= (SEA_LEVEL as usize) + 1;
@@ -615,8 +555,11 @@ mod tests {
         let _ = g.generate_column(0, 0);
         let calls = g.noise_calls();
         println!("ruido 2D en una columna: {calls} evaluaciones");
+        // Con el worldgen por etapas (geografia + clima + celda) son ~15 por
+        // celda (x,z); el invariante es O(256), no O(256 * altura). Si el ruido
+        // se llamara dentro del bucle `for y` serian ~18000+.
         assert!(
-            calls < CHUNK_SIZE as u32 * CHUNK_SIZE as u32 * 12,
+            calls < CHUNK_SIZE as u32 * CHUNK_SIZE as u32 * 24,
             "demasiadas evaluaciones 2D: {calls}"
         );
     }

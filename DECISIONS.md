@@ -2423,7 +2423,46 @@ visible; el test de la invariante evita que reaparezca.
 
 ---
 
-## Plantilla para futuras entradas
+### 2026-10-05 (v0.18.0) — Worldgen FASE 3: bioma por region celular
+
+**Contexto.** En v0.17.0 el relieve dejo de depender del bioma, pero el bioma
+seguia saliendo de una cascada de `if` sobre umbrales de clima: regions amorfas,
+sin identidad geométrica ni relacion con las celdas que ya usabamos para las
+costas.
+
+**Decision.** Nuevo `worldgen/biomes.rs`:
+- `BiomeDefinition` como **datos** (rangos de temperatura/humedad/altura +
+  `tree_density`); `select(t, h, elevation)` puntua cada bioma con bandas suaves y
+  elige el mejor (desempate estable por orden). Anadir un bioma = anadir una fila.
+- **Regionalizacion**: `WorldGen` calcula el clima local y el del **centro de la
+  celda**, y los mezcla con `blend = smoothstep(0.15, 0.55, cell_edge)`; en el
+  interior domina el centro (bioma unico por region), cerca del borde domina lo
+  local (transicion suave).
+- **Lapse de altitud**: `T -= lapse_rate * max(0, elev - lapse_start)`, con
+  `elev = smoothstep(sea, altitude_top, altura)`; asi las cumbres son frias.
+- El clima (`temperature`/`humidity`) se mueve a `WorldGen`: una sola muestra por
+  `(x,z)` da geografia + clima + bioma. `TerrainGenerator::climate`/`biome_at`
+  delegan; `surface_block` y la decoracion siguen igual.
+- `Biome::tree_density` lee de la definicion (una sola fuente).
+
+**Alternativas descartadas.**
+- Bioma puramente por celda sin mezcla: transiciones duras (patron "bioma A
+  pegado a B"); la mezcla por `cell_edge` da bordes suaves.
+- Bioma puramente local (como antes): regiones amorfas; no aprovecha las celdas.
+- Biomas como `enum` con `match` de propiedades: volveria a la cascada; los
+  datos permiten expandir sin tocar el selector.
+- Mover `Biome` a `biomes.rs`: churn de imports; se deja el `enum` en `terrain`
+  (la logica de seleccion si vive en `biomes`).
+
+**Tradeoffs.** `GENERATOR_VERSION → 10`: cambian materiales/vegetacion (el
+relieve es el mismo que v9). Los biomas `Tundra`/`Taiga` son raros en climas
+templados (correcto por scoring, pero el porcentaje depende mucho de la seed).
+
+**Consecuencia.** `worldgen/biomes.rs`, `worldgen/{mod,config}.rs`,
+`world/terrain.rs`, `examples/worldgen_preview.rs` (mapa logico de biomas +
+reparto; `layer` biome/height/continental), `save.rs` (v10). 241 tests; clippy
+limpio. Preview: 7 biomas con regiones coherentes; verificado en juego caminando
+varios chunks sin crash. Siguiente: FASE 5 hidrologia/rios.
 
 ```
 ### [fecha] vX.Y.Z — Titulo

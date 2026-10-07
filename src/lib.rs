@@ -10,7 +10,24 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.17.1 - Fix: overrun del buffer de malla
+//! ## Estado actual: v0.18.0 - Worldgen FASE 3: bioma por region celular
+//!
+//! El bioma deja de ser una cascada de `if` sobre umbrales de clima:
+//! * `worldgen/biomes.rs`: `BiomeDefinition` (rangos de temperatura/humedad/
+//!   altura + densidad de arboles) y `select` por **scoring** con bandas suaves;
+//!   anadir un bioma es anadir una fila.
+//! * **Regionalizacion**: el clima se mezcla con el del **centro de la celda**
+//!   (domina en el interior, clima local en el borde) → regiones de bioma
+//!   coherentes de ~`cell_distance` bloques con transiciones suaves.
+//! * **Lapse de altitud**: la temperatura baja con la altura (nieve en cumbres).
+//! * El clima (`temperature`/`humidity`) vive ya en `WorldGen` (una sola muestra
+//!   por (x,z) da geografia + clima + bioma).
+//!
+//! `GENERATOR_VERSION → 10`. Medido (preview 2048x2048, seed 13371): 7 biomas,
+//! Plains 38% / Forest 33% / Savanna 18% / Swamp 6% / Desert 4% / Tundra 1% /
+//! Taiga 1%. Hereda de v0.17.1 (fix buffer GPU).
+//!
+//! ## v0.17.1 - Fix: overrun del buffer de malla
 //!
 //! `Mesh::new` creaba los buffers GPU con el tamano **exacto** de los datos pero
 //! registraba `capacity = next_power_of_two()` (mayor). Al re-meshear una seccion

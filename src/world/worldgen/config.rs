@@ -36,6 +36,16 @@ pub struct WorldGenConfig {
     /// Frecuencia del detalle del ruido continental.
     pub continental_detail_scale: f64,
 
+    /// Frecuencia de los campos de clima (temperatura y humedad).
+    pub temperature_scale: f64,
+    pub humidity_scale: f64,
+    /// Cuanto baja la temperatura con la altura (lapse rate).
+    pub altitude_lapse_rate: f32,
+    /// Altura normalizada a partir de la cual empieza a notarse el lapse.
+    pub altitude_lapse_start: f32,
+    /// Altura (bloques) a la que la normalizacion de altitud llega a 1.
+    pub altitude_top: f32,
+
     /// Frecuencia y amplitud del relieve macro (colinas grandes).
     pub macro_scale: f64,
     pub macro_amplitude: f32,
@@ -76,6 +86,12 @@ impl Default for WorldGenConfig {
             continental_scale: 0.00045,
             continental_detail_scale: 0.0016,
 
+            temperature_scale: 0.004,
+            humidity_scale: 0.004,
+            altitude_lapse_rate: 0.16,
+            altitude_lapse_start: 0.20,
+            altitude_top: 180.0,
+
             macro_scale: 0.0018,
             macro_amplitude: 26.0,
 
@@ -115,6 +131,9 @@ impl WorldGenConfig {
                 "continental_detail_scale",
                 self.continental_detail_scale as f32,
             ),
+            ("temperature_scale", self.temperature_scale as f32),
+            ("humidity_scale", self.humidity_scale as f32),
+            ("altitude_top", self.altitude_top),
             ("macro_scale", self.macro_scale as f32),
             ("mountain_scale", self.mountain_scale as f32),
             ("valley_scale", self.valley_scale as f32),

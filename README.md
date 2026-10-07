@@ -8,7 +8,30 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.17.1` — Fix: overrun del buffer de malla
+## Estado actual: `v0.18.0` — Worldgen FASE 3: bioma por región celular
+
+El bioma deja de ser una cascada de `if` sobre umbrales de clima:
+
+- `worldgen/biomes.rs`: `BiomeDefinition` (rangos de temperatura/humedad/altura y
+  densidad de árboles) y `select` por **scoring** con bandas suaves; añadir un
+  bioma es añadir una fila.
+- **Regionalización**: el clima se mezcla con el del **centro de la celda**
+  (domina en el interior, clima local en el borde) → regiones de bioma coherentes
+  de ~`cell_distance` bloques con transiciones suaves.
+- **Lapse de altitud**: la temperatura baja con la altura (nieve en cumbres).
+- El clima vive ya en `WorldGen`: una sola muestra por `(x,z)` da geografía,
+  clima y bioma.
+
+Preview (auditoría #198, mapa lógico de biomas):
+
+```bash
+cargo run --release --example worldgen_preview -- 13371 512 4 biome
+```
+
+Medido (2048×2048, seed 13371): los 7 biomas presentes — Plains 38 %, Forest 33 %,
+Savanna 18 %, Swamp 6 %, Desert 4 %, Tundra 1 %, Taiga 1 %. `GENERATOR_VERSION → 10`.
+
+## v0.17.1 — Fix: overrun del buffer de malla
 
 `Mesh::new` creaba los buffers GPU con el tamaño **exacto** de los datos pero
 registraba `capacity = next_power_of_two()` (mayor). Al re-meshear una sección que
@@ -114,7 +137,7 @@ src/
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas (carga assets/atlas.png; fallback).
 │   ├── terrain.rs   Generacion: geografia, clima/biomas, superficie, cuevas.
-│   ├── worldgen/    Motor de worldgen por etapas (config, math, cells, mod).
+│   ├── worldgen/    Motor de worldgen por etapas (config, math, cells, biomes).
 │   ├── caves.rs     Cuevas 3D (spaghetti/cheese/pillar) con densidad por Y.
 │   ├── mesher.rs    Meshing naive con face culling (referencia).
 │   ├── greedy.rs    Greedy meshing (fusiona caras; separa el agua).

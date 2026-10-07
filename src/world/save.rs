@@ -62,7 +62,10 @@ pub const FORMAT_VERSION: u32 = 5;
 /// * v9: relieve **continental** por etapas (`world::worldgen`): continentalness
 ///   con domain warping, red celular, costa de ancho variable, cordilleras por
 ///   mascara de rango + cresta y valles. El bioma sigue derivandose del clima.
-pub const GENERATOR_VERSION: u32 = 9;
+/// * v10: **bioma por region celular** (FASE 3): definiciones con scoring,
+///   mezcla con el centro de la celda y lapse de altitud. Los materiales y la
+///   vegetacion cambian (el relieve es el mismo que v9).
+pub const GENERATOR_VERSION: u32 = 10;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";
