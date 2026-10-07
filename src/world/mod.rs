@@ -29,6 +29,7 @@ pub mod store;
 pub mod streaming;
 pub mod terrain;
 pub mod water;
+pub mod worldgen;
 
 pub use block::{Block, Face};
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};

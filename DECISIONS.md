@@ -2344,6 +2344,55 @@ registro, migracion (v1/v3/v4/v5) y mundo completo, incluida la recuperacion.
 
 ---
 
+### 2026-10-05 (v0.17.0) — Worldgen por etapas: celular + continentes + costas (FASE 1/2)
+
+**Contexto.** El generador antiguo derivaba el relieve del **bioma** (un `match`
+de amplitudes) sobre un `Fbm` continental que no separaba tierra/océano: las
+costas se reducian a `height <= SEA_LEVEL + 1` y los biomas eran umbrales de
+clima, sin regiones geometricas. La auditoria de worldgen pide jerarquia
+espacial: celdas -> continentes -> clima -> landforms -> hidrologia -> ...
+
+**Decision.** Nuevo modulo `world/worldgen/` con arquitectura por etapas:
+`WorldGenConfig` (central + validacion), seeds derivadas por campo,
+helpers de math (`smoothstep`/`remap`/`spline`), muestreador **celular Worley**
+(`CellSample` con id estable), **continentalness** con domain warping,
+clasificacion `LandClass`, **costa de ancho variable** (roll por celda) y una
+altura base = spline(continentalness) + relieve macro + cordilleras (mascara de
+rango + cresta) + valles. `TerrainGenerator` produce un `TerrainSample` y lo
+convierte a bloques; el relieve **deja de depender del bioma**. Se anade un
+preview offline (`examples/worldgen_preview.rs`) que exporta PNG y metricas.
+
+**Alternativas descartadas.**
+- Reescribir `terrain.rs` de golpe: el audit pide migracion por fases conservando
+  equivalencia; se extrajo la geografia a un modulo y `terrain.rs` la consume.
+- Campo continental como un solo `Fbm`: se combino macro + detalle (0.78/0.22)
+  y domain warping para romper la regularidad.
+- Clasificar tierra/océano punto a punto con un segundo ruido: la auditoria pide
+  clasificar por la **celda** (identidad geometrica); el id de celda es estable y
+  da coherencia regional (costas, futuras features).
+- Empaquetar la altura y el bioma en la misma fase (como antes): mantenerlos
+  separados permite regionalizar el bioma despues (FASE 3) sin tocar el relieve.
+
+**Por que.** Da continentes, oceanos con plataforma y mar abisal, costas de
+ancho variable y cordilleras con identidad, sin `noise + noise + noise`. Todo
+determinista: `(seed, x, z)` -> mismo resultado; `WorldGen` es `Send + Sync`.
+
+**Tradeoffs.** El bioma sigue siendo por clima (FASE 3 `DEFERRED`), asi que las
+regiones de bioma aun no coinciden con las celdas (las celdas ya se usan para el
+ancho de costa y quedan listas para el bioma y las features). La hidrologia y la
+jerarquia de cuevas no se tocaron (FASE 5/6 `DEFERRED`). `GENERATOR_VERSION`
+sube a 9 (el relieve cambia por completo); los mundos guardados se regeneran con
+el nuevo generador y solo se reaplican las ediciones del jugador (comportamiento
+ya existente).
+
+**Consecuencia.** `world/worldgen/{mod,config,math,cells}.rs`, `world/terrain.rs`
+(usa `WorldGen`; `Biome::relief` eliminado), `examples/worldgen_preview.rs`
+(FASE 9 PARCIAL), `save.rs` (`GENERATOR_VERSION = 9`). Medido con el preview:
+oceano 31-55% segun seed, abisal presente, picos hasta el techo de mundo.
+236 tests; clippy `-D warnings` limpio. Verificado en runtime.
+
+---
+
 ## Plantilla para futuras entradas
 
 ```

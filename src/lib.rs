@@ -10,16 +10,26 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.16.1 - Persistencia end-to-end (tests)
+//! ## Estado actual: v0.17.0 - Worldgen por etapas (FASE 1/2)
 //!
-//! Tests de integracion de guardado que pedia la auditoria (§41):
-//! * **Roundtrip completo**: editar un mundo (varias alturas + agua), volcarlo,
-//!   guardarlo, cargarlo y reconstruirlo con `World::new(seed, r, restaurado)`.
-//! * **Recuperacion tras crash**: si el archivo principal queda corrupto, el
-//!   `.bak` (guardado atomico anterior) sigue siendo cargable.
+//! Primer rediseno del generador de mundo (auditoria de worldgen). Nuevo modulo
+//! [`world::worldgen`] con:
+//! * `WorldGenConfig` central + validacion y `WORLDGEN_CONFIG_VERSION`.
+//! * seeds derivadas por campo (sin RNG con estado) y helpers de math
+//!   (`smoothstep`, `remap`, `spline`).
+//! * muestreador **celular (Worley)** determinista con id estable por celda.
+//! * **continentalness** con domain warping y clasificacion
+//!   `DeepOcean..Interior`; **costas de ancho variable** por celda; altura base
+//!   continental + relieve macro + cordilleras (mascara de rango + cresta) +
+//!   valles.
+//! * preview offline: `cargo run --release --example worldgen_preview`.
 //!
-//! Hereda de v0.16.0 (radio configurable). Fases 7/9/10/11/12/13 completadas.
-//! Pendiente: interpolacion de render y overlay de texto con fuente.
+//! El relieve ya no depende del bioma; el bioma sigue por clima (FASE 3
+//! `DEFERRED`). `GENERATOR_VERSION` sube a 9. Hereda de v0.16.1.
+//!
+//! Pendiente (honesto): bioma por region celular (FASE 3), hidrologia/rios
+//! (FASE 5), jerarquia de cuevas (FASE 6), decoracion por reglas (FASE 7),
+//! interpolacion de render y overlay de texto.
 //!
 //! ## Organizacion del codigo
 //!

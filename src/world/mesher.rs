@@ -169,7 +169,9 @@ fn add_face(
     };
 
     // Una cara de 1x1 usa el tile entero (0..1); el array de texturas lo aisla.
-    let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    // v=1 abajo del tile (igual que `emit_torch` y el greedy): las esquinas
+    // de abajo (y0) llevan v=1 para que el tile no salga del reves.
+    let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
 
     let base = vertices.len() as u32;
     for (corner, uv) in corners.iter().zip(uvs.iter()) {

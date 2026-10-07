@@ -1,0 +1,32 @@
+GIMP Palette
+Name: SolariaMedieval28
+Columns: 8
+#
+138 111  82 Tierra_Clara
+106  83  66 Tierra_Base
+ 87  66  47 Tierra_Oscura
+ 69  51  36 Tierra_Pozo
+156 144 128 Piedra_Clara
+132 119 103 Piedra_Base
+103  95  85 Piedra_Media
+ 78  70  60 Piedra_Junta
+217 180 137 Arena_Clara
+169 136  95 Arena_Oscura
+156 134  96 Madera_Clara
+117  94  70 Madera_Base
+ 87  67  46 Madera_Oscura
+ 58  46  32 Madera_Veta
+134 162  78 Hierba_Luz
+ 95 122  54 Hierba_Base
+ 66  89  42 Hierba_Sombra
+ 46  64  32 Hierba_Pozo
+244 246 246 Nieve_Base
+217 226 226 Nieve_Sombra
+ 73  86  91 Agua_Base
+ 55  65  68 Agua_Honda
+ 46  42  38 Obsidiana
+247 209  84 Lava_Brillo
+224 138  30 Lava_Base
+156  74  18 Lava_Costra
+ 36  28  20 Outline_UI
+214 198 154 Pergamino_UI

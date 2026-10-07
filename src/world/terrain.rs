@@ -1,25 +1,30 @@
-//! Generacion de terreno procedural: **clima**, **biomas**, **relieve por
-//! bioma**, **cuevas 3D** y **acuiferos**.
+//! Generacion de terreno procedimental: **geografia continental**, **clima**,
+//! **biomas**, **cuevas 3D** y **acuiferos**.
 //!
-//! Flujo de una columna:
-//! 1. **Clima 2D** — dos mapas `Fbm` (temperatura y humedad) en 0..1.
-//! 2. **Bioma** — se deriva del par (temperatura, humedad).
-//! 3. **Altura** — cada bioma aplica su propia **amplitud**, **frecuencia** y
-//!    peso de relieve escarpado (`RidgedMulti` para picos de montana).
-//! 4. **Superficie** — un ruido de detalle de alta frecuencia elige entre
-//!    `Grass`, `CoarseDirt`, `Podzol`, `Gravel` o `Sand`.
+//! Flujo de una columna (tras la auditoria de worldgen):
+//! 1. **Geografia** — [`super::worldgen`] produce un [`TerrainSample`]
+//!    (continentalness con domain warping, red celular, costa de ancho variable,
+//!    altura base con relieve macro + cordilleras + valles). El relieve ya **no**
+//!    depende del bioma.
+//! 2. **Clima 2D** — dos mapas `Fbm` (temperatura y humedad) en 0..1.
+//! 3. **Bioma** — se deriva del par (temperatura, humedad); decide materiales y
+//!    vegetacion. *(Regionalizar el bioma por celula es la FASE 3, pendiente.)*
+//! 4. **Superficie** — un ruido de alta frecuencia elige la variante de bloque.
 //! 5. **Cuevas/acuiferos** — [`crate::world::caves`] decide que celda se cava y
 //!    si nace llena de agua.
 //!
-//! Reemplaza la generacion v6 (Worley + Perlin simple). Sube `GENERATOR_VERSION`.
+//! `GENERATOR_VERSION` sube a 9 porque el relieve cambia por completo.
+//!
+//! [`TerrainSample`]: super::worldgen::TerrainSample
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use noise::{Fbm, MultiFractal, NoiseFn, Perlin, RidgedMulti};
+use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 
 use super::block::Block;
 use super::caves::{Carve, CaveSystem};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
+use super::worldgen::WorldGen;
 
 /// Altura media del terreno, en bloques (nivel del mar).
 pub const SEA_LEVEL: i32 = 64;
@@ -48,23 +53,6 @@ pub enum Biome {
 }
 
 impl Biome {
-    /// Perfil de relieve: `(amplitud, frecuencia, peso del RidgedMulti)`.
-    ///
-    /// La amplitud multiplica la onda grande (20 bloques) y la frecuencia
-    /// escala la coordenada de entrada (mas alta = colinas mas estrechas). El
-    /// peso del ridged anade picos; el desierto es casi llano y la taiga montana.
-    fn relief(self) -> (f64, f64, f64) {
-        match self {
-            Biome::Desert => (0.35, 0.6, 0.0),
-            Biome::Savanna => (0.70, 0.85, 0.0),
-            Biome::Plains => (0.45, 0.70, 0.0),
-            Biome::Forest => (1.00, 1.00, 0.0),
-            Biome::Swamp => (0.20, 0.55, 0.0),
-            Biome::Taiga => (1.45, 1.20, 0.75),
-            Biome::Tundra => (1.05, 0.90, 0.35),
-        }
-    }
-
     /// Densidad de arboles por columna (fraccion de columnas con arbol).
     fn tree_density(self) -> f32 {
         match self {
@@ -116,12 +104,10 @@ pub struct TerrainGenerator {
     temperature: Fbm<Perlin>,
     /// Clima (2D): humedad.
     humidity: Fbm<Perlin>,
-    /// Relieve grande (`Fbm` suave).
-    continent: Fbm<Perlin>,
-    /// Detalle fino del relieve.
-    detail: Perlin,
-    /// Crestas escarpadas para montanas.
-    ridged: RidgedMulti<Perlin>,
+    /// Generador de mundo por etapas (FASE 1/2): continentalness, celular,
+    /// costas, relieve macro y cordilleras. **Sustituye** a los antiguos ruidos
+    /// `continent`/`detail`/`ridged` (el relieve ya no depende del bioma).
+    worldgen: WorldGen,
     /// Ruido de alta frecuencia que varia la capa de superficie.
     surface_detail: Perlin,
     /// Nivel del acuifero por columna (2D).
@@ -154,14 +140,7 @@ impl TerrainGenerator {
                 .set_octaves(3)
                 .set_frequency(1.0)
                 .set_persistence(0.5),
-            continent: Fbm::<Perlin>::new(mix(3))
-                .set_octaves(4)
-                .set_frequency(1.0)
-                .set_persistence(0.5),
-            detail: Perlin::new(mix(4)),
-            ridged: RidgedMulti::<Perlin>::new(mix(5))
-                .set_octaves(4)
-                .set_frequency(1.0),
+            worldgen: WorldGen::new(seed),
             surface_detail: Perlin::new(mix(6)),
             aquifer: Perlin::new(mix(7)),
             cave_mask: Perlin::new(mix(8)),
@@ -258,33 +237,23 @@ impl TerrainGenerator {
             && caves.carve(x, y as i32 - 1, z, surface, aquifer) == Carve::None
     }
 
-    /// Altura con un bioma **ya conocido** (evita recalcular el clima).
-    fn height_for(&self, world_x: i32, world_z: i32, biome: Biome) -> usize {
-        let (amp, freq, ridged_w) = biome.relief();
-        let (fx, fz) = (world_x as f64, world_z as f64);
-
-        // La frecuencia por bioma se aplica escalando las coordenadas de entrada
-        // (el ruido base trabaja a 0.010). Es mas barato que reconfigurar el
-        // ruido, que no admite frecuencia variable por muestra.
-        self.bump();
-        let base = self.continent.get([fx * 0.010 * freq, fz * 0.010 * freq]);
-        self.bump();
-        let detail = self.detail.get([fx * 0.045 * freq, fz * 0.045 * freq]);
-        let mut h = SEA_LEVEL as f64 + base * 20.0 * amp + detail * 4.0;
-
-        if ridged_w > 0.0 {
-            self.bump();
-            let r = self.ridged.get([fx * 0.010 * freq, fz * 0.010 * freq]);
-            h += (r - 0.5) * 26.0 * amp * ridged_w;
-        }
-
-        (h.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize
+    /// Muestra geografica de una columna (continentalness, celda, costa,
+    /// altura base). Es la interfaz publica de la FASE 1/2 para previews/tests.
+    pub fn sample(&self, world_x: i32, world_z: i32) -> super::worldgen::TerrainSample {
+        self.worldgen.sample(world_x as f64, world_z as f64)
     }
 
     /// Altura del terreno (numero de bloques solidos) en `(x, z)`.
+    ///
+    /// El relieve ya **no depende del bioma** (auditoria de worldgen #20): viene
+    /// de la geografia continental + relieve macro + cordilleras + valles del
+    /// [`WorldGen`]. El bioma solo decide materiales y vegetacion.
     pub fn height(&self, world_x: i32, world_z: i32) -> usize {
-        let biome = self.biome_at(world_x, world_z);
-        self.height_for(world_x, world_z, biome)
+        let h = self
+            .worldgen
+            .sample(world_x as f64, world_z as f64)
+            .base_height;
+        (h.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize
     }
 
     /// Ruido de detalle de superficie (alta frecuencia, por columna): elige la
@@ -329,7 +298,10 @@ impl TerrainGenerator {
                 // --- Ruido 2D: UNA sola vez por (x, z) ---
                 let (t, h) = self.climate(wx, wz);
                 let biome = biome_of(t, h);
-                let height = self.height_for(wx, wz, biome);
+                // Geografia por etapas (FASE 1/2): la altura sale del WorldGen.
+                let geo = self.worldgen.sample(wx as f64, wz as f64);
+                let height =
+                    (geo.base_height.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize;
                 let aquifer = self.aquifer_level(wx, wz);
                 let variant = self.surface_variant(wx, wz);
                 let border = near_climate_edge(t, h);
@@ -765,9 +737,18 @@ mod tests {
     fn hay_arboles_con_tronco_y_hojas() {
         let g = TerrainGenerator::new(13_371);
         let (mut wood, mut leaves) = (0u32, 0u32);
-        for cz in -3..3 {
-            for cx in -3..3 {
-                let column = g.generate_column(cx * 16, cz * 16);
+        // El relieve continental mueve los biomas: buscamos una zona boscosa
+        // (tierra, con densidad de arboles) y generamos ahi, parando al hallarla.
+        'search: for cz in -12..12 {
+            for cx in -12..12 {
+                let (wx, wz) = (cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
+                if g.biome_at(wx, wz).tree_density() <= 0.0 {
+                    continue;
+                }
+                if g.height(wx, wz) <= SEA_LEVEL as usize {
+                    continue; // agua
+                }
+                let column = g.generate_column(wx, wz);
                 for z in 0..CHUNK_SIZE {
                     for x in 0..CHUNK_SIZE {
                         for y in 0..WORLD_HEIGHT {
@@ -779,9 +760,12 @@ mod tests {
                         }
                     }
                 }
+                if wood > 0 {
+                    break 'search;
+                }
             }
         }
-        assert!(wood > 0, "no se genero ningun tronco");
+        assert!(wood > 0, "no se genero ningun tronco en 24x24 chunks");
         assert!(leaves > wood, "menos hojas que troncos");
     }
 

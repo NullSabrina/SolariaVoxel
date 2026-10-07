@@ -14,7 +14,7 @@ pub const INITIAL_WIDTH: u32 = 1280;
 pub const INITIAL_HEIGHT: u32 = 720;
 
 /// Nombre que aparece en la barra de titulo.
-pub const TITLE: &str = "Solaria Voxel — v0.16.1";
+pub const TITLE: &str = "Solaria Voxel — v0.17.0";
 
 /// Devuelve los atributos con los que se creara la ventana.
 pub fn default_window_attributes() -> WindowAttributes {

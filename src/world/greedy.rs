@@ -331,6 +331,11 @@ fn emit_quad(
     // `origin` desplaza la columna a su sitio del mundo.
     let (ox, oy, oz) = (origin[0], origin[1], origin[2]);
 
+    // Convenio de V (igual que `emit_torch`): v=1 es ABAJO en la imagen del
+    // tile y v=0 ARRIBA. Las dos primeras esquinas de cada cara lateral estan
+    // a `v0` (abajo del bloque), asi que llevan `h`; de otro modo el tile se
+    // dibuja del reves (la hierba lateral salia abajo).
+    //
     // Devolvemos posiciones [x, y, z] para las 4 esquinas y las UV.
     let (corners, uvs): ([[f32; 3]; 4], [[f32; 2]; 4]) = match face {
         Face::PosX => {
@@ -338,14 +343,14 @@ fn emit_quad(
             let x = cf + 1.0;
             (
                 [[x, v0, u1], [x, v0, u0], [x, v1, u0], [x, v1, u1]],
-                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
+                [[0.0, h], [w, h], [w, 0.0], [0.0, 0.0]],
             )
         }
         Face::NegX => {
             let x = cf;
             (
                 [[x, v0, u0], [x, v0, u1], [x, v1, u1], [x, v1, u0]],
-                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
+                [[0.0, h], [w, h], [w, 0.0], [0.0, 0.0]],
             )
         }
         Face::PosY => {
@@ -368,14 +373,14 @@ fn emit_quad(
             let z = cf + 1.0;
             (
                 [[u0, v0, z], [u1, v0, z], [u1, v1, z], [u0, v1, z]],
-                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
+                [[0.0, h], [w, h], [w, 0.0], [0.0, 0.0]],
             )
         }
         Face::NegZ => {
             let z = cf;
             (
                 [[u1, v0, z], [u0, v0, z], [u0, v1, z], [u1, v1, z]],
-                [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]],
+                [[0.0, h], [w, h], [w, 0.0], [0.0, 0.0]],
             )
         }
     };
@@ -420,6 +425,33 @@ mod tests {
         let (vertices, indices) = greedy_column(&column, [0.0; 3]);
         assert_eq!(vertices.len(), 6 * 4, "6 caras x 4 vertices");
         assert_eq!(indices.len(), 6 * 6, "6 caras x 2 triangulos");
+    }
+
+    #[test]
+    fn las_caras_laterales_no_salen_del_reves() {
+        // Convenio: v=1 es ABAJO en la imagen del tile (igual que la antorcha).
+        // Las esquinas de abajo del bloque deben llevar v=1 y las de arriba
+        // v=0; de otro modo la franja de hierba lateral sale abajo.
+        for face in [Face::PosX, Face::NegX, Face::PosZ, Face::NegZ] {
+            let mut v = Vec::new();
+            let mut i = Vec::new();
+            let key = FaceKey {
+                block: Block::Grass.id(),
+                face,
+                sky: 15,
+                block_light: 0,
+            };
+            emit_quad(&mut v, &mut i, face, 3, 5, 7, 1, 1, key, [0.0; 3]);
+            assert_eq!(v.len(), 4, "{face:?}");
+            assert!(
+                v[0].position[1] < v[2].position[1],
+                "{face:?}: esquinas 0/1 abajo"
+            );
+            assert_eq!(v[0].uv[1], 1.0, "{face:?} abajo");
+            assert_eq!(v[1].uv[1], 1.0, "{face:?} abajo");
+            assert_eq!(v[2].uv[1], 0.0, "{face:?} arriba");
+            assert_eq!(v[3].uv[1], 0.0, "{face:?} arriba");
+        }
     }
 
     #[test]

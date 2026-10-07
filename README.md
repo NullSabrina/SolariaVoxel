@@ -8,22 +8,34 @@ versionado del mundo y mas.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.16.1` — Persistencia end-to-end (tests)
+## Estado actual: `v0.17.0` — Worldgen por etapas (FASE 1/2)
 
-Tests de integración de guardado (auditoría §41):
+Primer rediseño del generador de mundo (auditoría de worldgen). Nuevo módulo
+`world/worldgen/` con:
 
-- **Roundtrip completo**: editar un mundo (varias alturas + agua), volcarlo,
-  guardarlo, cargarlo y reconstruirlo.
-- **Recuperación tras crash**: si el archivo principal queda corrupto, el `.bak`
-  (guardado atómico anterior) sigue siendo cargable.
+- `WorldGenConfig` central + validación y `WORLDGEN_CONFIG_VERSION`.
+- Seeds derivadas por campo (sin RNG con estado) y helpers de math.
+- Muestreador **celular (Worley)** determinista con id estable por celda.
+- **Continentalness** con domain warping y clasificación
+  `DeepOcean..Interior`; **costas de ancho variable** por celda; altura base
+  continental + relieve macro + cordilleras (máscara de rango + cresta) + valles.
+- Preview offline:
 
-- Hereda de **v0.16.0**: radio de vista configurable (`SOLARIA_VIEW_RADIUS`, 1..=12;
-  niebla y culling atados a él). El escalado está medido en `docs/performance.md`.
-- Fases 7, 9, 10, 11, 12 y 13 de la auditoría completadas. Pendiente: interpolación
-  de render y overlay de texto con fuente.
+```bash
+cargo run --release --example worldgen_preview -- 13371 512 4
+```
 
-Variables: `SOLARIA_DEMO`, `SOLARIA_OCEAN`, `SOLARIA_STATS`, `SOLARIA_VIEW_RADIUS`,
-`SOLARIA_FLUID_BUDGET_CELLS/_MS`.
+Medido (2048×2048 bloques): océano ~31–55 % según seed (mar abisal incluido),
+tierra el resto, picos hasta el techo de mundo. El relieve ya no depende del
+bioma; el bioma sigue por clima (FASE 3 pendiente). `GENERATOR_VERSION` sube a 9.
+
+- Hereda de **v0.16.1**: persistencia end-to-end.
+- Fases 7, 9–13 de la auditoría completadas. Pendiente del worldgen: bioma por
+  región celular (FASE 3), hidrología/ríos (FASE 5), cuevas jerárquicas (FASE 6),
+  decoración por reglas (FASE 7), previews/benchmarks (FASE 9).
+
+Variables: `SOLARIA_DEMO`, `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_STATS`,
+`SOLARIA_VIEW_RADIUS`, `SOLARIA_FLUID_BUDGET_CELLS/_MS`.
 
 Controles: `1`-`9`/rueda = ranura, `E` = inventario, `F` = volar, **`F3` =
 diagnóstico**, click izq = romper, click der = colocar. Variables: `SOLARIA_DEMO`,
@@ -92,7 +104,8 @@ src/
 │   ├── bench.rs     Benchmarks reproducibles (solo tests).
 │   ├── chunk.rs     Seccion 16^3 y columna 16x16x384.
 │   ├── atlas.rs     Atlas de texturas (carga assets/atlas.png; fallback).
-│   ├── terrain.rs   Generacion: clima/biomas, relieve, superficie y acuiferos.
+│   ├── terrain.rs   Generacion: geografia, clima/biomas, superficie, cuevas.
+│   ├── worldgen/    Motor de worldgen por etapas (config, math, cells, mod).
 │   ├── caves.rs     Cuevas 3D (spaghetti/cheese/pillar) con densidad por Y.
 │   ├── mesher.rs    Meshing naive con face culling (referencia).
 │   ├── greedy.rs    Greedy meshing (fusiona caras; separa el agua).

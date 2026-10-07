@@ -59,7 +59,10 @@ pub const FORMAT_VERSION: u32 = 5;
 /// * v6: vegetacion (arboles).
 /// * v7: clima/biomas avanzados, relieve por bioma, cuevas 3D y acuiferos.
 /// * v8: pozas de lava + bloques `Lava`/`Obsidian`.
-pub const GENERATOR_VERSION: u32 = 8;
+/// * v9: relieve **continental** por etapas (`world::worldgen`): continentalness
+///   con domain warping, red celular, costa de ancho variable, cordilleras por
+///   mascara de rango + cresta y valles. El bioma sigue derivandose del clima.
+pub const GENERATOR_VERSION: u32 = 9;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";

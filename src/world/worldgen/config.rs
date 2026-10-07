@@ -1,0 +1,180 @@
+//! Configuracion central del generador de mundo (FASE 1).
+//!
+//! Antes las constantes estaban dispersas por `terrain.rs`. Aqui viven todas las
+//! escalas y umbrales en un unico sitio, con validacion, para poder calibrar el
+//! generador con previews y benchmarks sin tocar 20 funciones.
+//!
+//! `WORLDGEN_CONFIG_VERSION` versiona la configuracion de cara a depurar y a
+//! futuros guardados: un cambio de valores que altere el mundo deberia subir
+//! tambien `GENERATOR_VERSION` (el resultado cambia), pero esta version permite
+//! distinguir "resultado distinto por formula" de "resultado distinto por
+//! parametros".
+
+/// Version de la configuracion de worldgen.
+pub const WORLDGEN_CONFIG_VERSION: u32 = 1;
+
+/// Parametros de la generacion de mundo. Valores iniciales a calibrar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WorldGenConfig {
+    /// Distancia entre centros de celda (bioma regional), en bloques.
+    pub cell_distance: f32,
+    /// Jitter de los centros celulares (0 = rejilla, 1 = Worley completo).
+    pub cell_jitter: f32,
+
+    /// Valor continental por debajo del cual la celda es oceano.
+    pub ocean_threshold: f32,
+    /// Valor continental por debajo del cual el oceano es abisal.
+    pub deep_ocean_threshold: f32,
+
+    /// Ancho (en unidades continentales) de una costa estrecha.
+    pub coast_narrow: f32,
+    /// Ancho de una costa ancha.
+    pub coast_wide: f32,
+
+    /// Frecuencia del ruido continental de gran escala.
+    pub continental_scale: f64,
+    /// Frecuencia del detalle del ruido continental.
+    pub continental_detail_scale: f64,
+
+    /// Frecuencia y amplitud del relieve macro (colinas grandes).
+    pub macro_scale: f64,
+    pub macro_amplitude: f32,
+
+    /// Frecuencia y amplitud de las cordilleras.
+    pub mountain_scale: f64,
+    pub mountain_amplitude: f32,
+    /// Exponente de la cresta (`1 - |n|`): mas alto, cumbres mas afiladas.
+    pub ridge_power: f32,
+    /// Umbrales de la mascara de cordillera (bajo/alto) sobre el ruido `[0,1]`.
+    pub range_low: f32,
+    pub range_high: f32,
+
+    /// Frecuencia y amplitud de los valles.
+    pub valley_scale: f64,
+    pub valley_amplitude: f32,
+    /// Umbrales del valle (bajo/alto) sobre `|n|`.
+    pub valley_low: f32,
+    pub valley_high: f32,
+
+    /// Domain warping: frecuencia y fuerza (bloques) para romper la regularidad.
+    pub warp_scale: f64,
+    pub warp_strength: f32,
+}
+
+impl Default for WorldGenConfig {
+    fn default() -> Self {
+        Self {
+            cell_distance: 320.0,
+            cell_jitter: 0.85,
+
+            ocean_threshold: -0.05,
+            deep_ocean_threshold: -0.38,
+
+            coast_narrow: 0.045,
+            coast_wide: 0.16,
+
+            continental_scale: 0.00045,
+            continental_detail_scale: 0.0016,
+
+            macro_scale: 0.0018,
+            macro_amplitude: 26.0,
+
+            mountain_scale: 0.0026,
+            mountain_amplitude: 120.0,
+            ridge_power: 2.0,
+            range_low: 0.46,
+            range_high: 0.72,
+
+            valley_scale: 0.0040,
+            valley_amplitude: 30.0,
+            valley_low: 0.06,
+            valley_high: 0.22,
+
+            warp_scale: 0.0016,
+            warp_strength: 55.0,
+        }
+    }
+}
+
+/// Error de validacion de la configuracion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigError {
+    NotPositive(&'static str),
+    OutOfRange(&'static str),
+    Unordered(&'static str),
+}
+
+impl WorldGenConfig {
+    /// Comprueba invariantes: frecuencias positivas, umbrales ordenados,
+    /// probabilidades en rango. Un error claro evita mundos absurdos silenciosos.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        for (name, v) in [
+            ("cell_distance", self.cell_distance),
+            ("continental_scale", self.continental_scale as f32),
+            (
+                "continental_detail_scale",
+                self.continental_detail_scale as f32,
+            ),
+            ("macro_scale", self.macro_scale as f32),
+            ("mountain_scale", self.mountain_scale as f32),
+            ("valley_scale", self.valley_scale as f32),
+            ("warp_scale", self.warp_scale as f32),
+        ] {
+            if v <= 0.0 {
+                return Err(ConfigError::NotPositive(name));
+            }
+        }
+        if !(0.0..=1.0).contains(&self.cell_jitter) {
+            return Err(ConfigError::OutOfRange("cell_jitter"));
+        }
+        if !(-1.0..=0.0).contains(&self.ocean_threshold) {
+            return Err(ConfigError::OutOfRange("ocean_threshold"));
+        }
+        if self.deep_ocean_threshold >= self.ocean_threshold {
+            return Err(ConfigError::Unordered(
+                "deep_ocean_threshold < ocean_threshold",
+            ));
+        }
+        if self.coast_narrow <= 0.0 || self.coast_wide < self.coast_narrow {
+            return Err(ConfigError::Unordered("coast_narrow <= coast_wide"));
+        }
+        if self.range_low >= self.range_high {
+            return Err(ConfigError::Unordered("range_low < range_high"));
+        }
+        if self.valley_low >= self.valley_high {
+            return Err(ConfigError::Unordered("valley_low < valley_high"));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn la_config_por_defecto_es_valida() {
+        assert_eq!(WorldGenConfig::default().validate(), Ok(()));
+    }
+
+    #[test]
+    fn la_validacion_detecta_valores_absurdos() {
+        let c = WorldGenConfig {
+            cell_distance: 0.0,
+            ..Default::default()
+        };
+        assert_eq!(c.validate(), Err(ConfigError::NotPositive("cell_distance")));
+
+        let c = WorldGenConfig {
+            range_low: 0.9,
+            ..Default::default()
+        };
+        assert!(matches!(c.validate(), Err(ConfigError::Unordered(_))));
+
+        let c = WorldGenConfig {
+            ocean_threshold: 0.5,
+            ..Default::default()
+        };
+        assert!(matches!(c.validate(), Err(ConfigError::OutOfRange(_))));
+    }
+}

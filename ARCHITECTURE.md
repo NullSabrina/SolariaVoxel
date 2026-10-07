@@ -106,9 +106,14 @@ Puntos clave:
 ## El pipeline de datos del mundo
 
 ```
-TerrainGenerator (semilla)
-      │  genera_column(x,z)  -> altura (Perlin, POR BLOQUE) + bioma (Worley) + superficie
-      │                          + cuevas (Perlin 3D, iso-superficie)
+WorldGen (semilla)  ->  config + seeds derivadas + ruido (continental, macro,
+      │                  cordillera, valle, warp) + celular (Worley)
+      │  sample(x,z) -> TerrainSample (continentalness, LandClass, celda,
+      │                  costa, altura base)
+      v
+TerrainGenerator
+      │  genera_column(x,z) -> altura del TerrainSample + clima/bioma + superficie
+      │                          + cuevas (Perlin 3D, iso-superficie) + acuifero
       v
    Column (24 x Chunk de 16^3, + arrays de luz cielo/bloque)
       │  greedy::greedy_section_query(query, light, section, origin)

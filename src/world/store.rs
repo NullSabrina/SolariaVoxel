@@ -1207,8 +1207,10 @@ mod tests {
         let change = world.warm_streaming([0.0, 64.0, 0.0]);
         assert_eq!(change.loaded.len(), 81, "deberia cargar 9x9 columnas");
         assert_eq!(world.loaded_positions().count(), 81);
-        // El suelo del spawn es solido y esta posado en un y razonable.
-        assert!(world.is_solid([0, 60, 0]) || world.is_solid([0, 70, 0]));
+        // El spawn tiene terreno solido en algun `y` (con el relieve continental
+        // el origen puede ser tierra o mar, asi que no se fija una altura).
+        let solido = (0..WORLD_HEIGHT as i32).any(|y| world.is_solid([0, y, 0]));
+        assert!(solido, "la columna del spawn no tiene ningun bloque solido");
     }
 
     #[test]

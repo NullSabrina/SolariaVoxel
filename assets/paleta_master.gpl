@@ -1,0 +1,32 @@
+GIMP Palette
+Name: SolariaMaster28
+Columns: 8
+#
+224 166 103 Tierra_Claro_Highlight
+168 101  50 Tierra_Media
+ 95  52  25 Tierra_Oscura_Outline
+185 196 209 Piedra_Clara_Highlight
+125 140 160 Piedra_Media
+ 74  87 110 Piedra_Oscura_Outline
+232 163  61 Madera_Clara_Highlight
+176  99  31 Madera_Media
+ 94  47  18 Madera_Oscura_Outline
+205 225  78 Hoja_Amarillenta_Highlight
+ 95 176  43 Hoja_Media
+ 31 107  58 Hoja_Azulada_Sombra
+ 18  58  38 Hoja_Outline
+255 226 122 Oro_Highlight
+242 168  29 Oro_Medio
+156  83  16 Oro_Sombra_Outline
+125 232 224 Cian_Highlight
+ 43 200 200 Cian_Medio
+ 16  88 107 Cian_Oscuro_Outline
+255 154 138 Rojo_Highlight
+226  58  58 Rojo_Medio
+110  20  48 Rojo_Oscuro_Outline
+255 243 214 Crema_UI_FondoClaro
+203 210 218 Gris_Claro_UI
+ 35  43  61 Pizarra_Oscuro_OutlineGlobal
+255 255 255 Blanco_Hueso_TextoBrillo
+255 230   0 Amarillo_Seleccion_Acento
+255  46 136 Magenta_Acento

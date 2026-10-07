@@ -165,7 +165,9 @@ pub fn fluid_section(
                             [ox + xf, base, oz + zf],
                         ],
                     };
-                    let uv = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+                    // v=1 abajo del tile (igual que la antorcha): p[0..1] es el
+                    // borde superior y p[2..3] la base.
+                    let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
                     push_quad(&mut vertices, &mut indices, p, uv, sky_f, block_f, tile);
                 }
             }
