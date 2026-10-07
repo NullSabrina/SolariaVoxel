@@ -17,6 +17,7 @@
 //! De momento exponemos [`Vec3`] y [`Mat4`]; iremos anadiendo `Vec2`, `Quat`,
 //! `Aabb`, etc. a medida que el motor los necesite.
 
+pub mod color;
 mod frustum;
 mod mat4;
 mod vec3;

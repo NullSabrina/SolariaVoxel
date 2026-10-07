@@ -43,7 +43,7 @@ main.rs ──> lib.rs ──> engine::run()
 | ------ | --------------- | ---------- |
 | `engine` | Ciclo de vida de la app, eventos de winit, input, ventana. | `render`, `scene`, `player`, `world`, `math` |
 | `render` | Todo lo que toca `wgpu`: superficie, pipelines, mallas, shaders e **interfaz 2D** (hotbar/inventario). | `world` (para meshear), `scene`, `math` |
-| `scene` | Que hay en la escena: la camara FPS y el ciclo dia/noche. | `math` |
+| `scene` | Que hay en la escena: la camara FPS, el ciclo dia/noche y el **cielo** (paleta, orbita solar y `SkyState`, todo puro y testeable). | `math` |
 | `player` | Fisica del jugador: vertical (gravedad/salto/vuelo), colision horizontal y test de solape bloque/jugador. | `scene`, `world` (tipos), `math` |
 | `world` | Datos del mundo: bloques, columnas, meshing, raycast, guardado. | `render::mesh` (el tipo `Vertex`), `math` |
 | `math` | Matematica 3D propia (`Vec3`, `Mat4`). | ninguna |
@@ -62,15 +62,16 @@ resumed()                 window_event(RedrawRequested)
   posar jugador (settle)    │   + move_horizontal     (colision en X-Z)
   [modo demo] escena fija   ├─ App::update_selection() raycast -> resaltado
   [modo demo] escena fija   └─ camera.view_projection()
-                                renderer.set_environment(day_factor, sky_color)
+                                let sky = SkyState::at(&day_cycle, &params)  (CPU)
+                                renderer.set_sky(&sky)
                                 renderer.sync_streaming(camara)
-                                renderer.render(&view_projection)
+                                renderer.render(&view_projection, camara, &sky_basis, ...)
                                       │
                                       ├─ world.update_streaming() carga/descarga columnas
                                       ├─ reconstruir mallas de columnas nuevas
-                                      ├─ escribir uniform (MVP + day_factor)
-                                      └─ render pass: limpiar + mallas + resaltado + present
-about_to_wait() -> window.request_redraw()   (bucle continuo)
+                                      ├─ escribir uniform (MVP + day_factor + niebla)
+                                      └─ render pass: limpiar + CIELO + mallas +
+                                         resaltado + mano/personaje + UI + present
 ```
 
 Puntos clave:
@@ -102,6 +103,12 @@ Puntos clave:
 - **Niebla**: el fragment shader funde con el color del cielo por distancia
   (`fog_start`/`fog_end`), lo que da profundidad y disimula el borde del area
   cargada.
+- **Cielo**: una sola fuente de verdad, `scene::SkyState`, resuelve en CPU el
+  gradiente, la luz, la niebla y los astros a partir de la hora. El **pase de
+  cielo** (`render/sky.rs` + `sky.wgsl`) es un triangulo a pantalla completa que
+  se dibuja **antes** del mundo, sin escribir profundidad; reconstruye el rayo de
+  vista desde la base de la camara (sin invertir matrices) y no lleva tablas de
+  keyframes en WGSL.
 
 ## El pipeline de datos del mundo
 
@@ -197,6 +204,9 @@ capturas: el render, el pipeline y la integracion de eventos.
 - Logica de bloques/chunks/meshing/raycast -> `world`.
 - Estado del jugador (inventario, salud, colision) -> `player`.
 - Camara, entidades, iluminacion de escena -> `scene`.
+- **Cielo y atmosfera** (paleta, orbita solar/lunar, fases, estrellas, clima
+  celeste) -> `scene` (estado puro, testeable sin GPU); su **pase** de dibujo ->
+  `render` (`render/sky.rs` + `sky.wgsl`). Conversion de color -> `math/color.rs`.
 - Interfaz 2D (HUD, hotbar, inventario, mesa, overlay F3) -> `render`
   (`render::ui` + `render::gui` + `render::font`); el estado (rejilla, resultado,
   que ventana esta abierta) vive en `App`, y las recetas en `world::recipe`

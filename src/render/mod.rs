@@ -8,10 +8,10 @@
 //! * [`renderer`] — duena de los recursos de GPU y del bucle de un frame.
 //! * [`pipeline`] — como se dibuja (shader, vertices, z-buffer, uniforms).
 //! * [`mesh`] — la geometria (vertices + indices) subida a la GPU.
+//! * [`sky`] — el pase de cielo (gradiente cenit <-> horizonte).
 //!
 //! En v0.1.2 el renderer ya dibuja un cubo 3D con z-buffer sobre el cielo.
 
-mod color;
 pub(crate) mod font;
 pub(crate) mod gui;
 mod highlight;
@@ -22,7 +22,9 @@ mod mesh_worker;
 pub(crate) mod model;
 mod pipeline;
 mod renderer;
+mod sky;
 mod ui;
 
 pub use renderer::{CharacterView, FrameStats, HandView, Renderer, RendererError};
+pub use sky::SkyBasis;
 pub use ui::{UiQuad, region_uv};

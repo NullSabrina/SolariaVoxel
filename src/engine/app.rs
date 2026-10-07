@@ -28,8 +28,8 @@ use crate::engine::input::Input;
 use crate::engine::window;
 use crate::math::Vec3;
 use crate::player::PlayerController;
-use crate::render::Renderer;
-use crate::scene::{Camera, DayCycle};
+use crate::render::{Renderer, SkyBasis};
+use crate::scene::{Camera, DayCycle, SkyParams, SkyState};
 use crate::world::registry;
 
 /// Estado global de la aplicacion.
@@ -90,6 +90,8 @@ pub struct App {
     fps_accum: f32,
     /// Hora del mundo y como afecta a la luz y al cielo.
     day_cycle: DayCycle,
+    /// Parametros artisticos del cielo (paleta, tilt, bruma...).
+    sky_params: SkyParams,
     /// Acumulador para el tick de agua (10 Hz), separado de la fisica y el render.
     water_timer: f32,
     /// Acumulador del **timestep fijo** de la fisica del jugador (segundos).
@@ -696,6 +698,7 @@ impl App {
             crate::world::worldgen::biomes::definition(r.biome_at(bx, bz)).name
         });
         let tod = self.day_cycle.time_of_day * 24.0;
+        let sky_state = SkyState::at(&self.day_cycle, &self.sky_params);
         let stats = self.renderer.as_ref().map(|r| r.frame_stats());
         let memory = self.renderer.as_ref().map(|r| r.world_memory());
         let gpu = self.renderer.as_ref().map_or(0, |r| r.gpu_mesh_bytes());
@@ -717,6 +720,10 @@ impl App {
             format!("BIOME: {biome}"),
             format!("LIGHT: {} ({sky} SKY, {blk} BLOCK)", sky.max(blk)),
             format!("TIME: {:02}:{:02}", tod as u32, (tod * 60.0) as u32 % 60),
+            format!(
+                "SKY: EL {:.0} MOON {}",
+                sky_state.sun_elevation_deg, sky_state.moon_phase
+            ),
             format!("SEED: {}", self.seed),
         ];
         let mut right: Vec<String> = Vec::new();
@@ -977,6 +984,20 @@ impl ApplicationHandler for App {
         }
         self.seed = seed;
         self.world_header = header;
+        // Hora inicial y velocidad del dia por entorno (fuera del modo demo).
+        let start_time = std::env::var("SOLARIA_TIME")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.35);
+        self.day_cycle = DayCycle::new(start_time);
+        if let Some(speed) = std::env::var("SOLARIA_DAY_SPEED")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            && speed > 0.0
+        {
+            let base = self.day_cycle.day_length;
+            self.day_cycle.day_length = base / speed;
+        }
         // Presupuesto de fluidos configurable por entorno.
         self.fluid_budget = crate::world::FluidBudget::from_env();
         println!(
@@ -1273,9 +1294,8 @@ impl ApplicationHandler for App {
                     self.update_selection();
                 }
 
-                // Dibujamos con la matriz de la camara actual (proyeccion * vista).
-                let day_factor = self.day_cycle.day_factor();
-                let sky = self.day_cycle.sky_color();
+                // Cielo del frame: unica fuente de verdad, resuelta en CPU.
+                let sky_state = SkyState::at(&self.day_cycle, &self.sky_params);
                 // Interfaz (hotbar/inventario) construida antes de prestar el
                 // renderer para no mezclar prestamos.
                 // El layout de la interfaz usa el tamano de la **superficie**
@@ -1294,7 +1314,7 @@ impl ApplicationHandler for App {
                 if let (Some(renderer), Some(camera)) =
                     (self.renderer.as_mut(), self.camera.as_mut())
                 {
-                    renderer.set_environment(day_factor, sky);
+                    renderer.set_sky(&sky_state);
                     let player_eye = camera.position;
                     let third = self.third_person && !self.demo;
                     // Tercera persona: la camara se separa del jugador (el
@@ -1310,6 +1330,17 @@ impl ApplicationHandler for App {
                     }
                     let view_projection = camera.view_projection();
                     let position = camera.position;
+                    // Base de la camara para que el shader del cielo reconstruya
+                    // el rayo de vista sin invertir la matriz.
+                    let fwd = camera.forward();
+                    let right = fwd.cross(Vec3::Y).normalize();
+                    let sky_basis = SkyBasis {
+                        forward: fwd,
+                        right,
+                        up: right.cross(fwd).normalize(),
+                        tan_half_fov_y: (camera.fov_y_deg.to_radians() * 0.5).tan(),
+                        aspect: win_w / win_h.max(1.0),
+                    };
                     let feet = Vec3::new(
                         player_eye.x,
                         player_eye.y - crate::player::EYE_HEIGHT,
@@ -1329,7 +1360,7 @@ impl ApplicationHandler for App {
                     });
                     renderer.set_hand_item(self.hotbar[self.hotbar_sel]);
                     renderer.sync_streaming(player_eye);
-                    renderer.render(&view_projection, position, &ui, hand, character);
+                    renderer.render(&view_projection, position, &sky_basis, &ui, hand, character);
                     // Restaura la camara del jugador para la fisica del proximo frame.
                     camera.position = player_eye;
                     camera.update_view();

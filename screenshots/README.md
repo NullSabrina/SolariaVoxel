@@ -52,3 +52,14 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.18.0-biomes.png` | FASE 3: bioma por region celular. |
 | `v0.19.0-river.png` | FASE 5: rios serpenteantes. |
 | `worldgen_preview_13371_biome.png` `worldgen_preview_13371_river.png` | Previews offline (`examples/worldgen_preview.rs`). |
+
+## Cielo y atmosfera (`v0.30`)
+
+| Captura | Que muestra |
+| ------- | ----------- |
+| `v0.30.0_sky_dawn.png` | Amanecer (elevacion solar ~7 grados): horizonte dorado, cenit azul. |
+| `v0.30.0_sky_noon.png` | Mediodia: cenit azul profundo hacia una bruma palida en el horizonte. |
+| `v0.30.0_sky_sunset.png` | Atardecer (golden hour): horizonte naranja y cielo malva. |
+| `v0.30.0_sky_night.png` | Noche profunda: azul muy oscuro. |
+| `v0.30.0_sky_twilight.png` | Hora azul (crepusculo nautico): violeta profundo. |
+| `sky_preview.png` | Preview offline (`examples/sky_preview.rs`): tira de 24 h + hemisferio. |

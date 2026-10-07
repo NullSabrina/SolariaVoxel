@@ -8,19 +8,22 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.29.0` — Personaje y camara en tercera persona
+## Estado actual: `v0.30.0` — Cielo y atmosfera
 
-- **Mano en primera persona** (`v0.28.0`): brazo (manga, puño, piel) + **bloque
-  sostenido**, con animacion de **golpe** (romper/colocar) y **balanceo** al andar.
-- **Personaje** (`v0.28.0`+): humanoide de 1.8 con **pelo, ojos, cinturon y
-  botas** (algo mas que Steve) y **animacion de andar** (piernas y brazos en
-  oposicion).
-- **F5** alterna primera/tercera persona: en tercera la camara se separa del
-  jugador, se dibuja el personaje y se oculta la mano.
-
-Ambos usan un sistema de **modelos de cubos de color** propio
-(`render/model.rs` + `scene/player.rs`), **independiente del atlas**: pipeline
-con **dynamic offset** por pieza, **sombreado por cara horneado** y luz dia/noche.
+- **Cielo con gradiente** (`v0.30.0`): el fondo plano pasa a un pase de cielo
+  (`render/sky.wgsl`) con gradiente **cenit <-> horizonte** que depende de la
+  **elevacion solar** y del **azimut** (naranja hacia el sol, diferente en el lado
+  opuesto). Bajo el horizonte se funde con el color de **niebla**. Con dithering
+  para evitar el banding en degradados oscuros.
+- **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte
+  (noche profunda, crepusculos astronomico/nautico/civil, golden hour, manana/tarde,
+  mediodia), mezcladas en **OKLab** con `smoothstep` para que recorrer 24 h no de
+  saltos. `SkyState` es la **unica fuente de verdad** del color del cielo, la
+  niebla, el `day_factor` y el tinte de luz; la CPU resuelve todo y el shader solo
+  reconstruye el rayo de vista.
+- **Sol y luna 3D, estrellas** llegan en `v0.31`.
+- **Personaje y mano** (`v0.28`/`v0.29`): mano en primera persona y humanoide en
+  tercera persona (`F5`).
 
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
@@ -91,7 +94,8 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_VIEW_RADIUS` | Radio de vista en columnas (niebla y culling atados). |
 | `SOLARIA_FLUID_BUDGET_CELLS` | Celdas de fluido simuladas por tick. |
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
-| `SOLARIA_TIME` | Hora inicial del ciclo dia/noche. |
+| `SOLARIA_TIME` | Hora inicial del ciclo dia/noche (0..1). |
+| `SOLARIA_DAY_SPEED` | Acelera el ciclo (multiplicador; 1 = normal, 24 = un dia por 25 s). |
 
 Ejemplo:
 
@@ -105,8 +109,8 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-272 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
-fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
+287 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+fluidos estilo Minecraft, raycast, worldgen, cuevas y cielo/color). Lint:
 
 ```bash
 cargo fmt
@@ -131,6 +135,12 @@ Galeria de semillas (mosaico de mapas de bioma):
 
 ```bash
 cargo run --release --example seed_gallery
+```
+
+Preview del **cielo** (tira de 24 h + hemisferio completo, offline):
+
+```bash
+cargo run --release --example sky_preview -- 0.28
 ```
 
 Capturas:
@@ -161,7 +171,8 @@ src/
 │   ├── mesh_worker.rs  Meshing en hilos de trabajo con presupuesto por frame.
 │   ├── highlight.rs    Resaltado wireframe del bloque apuntado.
 │   ├── ui.rs / gui.rs  Interfaz 2D (hotbar, inventario) e iconos.
-│   ├── color.rs        Conversion sRGB -> lineal para los colores de clear.
+│   ├── sky.rs          Pase de cielo (triangulo a pantalla completa).
+│   ├── sky.wgsl        Shader del cielo (gradiente + dithering).
 │   ├── scene.wgsl      Shader de la escena (vertex + fragment, cutout).
 │   ├── highlight.wgsl  Shader del resaltado.
 │   ├── ui.wgsl         Shader de la interfaz 2D.
@@ -170,11 +181,13 @@ src/
 │   └── controller.rs   Fisica del jugador: gravedad, suelo, salto, vuelo.
 ├── scene/
 │   ├── camera.rs       Camara FPS (posicion, yaw/pitch, matrices).
-│   └── daynight.rs     Hora del mundo, luz del sol y color del cielo.
+│   ├── daynight.rs     Hora del mundo y contador de dias.
+│   └── sky.rs          Cielo/atmosfera: paleta, orbita solar y SkyState.
 ├── physics.rs          Fisica AABB de entidades (gravedad, colision, flotar).
 ├── math/
 │   ├── vec3.rs         Vector de 3 componentes.
 │   ├── mat4.rs         Matriz 4x4 column-major (perspectiva, look-at).
+│   ├── color.rs        sRGB <-> lineal y mezcla perceptual en OKLab.
 │   └── frustum.rs      Frustum de la camara (frustum culling).
 └── world/
     ├── block.rs        Tipos de bloque (id) que delegan en el registro.

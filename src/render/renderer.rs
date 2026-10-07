@@ -20,7 +20,6 @@ use std::time::Instant;
 use winit::window::Window;
 
 use crate::math::{Frustum, Mat4, Vec3};
-use crate::render::color::srgb_to_linear;
 use crate::render::font;
 use crate::render::gui;
 use crate::render::highlight::{HighlightPipeline, cube_edges};
@@ -28,8 +27,10 @@ use crate::render::mesh::Mesh;
 use crate::render::mesh_worker::{MeshJob, MeshOutput, MeshScheduler};
 use crate::render::model::{ModelMesh, ModelPipeline};
 use crate::render::pipeline::ScenePipeline;
+use crate::render::sky::{SkyBasis, SkyPipeline};
 use crate::render::ui::{UiPipeline, UiQuad};
 use crate::scene::player;
+use crate::scene::{DayCycle, SkyParams, SkyState};
 use crate::world::mesh_snapshot::section_snapshot;
 use crate::world::{
     Block, CHUNK_SIZE, ChunkPos, ChunkRecord, FluidBudget, FluidDirty, RayHit, SECTION_COUNT,
@@ -81,17 +82,19 @@ impl fmt::Display for RendererError {
 
 impl std::error::Error for RendererError {}
 
-/// Color de cielo por defecto, expresado en sRGB y convertido a lineal.
-fn sky_color() -> wgpu::Color {
-    sky_color_from_srgb([0.47, 0.71, 0.97])
+/// Estado de cielo por defecto (media manana) para el arranque.
+fn default_sky_state() -> SkyState {
+    SkyState::at(&DayCycle::default(), &SkyParams::default())
 }
 
-/// Convierte un color de cielo sRGB (0..1) al `wgpu::Color` lineal del clear.
-fn sky_color_from_srgb(c: [f32; 3]) -> wgpu::Color {
+/// `wgpu::Color` (lineal) a partir del horizonte del estado del cielo. El pase de
+/// cielo cubre la pantalla, pero el clear evita parpadeos si algo lo saltara.
+fn clear_color_from_sky(state: &SkyState) -> wgpu::Color {
+    let c = (state.horizon_sun_side + state.horizon_anti_side) * 0.5;
     wgpu::Color {
-        r: srgb_to_linear(c[0]) as f64,
-        g: srgb_to_linear(c[1]) as f64,
-        b: srgb_to_linear(c[2]) as f64,
+        r: c.x as f64,
+        g: c.y as f64,
+        b: c.z as f64,
         a: 1.0,
     }
 }
@@ -298,6 +301,10 @@ pub struct Renderer {
     stats: FrameStats,
 
     clear_color: wgpu::Color,
+    /// Pase de cielo (triangulo a pantalla completa).
+    sky: SkyPipeline,
+    /// Estado del cielo del ultimo frame, resuelto en CPU.
+    sky_state: SkyState,
     /// Factor dia/noche (0..1) del ultimo frame, subido al shader.
     day_factor: f32,
     /// Distancia (bloques) a la que empieza la niebla. Atada al radio de vista.
@@ -373,6 +380,8 @@ impl Renderer {
         );
         // Modelo de la mano (cubos de color) y su pipeline.
         let model = ModelPipeline::new(&device, config.format, Self::DEPTH_FORMAT);
+        // Pase de cielo (gradiente cenit <-> horizonte).
+        let sky = SkyPipeline::new(&device, config.format, Self::DEPTH_FORMAT);
         let hand_arm = ModelMesh::new(&device, &queue, "hand.arm", &player::first_person_arm());
         let hand_item = ModelMesh::new(
             &device,
@@ -434,7 +443,9 @@ impl Renderer {
             mesh_rev: HashMap::new(),
             water_order: Vec::new(),
             stats: FrameStats::default(),
-            clear_color: sky_color(),
+            clear_color: clear_color_from_sky(&default_sky_state()),
+            sky,
+            sky_state: default_sky_state(),
             day_factor: 1.0,
             fog_start,
             fog_end,
@@ -1047,11 +1058,13 @@ impl Renderer {
         self.stats
     }
 
-    /// Actualiza el entorno visual del frame: factor dia/noche y color de cielo
-    /// (sRGB, canales 0..1). El color se convierte a lineal para el clear.
-    pub fn set_environment(&mut self, day_factor: f32, sky_color: [f32; 3]) {
-        self.day_factor = day_factor.clamp(0.0, 1.0);
-        self.clear_color = sky_color_from_srgb(sky_color);
+    /// Actualiza el cielo del frame. La unica fuente de verdad es
+    /// [`crate::scene::SkyState`]: de aqui salen el `day_factor`, el color del
+    /// clear (horizonte) y los colores del pase de cielo.
+    pub fn set_sky(&mut self, state: &SkyState) {
+        self.day_factor = state.day_factor.clamp(0.0, 1.0);
+        self.clear_color = clear_color_from_sky(state);
+        self.sky_state = *state;
     }
 
     /// Dibuja y presenta un frame.
@@ -1059,6 +1072,7 @@ impl Renderer {
         &mut self,
         view_projection: &Mat4,
         camera_pos: Vec3,
+        sky_basis: &SkyBasis,
         ui_quads: &[UiQuad],
         hand: Option<HandView>,
         character: Option<CharacterView>,
@@ -1075,6 +1089,14 @@ impl Renderer {
             ui_quads,
             self.config.width,
             self.config.height,
+        );
+
+        // Cielo del frame: sube la base de camara y los colores ya resueltos.
+        self.sky.update(
+            &self.queue,
+            &self.sky_state,
+            sky_basis,
+            self.start.elapsed().as_secs_f32(),
         );
 
         let fog_color = [
@@ -1173,6 +1195,9 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+
+            // Cielo primero (fondo): cubre la pantalla sin escribir profundidad.
+            self.sky.draw(&mut pass);
 
             pass.set_pipeline(self.pipeline.pipeline());
             pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
