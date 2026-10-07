@@ -15,7 +15,7 @@
 
 use crate::math::Vec3;
 
-use super::block::{Block, Face};
+use super::block::Face;
 
 /// Resultado de un impacto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,10 +145,6 @@ fn face_from_step(axis: usize, step: i32) -> Face {
         _ => Face::PosZ,
     }
 }
-
-/// Funcion auxiliar: bloque solido en el plano y<0 de tests.
-#[allow(dead_code)]
-fn _unused(_: Block) {}
 
 #[cfg(test)]
 mod tests {

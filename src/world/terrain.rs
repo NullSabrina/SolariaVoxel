@@ -530,12 +530,6 @@ fn place_tree(column: &mut Column, x: usize, ground: usize, z: usize) {
     }
 }
 
-/// Cota superior de la altura (para validaciones externas).
-pub fn max_height() -> usize {
-    let _ = WORLD_HEIGHT;
-    MAX_HEIGHT as usize
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
