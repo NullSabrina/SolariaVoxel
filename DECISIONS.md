@@ -3064,6 +3064,45 @@ en caliente solo esta por entorno; la UI (Prompt 2) lo expondra.
 limpio. Capturas `v0.33.0_{view_r12,view_r16,fog_short}.png`.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.40.1 / v0.41.0 - UI creativa: nombres, i18n e inventario
+
+### 2026-10-07 - Modulo `ui` sin GPU, categorias, busqueda y nombre del bloque
+
+**Decision.**
+- Nuevo modulo **`ui`** (sin `wgpu`): `ui::lang` (i18n es/en en tablas de codigo,
+  fallback a la clave) y `ui::inventory` (categorias, `fold` sin tildes,
+  `matches`/`search`/`view`). `render` solo dibuja.
+- `world::registry` gana `CreativeCategory` + `creative_category(block)` +
+  `items_in(cat)` (derivada del bloque, sin tocar la tabla de 17 definiciones).
+- **Nombre del bloque sobre la hotbar** al cambiar de ranura (aparece y se
+  desvanece a los ~2 s), con sombra.
+- **Inventario creativo**: pestanas por categoria (texto, ancho segun etiqueta),
+  campo de busqueda (se escribe con el teclado; Backspace borra) y rejilla 9x5 con
+  **scroll** por rueda. Clic en pestana cambia de categoria; clic en bloque lo
+  asigna a la ranura activa.
+
+**Motivo.** El usuario pidio "inventario creativo con categorias, busqueda, scroll"
+y "nombre del bloque al cambiar de ranura". Se aisló la logica en `ui` para poder
+probarla sin GPU (regla del repo).
+
+**Alternativas descartadas.** `serde_json` + `assets/lang/*.json` (dependencia
+nueva y un parser por dos tablas pequenas): se usan tablas `&[(&str,&str)]`, y un
+datapack puede migrarlas despues. Rehacer el toolkit de widgets nine-slice: fuera
+de este incremento.
+
+**Pendiente honesto del Prompt 2** (documentado, NO hecho): pantalla de titulo,
+selector de mundos y **guardado multi-mundo** (`saves/<slug>/`, level.json,
+escritura atomica, `.bak`, importar `world.vf`), menu de pausa/opciones con
+reasignacion de teclas, fuente ampliada con tildes en el render y nine-slice.
+Nota: `Esc` **sigue** cerrando el juego (el cambio a menu de pausa depende de las
+pantallas, aun no implementadas).
+
+**Consecuencia.** `ui/mod.rs`, `ui/lang.rs`, `ui/inventory.rs`;
+`world/registry.rs`; `engine/app.rs` (idioma, toast, inventario con pestanas y
+busqueda); env `SOLARIA_INVENTORY`/`SOLARIA_SEARCH`/`SOLARIA_TOAST`. 301 tests;
+clippy limpio. Capturas `v0.40.1_toast.png`, `v0.41.0_{inventory,search}.png`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

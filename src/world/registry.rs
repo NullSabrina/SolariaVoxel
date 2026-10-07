@@ -48,6 +48,40 @@ pub enum FluidKind {
     Lava,
 }
 
+/// Categoria del **inventario creativo** (pestanas). Se deriva del bloque (no hay
+/// campo en la tabla) para no tocar las 17 definiciones.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CreativeCategory {
+    /// Construccion: piedra, tablones, obsidiana, mesa.
+    Building,
+    /// Naturaleza: tierras, arena, grava, nieve, madera, hojas.
+    Nature,
+    /// Decoracion/luz: antorcha.
+    Decoration,
+    /// Especiales: liquidos.
+    Special,
+}
+
+impl CreativeCategory {
+    /// Todas las categorias, en orden de pestanas.
+    pub const ALL: [CreativeCategory; 4] = [
+        CreativeCategory::Building,
+        CreativeCategory::Nature,
+        CreativeCategory::Decoration,
+        CreativeCategory::Special,
+    ];
+
+    /// Clave i18n del nombre de la pestana (p.ej. `cat.building`).
+    pub fn key(self) -> &'static str {
+        match self {
+            CreativeCategory::Building => "cat.building",
+            CreativeCategory::Nature => "cat.nature",
+            CreativeCategory::Decoration => "cat.decoration",
+            CreativeCategory::Special => "cat.special",
+        }
+    }
+}
+
 impl FluidKind {
     /// ¿Es un liquido?
     #[inline]
@@ -361,12 +395,48 @@ impl BlockRegistry {
     pub fn count() -> usize {
         COUNT
     }
+
+    /// Categoria de inventario creativo de un bloque.
+    #[inline]
+    pub fn category(block: Block) -> CreativeCategory {
+        creative_category(block)
+    }
+
+    /// Bloques colocables de una categoria, en orden de inventario.
+    pub fn items_in(cat: CreativeCategory) -> Vec<Block> {
+        PLACEABLE_ITEMS
+            .iter()
+            .copied()
+            .filter(|b| creative_category(*b) == cat)
+            .collect()
+    }
 }
 
 /// Definicion de un bloque. Nunca falla: `Block` siempre tiene una entrada.
 #[inline]
 pub fn definition(block: Block) -> &'static BlockDefinition {
     &BLOCKS[block.id() as usize]
+}
+
+/// Categoria del inventario creativo de un bloque.
+pub fn creative_category(block: Block) -> CreativeCategory {
+    match block {
+        Block::Stone | Block::Planks | Block::Obsidian | Block::CraftingTable => {
+            CreativeCategory::Building
+        }
+        Block::Grass
+        | Block::Dirt
+        | Block::CoarseDirt
+        | Block::Podzol
+        | Block::Sand
+        | Block::Gravel
+        | Block::Snow
+        | Block::Wood
+        | Block::Leaves => CreativeCategory::Nature,
+        Block::Torch => CreativeCategory::Decoration,
+        Block::Water | Block::Lava => CreativeCategory::Special,
+        Block::Air => CreativeCategory::Building,
+    }
 }
 
 /// Reconstruye un bloque desde su id. Cualquier id fuera de rango es aire

@@ -241,6 +241,7 @@ pub mod physics;
 pub mod player;
 pub mod render;
 pub mod scene;
+pub mod ui;
 pub mod world;
 
 pub use engine::run;

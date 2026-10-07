@@ -8,21 +8,25 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.33.0` — Distancia de vista y niebla
+## Estado actual: `v0.41.0` — UI creativa (inventario, nombres, i18n)
 
-- **Radios separados** (`world::ViewSettings`): distancia de **render** (12 por
-  defecto, hasta 32), de **simulacion** (6), **unload** con histeresis y **niebla**.
-  La carga es **circular** (radio euclideo). Presets `low/medium/high`. Env
-  `SOLARIA_VIEW_RADIUS`, `SOLARIA_SIM_RADIUS`, `SOLARIA_FOG=off|far|normal|short`.
-- **Niebla** (`v0.30.1`): color = horizonte del cielo en la direccion de mirada,
-  termina en `(render-1)` chunks. Los fluidos solo se simulan dentro del radio de
-  simulacion (fuera quedan congelados pero guardados).
-- **Arranque**: se calienta en sincrono solo un radio pequeno; el resto lo trae el
-  streaming asincrono. Medido: R12 defecto ~477 MB (CPU+GPU), 182 fps, ~955 dc.
-  Ver [`docs/performance.md`](./docs/performance.md).
-- **Cielo y atmosfera** (`v0.30`–`v0.31.1`): gradiente cenit <-> horizonte por
-  fases (OKLab), sol y luna como **cubos 3D** con fases lunares, estrellas, halo
-  (Henyey-Greenstein), Cinturon de Venus y hora azul.
+- **Modulo `ui` sin GPU** (`src/ui/`): estado y logica de interfaz, 100 %
+  testeable. `ui::lang` (i18n es/en) y `ui::inventory` (categorias, busqueda
+  insensible a mayusculas y **tildes**: "pie" encuentra "Piedra").
+- **Registro de bloques con categoria** creativa (`CreativeCategory`).
+- **Inventario creativo** (`v0.41.0`): pestanas por categoria, campo de
+  **busqueda** y rejilla **9x5 con scroll** (rueda). `E` para abrir.
+- **Nombre del bloque** sobre la hotbar (`v0.40.1`): aparece al cambiar de
+  ranura y se desvanece (~2 s).
+- **Pendiente de la Parte B/UI del Prompt 2**: pantalla de titulo, selector y
+  guardado **multi-mundo** (`saves/<slug>/`), menu de pausa/opciones, reasignacion
+  de teclas y nine-slice de widgets. Documentado como siguiente hito.
+- **Distancia de vista y niebla** (`v0.33.0`): radios separados
+  (`world::ViewSettings`), carga circular y niebla al horizonte. Ver
+  [`docs/performance.md`](./docs/performance.md).
+- **Cielo y atmosfera** (`v0.30`–`v0.31.1`): gradiente por fases (OKLab), sol y
+  luna como **cubos 3D** con fases lunares, estrellas, halo (Henyey-Greenstein),
+  Cinturon de Venus y hora azul.
 - **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte
   (noche profunda, crepusculos astronomico/nautico/civil, golden hour, manana/tarde,
   mediodia), mezcladas en **OKLab** con `smoothstep` para que recorrer 24 h no de
@@ -102,6 +106,9 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_VIEW_RADIUS` | Radio de render en columnas (2–32; por defecto 12). |
 | `SOLARIA_SIM_RADIUS` | Radio de simulacion de fluidos (1–12; por defecto 6). |
 | `SOLARIA_FOG` | Modo de niebla: `off`, `far`, `normal` (def.), `short`. |
+| `SOLARIA_INVENTORY` | Abre el inventario creativo al arrancar (capturas). |
+| `SOLARIA_SEARCH` | Texto de busqueda inicial del inventario (abre el inventario). |
+| `SOLARIA_TOAST` | Muestra el nombre del bloque de esa ranura sobre la hotbar. |
 | `SOLARIA_FLUID_BUDGET_CELLS` | Celdas de fluido simuladas por tick. |
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
 | `SOLARIA_TIME` | Hora inicial del ciclo dia/noche (0..1). |
@@ -121,9 +128,9 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-292 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
-fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color y distancia de
-vista). Lint:
+301 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color, distancia de
+vista e interfaz creativa). Lint:
 
 ```bash
 cargo fmt
@@ -196,6 +203,9 @@ src/
 │   ├── camera.rs       Camara FPS (posicion, yaw/pitch, matrices).
 │   ├── daynight.rs     Hora del mundo y contador de dias.
 │   └── sky.rs          Cielo/atmosfera: paleta, orbita solar y SkyState.
+├── ui/                 Estado/logica de interfaz sin GPU (i18n, inventario).
+│   ├── lang.rs         Traducciones es/en.
+│   └── inventory.rs    Categorias, busqueda y filtrado del inventario.
 ├── physics.rs          Fisica AABB de entidades (gravedad, colision, flotar).
 ├── math/
 │   ├── vec3.rs         Vector de 3 componentes.

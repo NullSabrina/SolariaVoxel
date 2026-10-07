@@ -120,6 +120,16 @@ pub struct App {
     bob: f32,
     /// Camara en **tercera persona** (F5): se ve el personaje.
     third_person: bool,
+    /// Idioma de la interfaz (es/en).
+    lang: crate::ui::Lang,
+    /// Categoria activa del inventario creativo (indice en `CreativeCategory::ALL`).
+    inv_category: usize,
+    /// Texto de busqueda del inventario creativo.
+    inv_search: String,
+    /// Desplazamiento vertical del inventario (en filas).
+    inv_scroll: i32,
+    /// Nombre del bloque sobre la hotbar: `(bloque, segundos restantes)`.
+    hotbar_toast: Option<(crate::world::Block, f32)>,
 }
 
 /// Distancia y altura de la camara en tercera persona.
@@ -141,6 +151,10 @@ fn now_unix() -> u64 {
 
 /// Cuantas ranuras tiene la barra rapida (teclas `1`-`9`).
 const HOTBAR_SLOTS: usize = 9;
+
+/// Rejilla visible del inventario creativo (columnas x filas).
+const INV_COLS: usize = 9;
+const INV_ROWS: usize = 5;
 
 /// Escala de la interfaz (pixels de mundo -> pixels de pantalla).
 const UI_SCALE: f32 = 2.0;
@@ -272,6 +286,13 @@ impl App {
                 self.bob += frame_dt * 7.0;
             }
             self.swing = (self.swing - frame_dt / 0.28).max(0.0);
+        }
+
+        // Nombre del bloque sobre la hotbar: aparece al cambiar de ranura y se
+        // desvanece (a los ~2 s desaparece).
+        if let Some((b, t)) = self.hotbar_toast {
+            let t = t - frame_dt;
+            self.hotbar_toast = (t > 0.0).then_some((b, t));
         }
 
         // El giro es **por frame**: el delta del raton es de este frame, no de un
@@ -510,30 +531,88 @@ impl App {
         }
     }
 
-    /// Celdas (rectangulos) del inventario: una rejilla que contiene **todos**
-    /// los bloques de `BlockRegistry::items()` (8 columnas), centrada.
+    /// Bloques que muestra el inventario creativo: la categoria activa, o los
+    /// resultados si hay busqueda.
+    fn inventory_items(&self) -> Vec<crate::world::Block> {
+        let cat = crate::world::CreativeCategory::ALL[self.inv_category.min(3)];
+        crate::ui::inventory::view(self.lang, cat, &self.inv_search)
+    }
+
+    /// Rectangulos de la rejilla **visible** del inventario (9x5) y su esquina.
     fn inventory_cells(&self, win_w: f32, win_h: f32) -> Vec<[f32; 4]> {
         use crate::render::gui;
         let slot = gui::SLOT as f32 * UI_SCALE;
-        let gap = 6.0;
-        let cols = 8usize;
-        let rows = registry::BlockRegistry::items().len().div_ceil(cols).max(1);
-        let grid_w = cols as f32 * slot + (cols as f32 - 1.0) * gap;
-        let grid_h = rows as f32 * slot + (rows as f32 - 1.0) * gap;
-        let x0 = (win_w - grid_w) * 0.5;
-        let y0 = (win_h - grid_h) * 0.5;
-        let mut out = Vec::with_capacity(cols * rows);
-        for i in 0..(cols * rows) {
-            let cx = x0 + (i % cols) as f32 * (slot + gap);
-            let cy = y0 + (i / cols) as f32 * (slot + gap);
-            out.push([cx, cy, slot, slot]);
+        let gap = 4.0;
+        let cols = INV_COLS as f32;
+        let rows = INV_ROWS as f32;
+        let grid_w = cols * slot + (cols - 1.0) * gap;
+        let grid_h = rows * slot + (rows - 1.0) * gap;
+        let bar_h = gui::HOTBAR.h as f32 * UI_SCALE;
+        let x0 = ((win_w - grid_w) * 0.5).floor();
+        let y0 = ((win_h - bar_h - 8.0) - 12.0 - grid_h).floor();
+        let mut out = Vec::with_capacity((cols * rows) as usize);
+        for r in 0..INV_ROWS {
+            for c in 0..INV_COLS {
+                out.push([
+                    x0 + c as f32 * (slot + gap),
+                    y0 + r as f32 * (slot + gap),
+                    slot,
+                    slot,
+                ]);
+            }
         }
         out
     }
 
+    /// Maximo desplazamiento (en filas) del inventario.
+    fn inventory_max_scroll(&self) -> i32 {
+        let items = self.inventory_items().len() as i32;
+        let full_rows = (items + INV_COLS as i32 - 1) / INV_COLS as i32;
+        (full_rows - INV_ROWS as i32).max(0)
+    }
+
+    /// Celdas visibles emparejadas con su bloque (para clic y dibujo).
+    fn inventory_slots(&self, win_w: f32, win_h: f32) -> Vec<([f32; 4], crate::world::Block)> {
+        let items = self.inventory_items();
+        let start = (self.inv_scroll.max(0) as usize) * INV_COLS;
+        self.inventory_cells(win_w, win_h)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, cell)| items.get(start + i).map(|b| (cell, *b)))
+            .collect()
+    }
+
+    /// Rectangulos de las pestanas de categoria (una por categoria), centradas
+    /// sobre la rejilla y con ancho segun el texto (para que no se solapen).
+    fn inventory_tabs(&self, win_w: f32, win_h: f32) -> Vec<[f32; 4]> {
+        use crate::render::font;
+        let cells = self.inventory_cells(win_w, win_h);
+        let Some(first) = cells.first() else {
+            return Vec::new();
+        };
+        let cats = crate::world::CreativeCategory::ALL;
+        let tab_h = 16.0;
+        let gap = 4.0;
+        let tab_w = cats
+            .iter()
+            .map(|c| font::text_width(crate::ui::translate(self.lang, c.key()), UI_SCALE))
+            .fold(0.0, f32::max)
+            + 12.0;
+        let grid_w = cells
+            .get(INV_COLS - 1)
+            .map(|c| c[0] + c[2] - first[0])
+            .unwrap_or(0.0);
+        let total = cats.len() as f32 * (tab_w + gap) - gap;
+        let x0 = first[0] + (grid_w - total).max(0.0) * 0.5;
+        let y = (first[1] - tab_h - 6.0).max(2.0);
+        (0..cats.len())
+            .map(|i| [x0 + i as f32 * (tab_w + gap), y, tab_w, tab_h])
+            .collect()
+    }
+
     /// Construye los quads de la interfaz (hotbar + inventario).
     fn build_ui(&self, win_w: f32, win_h: f32) -> Vec<crate::render::UiQuad> {
-        use crate::render::{UiQuad, gui, region_uv};
+        use crate::render::{UiQuad, font, gui, region_uv};
         use crate::world::Face;
         let mut quads: Vec<UiQuad> = Vec::new();
         let slot = gui::SLOT as f32 * UI_SCALE;
@@ -630,25 +709,89 @@ impl App {
             }
         }
 
-        // Inventario: rejilla con TODOS los bloques disponibles (ICONOS).
+        // Inventario creativo: pestanas por categoria, busqueda y rejilla con
+        // scroll (9x5 visibles).
         if self.inventory_open {
-            for (cell, item) in self
-                .inventory_cells(win_w, win_h)
-                .iter()
-                .zip(registry::BlockRegistry::items().iter())
-            {
-                let [cx, cy, cw, ch] = *cell;
+            // Pestanas de categoria (texto centrado).
+            for (i, tab) in self.inventory_tabs(win_w, win_h).iter().enumerate() {
+                let selected = i == self.inv_category;
                 quads.push(UiQuad {
-                    rect: [cx, cy, cw, ch],
+                    rect: *tab,
+                    uv: region_uv(if selected {
+                        gui::SELECTION
+                    } else {
+                        gui::SLOT_REGION
+                    }),
+                    layer: -1,
+                });
+                let cat = crate::world::CreativeCategory::ALL[i];
+                let label = crate::ui::translate(self.lang, cat.key());
+                let tw = font::text_width(label, UI_SCALE);
+                quads.extend(font::text_quads(
+                    label,
+                    tab[0] + (tab[2] - tw) * 0.5,
+                    tab[1] + 4.0,
+                    UI_SCALE,
+                ));
+            }
+            // Campo de busqueda.
+            let cells = self.inventory_cells(win_w, win_h);
+            if let Some(first) = cells.first() {
+                let grid_w = cells
+                    .get(INV_COLS - 1)
+                    .map(|c| c[0] + c[2] - first[0])
+                    .unwrap_or(9.0 * gui::SLOT as f32 * UI_SCALE);
+                let sx = first[0];
+                let sy = (first[1] - 40.0).max(2.0);
+                quads.push(UiQuad {
+                    rect: [sx, sy, grid_w, 16.0],
+                    uv: region_uv(gui::DIM),
+                    layer: -1,
+                });
+                let label = format!(
+                    "{}: {}",
+                    crate::ui::translate(self.lang, "ui.search"),
+                    self.inv_search
+                );
+                quads.extend(font::text_quads(&label, sx + 4.0, sy + 4.0, UI_SCALE));
+            }
+            // Rejilla con los bloques visibles.
+            for (cell, item) in self.inventory_slots(win_w, win_h) {
+                quads.push(UiQuad {
+                    rect: cell,
                     uv: region_uv(gui::SLOT_REGION),
                     layer: -1,
                 });
                 quads.push(UiQuad {
-                    rect: [cx + inset, cy + inset, cw - 2.0 * inset, ch - 2.0 * inset],
+                    rect: [
+                        cell[0] + inset,
+                        cell[1] + inset,
+                        cell[2] - 2.0 * inset,
+                        cell[3] - 2.0 * inset,
+                    ],
                     uv: [0.0, 0.0, 1.0, 1.0],
                     layer: item.face_tile(Face::PosY) as i32,
                 });
             }
+        }
+
+        // Nombre del bloque sobre la hotbar (aparece al cambiar de ranura).
+        if let Some((b, _)) = self.hotbar_toast {
+            let name = crate::ui::lang::block_name(self.lang, b);
+            let tw = font::text_width(name, UI_SCALE);
+            let tx = ((win_w - tw) * 0.5).floor();
+            let ty = (bar_y - 22.0).floor();
+            quads.push(UiQuad {
+                rect: [
+                    tx - 4.0,
+                    ty - 3.0,
+                    tw + 8.0,
+                    font::GLYPH_H as f32 * UI_SCALE + 6.0,
+                ],
+                uv: region_uv(gui::DIM),
+                layer: -1,
+            });
+            quads.extend(font::text_quads(name, tx, ty, UI_SCALE));
         }
 
         // Overlay de diagnostico **F3**: dos columnas con fondo oscuro.
@@ -792,18 +935,25 @@ impl App {
         quads
     }
 
-    /// Un click en el inventario: elige el bloque de la celda pulsada.
+    /// Un click en el inventario: cambia de pestana o asigna el bloque pulsado a
+    /// la ranura activa de la hotbar.
     fn inventory_click(&mut self) {
         let (win_w, win_h) = self.window_size_f();
         let (mx, my) = self.cursor;
-        for (cell, item) in self
-            .inventory_cells(win_w, win_h)
-            .iter()
-            .zip(registry::BlockRegistry::items().iter())
-        {
-            let [x, y, w, h] = *cell;
-            if mx >= x && mx < x + w && my >= y && my < y + h {
-                self.hotbar[self.hotbar_sel] = *item;
+        let inside =
+            |r: &[f32; 4]| mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3];
+        for (i, tab) in self.inventory_tabs(win_w, win_h).iter().enumerate() {
+            if inside(tab) {
+                self.inv_category = i;
+                self.inv_search.clear();
+                self.inv_scroll = 0;
+                return;
+            }
+        }
+        for (cell, item) in self.inventory_slots(win_w, win_h) {
+            if inside(&cell) {
+                self.hotbar[self.hotbar_sel] = item;
+                self.hotbar_toast = Some((item, 2.0));
                 println!("[engine] ranura {} = {item:?}", self.hotbar_sel + 1);
                 return;
             }
@@ -1018,6 +1168,21 @@ impl ApplicationHandler for App {
         // Barra rapida por defecto: los primeros `HOTBAR_SLOTS` items.
         self.hotbar = std::array::from_fn(|i| registry::BlockRegistry::items()[i]);
 
+        // Demo de interfaz: abrir el inventario, una busqueda y el nombre del
+        // bloque sobre la hotbar (para capturas sin interaccion).
+        if let Ok(q) = std::env::var("SOLARIA_SEARCH") {
+            self.inv_search = q;
+            self.inventory_open = true;
+        }
+        if std::env::var("SOLARIA_INVENTORY").is_ok() {
+            self.inventory_open = true;
+        }
+        if let Ok(v) = std::env::var("SOLARIA_TOAST") {
+            let idx = v.parse::<usize>().unwrap_or(2).min(HOTBAR_SLOTS - 1);
+            self.hotbar_sel = idx;
+            self.hotbar_toast = Some((self.hotbar[idx], 9999.0));
+        }
+
         // Carga **sincrona** del area inicial antes de posar al jugador (o
         // montar la demo): con streaming async el suelo aun no estaria cargado y
         // el jugador caeria o la demo saldria vacia.
@@ -1197,10 +1362,28 @@ impl ApplicationHandler for App {
                                 }
                             );
                         }
-                        // 1..9: selecciona la ranura de la hotbar.
+                        // Con el inventario abierto, las teclas escriben en la
+                        // busqueda; si no, `1`-`9` seleccionan la ranura.
                         _ if event.state == ElementState::Pressed => {
-                            if let Some(slot) = digit_slot(code) {
+                            if self.inventory_open {
+                                if code == KeyCode::Backspace {
+                                    self.inv_search.pop();
+                                    self.inv_scroll = 0;
+                                    return;
+                                }
+                                if let Some(text) = event.text.as_deref() {
+                                    for ch in text.chars() {
+                                        if (ch.is_alphanumeric() || ch == ' ')
+                                            && self.inv_search.chars().count() < 24
+                                        {
+                                            self.inv_search.push(ch);
+                                        }
+                                    }
+                                    self.inv_scroll = 0;
+                                }
+                            } else if let Some(slot) = digit_slot(code) {
                                 self.hotbar_sel = slot;
+                                self.hotbar_toast = Some((self.hotbar[slot], 2.0));
                                 println!("[engine] ranura {} ({:?})", slot + 1, self.hotbar[slot]);
                             }
                         }
@@ -1263,6 +1446,20 @@ impl ApplicationHandler for App {
                         self.hotbar_sel = (self.hotbar_sel + 8) % 9;
                     } else if step < 0.0 {
                         self.hotbar_sel = (self.hotbar_sel + 1) % 9;
+                    }
+                    self.hotbar_toast = Some((self.hotbar[self.hotbar_sel], 2.0));
+                } else {
+                    // Con el inventario abierto, la rueda hace scroll.
+                    use winit::event::MouseScrollDelta;
+                    let step = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y.signum(),
+                        MouseScrollDelta::PixelDelta(p) => p.y.signum() as f32,
+                    };
+                    let max = self.inventory_max_scroll();
+                    if step > 0.0 {
+                        self.inv_scroll = (self.inv_scroll - 1).clamp(0, max);
+                    } else if step < 0.0 {
+                        self.inv_scroll = (self.inv_scroll + 1).clamp(0, max);
                     }
                 }
             }

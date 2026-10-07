@@ -38,7 +38,7 @@ pub use memory::WorldMemory;
 pub use mesher::{SectionMesh, mesh_column, mesh_section};
 pub use raycast::{RayHit, raycast};
 pub use recipe::{RECIPES, Recipe, match_recipe};
-pub use registry::{BlockDefinition, BlockRegistry, FluidKind, RenderKind};
+pub use registry::{BlockDefinition, BlockRegistry, CreativeCategory, FluidKind, RenderKind};
 pub use save::{
     ChunkPos, ChunkRecord, FORMAT_VERSION, GENERATOR_VERSION, MigrationChain, SaveError,
     WorldHeader, WorldMigrator, WorldSave, load_and_migrate,

@@ -44,6 +44,7 @@ main.rs ──> lib.rs ──> engine::run()
 | `engine` | Ciclo de vida de la app, eventos de winit, input, ventana. | `render`, `scene`, `player`, `world`, `math` |
 | `render` | Todo lo que toca `wgpu`: superficie, pipelines, mallas, shaders e **interfaz 2D** (hotbar/inventario). | `world` (para meshear), `scene`, `math` |
 | `scene` | Que hay en la escena: la camara FPS, el ciclo dia/noche y el **cielo** (paleta, orbita solar y `SkyState`, todo puro y testeable). | `math` |
+| `ui` | Estado y **logica de interfaz sin GPU**: i18n (`lang`) y reglas del inventario creativo (categorias, busqueda, filtrado). | `world` (tipos) |
 | `player` | Fisica del jugador: vertical (gravedad/salto/vuelo), colision horizontal y test de solape bloque/jugador. | `scene`, `world` (tipos), `math` |
 | `world` | Datos del mundo: bloques, columnas, meshing, raycast, guardado. | `render::mesh` (el tipo `Vertex`), `math` |
 | `math` | Matematica 3D propia (`Vec3`, `Mat4`). | ninguna |
@@ -208,9 +209,9 @@ capturas: el render, el pipeline y la integracion de eventos.
   celeste) -> `scene` (estado puro, testeable sin GPU); su **pase** de dibujo ->
   `render` (`render/sky.rs` + `sky.wgsl`). Conversion de color -> `math/color.rs`.
 - Interfaz 2D (HUD, hotbar, inventario, mesa, overlay F3) -> `render`
-  (`render::ui` + `render::gui` + `render::font`); el estado (rejilla, resultado,
-  que ventana esta abierta) vive en `App`, y las recetas en `world::recipe`
-  (logica pura, testeable).
+  (`render::ui` + `render::gui` + `render::font`); el **estado/logica** de UI
+  (idioma, categorias, busqueda, reglas del inventario) -> `ui` (sin GPU,
+  testeable), y las recetas en `world::recipe`.
 - Nuevos efectos visuales (particulas) -> `render` (o un `render::vfx`).
 - Un sistema de juego (crafteo, IA) -> un modulo nuevo al mismo nivel.
 - Cualquier cosa que necesite `wgpu` -> solo dentro de `render`.
