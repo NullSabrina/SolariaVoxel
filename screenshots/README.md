@@ -65,3 +65,6 @@ ejecutable en modo demo (ver `README.md`).
 | `sky_preview.png` | Preview offline (`examples/sky_preview.rs`): tira de 24 h + hemisferio. |
 | `v0.30.1_fog_directional.png` | Atardecer con niebla direccional (color de horizonte por azimut). |
 | `v0.30.1_fog_horizonte.png` | Amanecer: sin costura entre cielo y terreno lejano. |
+| `v0.31.0_sun_cube.png` | Sol como cubo 3D (se ve la cara superior y el giro). |
+| `v0.31.0_moon_cube.png` | Luna cubo 3D con fase y campo de estrellas. |
+| `v0.31.0_stars.png` | Cielo nocturno con estrellas y luna. |

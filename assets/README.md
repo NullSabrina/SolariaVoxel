@@ -11,6 +11,7 @@
 | `paleta_master.gpl` | - | Paleta maestra de LibreSprite (documenta los colores del atlas). |
 | `paleta_medieval.gpl` | - | Paleta medieval de LibreSprite. |
 | `models/solaria_torch.bbmodel` | - | Modelo fuente Blockbench de la antorcha. |
+| `src/models/solaria_celestial.bbmodel` | - | Modelo fuente Blockbench del "rig celeste" (cubo-sol ~22 u, cubo-luna ~17 u, giro fijo yaw 30 grados / pitch -20). Es **referencia de proporciones**: el sol/luna se dibujan por interseccion rayo-caja en `render/sky.wgsl` (sin texturas), con las medidas reflejadas en `render/sky.rs`. |
 
 Regenerar el atlas (`tools/gen_atlas_final.py`) reproduce `atlas.png` byte a byte
 desde las matrices embebidas; los `.gpl` y los sprites son la referencia de

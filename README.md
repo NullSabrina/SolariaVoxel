@@ -8,7 +8,7 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.30.1` — Cielo y atmosfera
+## Estado actual: `v0.31.0` — Cielo y atmosfera
 
 - **Cielo con gradiente** (`v0.30.0`): el fondo plano pasa a un pase de cielo
   (`render/sky.wgsl`) con gradiente **cenit <-> horizonte** que depende de la
@@ -19,6 +19,12 @@ versionado del mundo y la generacion procedural.
   sino el **horizonte del cielo en la direccion de mirada** (misma funcion que el
   pase de cielo), asi que **no hay costura** entre cielo y terreno lejano. El agua
   usa la misma niebla y el especular sigue la direccion real del sol.
+- **Sol y luna 3D + estrellas** (`v0.31.0`): el sol y la luna son **cubos 3D**
+  (interseccion rayo-caja orientada en el shader) que giran alrededor del jugador,
+  en lados opuestos, con **sombreado por cara** y **giro propio**; se ocultan bajo
+  el horizonte. La luna tiene **fase** (ciclo de 8 dias de juego via `day_count`).
+  El cielo nocturno tiene ~1500 **estrellas** deterministas por hash, con
+  parpadeo. Rig celeste de referencia en Blockbench (`assets/src/models/`).
 - **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte
   (noche profunda, crepusculos astronomico/nautico/civil, golden hour, manana/tarde,
   mediodia), mezcladas en **OKLab** con `smoothstep` para que recorrer 24 h no de
@@ -100,6 +106,8 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
 | `SOLARIA_TIME` | Hora inicial del ciclo dia/noche (0..1). |
 | `SOLARIA_DAY_SPEED` | Acelera el ciclo (multiplicador; 1 = normal, 24 = un dia por 25 s). |
+| `SOLARIA_DAY` | Dia de juego inicial (fases lunares). |
+| `SOLARIA_LOOK` | Orientacion de la camara del demo (`yaw,pitch` en grados), p.ej. `96,18` para mirar al sol. |
 
 Ejemplo:
 
@@ -113,7 +121,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-287 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+288 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen, cuevas y cielo/color). Lint:
 
 ```bash

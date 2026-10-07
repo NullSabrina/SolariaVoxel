@@ -22,6 +22,11 @@ pub struct SkyBasis {
     pub aspect: f32,
 }
 
+/// Radio angular del sol, en radianes (~6.3 grados de radio).
+pub const SUN_ANG_RADIUS: f32 = 0.11;
+/// Radio angular de la luna, en radianes.
+pub const MOON_ANG_RADIUS: f32 = 0.085;
+
 /// Uniform del pase de cielo. DEBE coincidir con `SkyUniforms` de `sky.wgsl`.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -42,6 +47,12 @@ struct SkyUniforms {
     time: f32,
     sun_color: [f32; 3],
     _pad: f32,
+    moon_dir: [f32; 3],
+    moon_phase: f32,
+    sun_ang_radius: f32,
+    moon_ang_radius: f32,
+    star_vis: f32,
+    self_spin: f32,
 }
 
 /// Recursos de GPU del pase de cielo.
@@ -165,6 +176,12 @@ impl SkyPipeline {
             time,
             sun_color: state.sun_color.into(),
             _pad: 0.0,
+            moon_dir: state.moon_dir.into(),
+            moon_phase: state.moon_phase as f32,
+            sun_ang_radius: SUN_ANG_RADIUS,
+            moon_ang_radius: MOON_ANG_RADIUS,
+            star_vis: state.star_visibility,
+            self_spin: state.self_spin,
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
@@ -188,8 +205,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn el_uniform_del_cielo_mide_128_bytes() {
+    fn el_uniform_del_cielo_mide_160_bytes() {
         // sky.wgsl asume este layout exacto (vec3 alineados a 16).
-        assert_eq!(std::mem::size_of::<SkyUniforms>(), 128);
+        assert_eq!(std::mem::size_of::<SkyUniforms>(), 160);
     }
 }

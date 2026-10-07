@@ -37,6 +37,10 @@ pub const HAZE: f32 = 0.6;
 /// Numero de fases lunares (ciclo de 8 dias de juego).
 pub const MOON_PHASES: u8 = 8;
 
+/// Giro propio de los astros por dia de juego, en grados. Hace que el cubo del
+/// sol/luna muestre 2-3 caras y cambie su sombreado (se lee como cubo, no sprite).
+pub const SELF_SPIN_DEG_PER_DAY: f32 = 45.0;
+
 /// Parametros artisticos del cielo, sobreescribibles por configuracion.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SkyParams {
@@ -163,6 +167,8 @@ pub struct SkyState {
     pub belt_of_venus: f32,
     /// Visibilidad de las estrellas (`0..1`).
     pub star_visibility: f32,
+    /// Giro propio de los astros (radianes), acumulado a lo largo del dia.
+    pub self_spin: f32,
     /// Fase lunar (`0..MOON_PHASES`).
     pub moon_phase: u8,
     /// Cuanto se apaga la luz del sol (`0..1`); lo consume `scene.wgsl`.
@@ -215,6 +221,7 @@ impl SkyState {
             sun_glow,
             belt_of_venus,
             star_visibility,
+            self_spin: SELF_SPIN_DEG_PER_DAY.to_radians() * cycle.time_of_day,
             moon_phase: (cycle.day_count % MOON_PHASES as u64) as u8,
             day_factor,
         }
@@ -430,6 +437,16 @@ mod tests {
             (toward - away).length() > 0.02,
             "el horizonte deberia diferir sol vs anti-sol"
         );
+    }
+
+    #[test]
+    fn los_astros_giran_lentamente_a_lo_largo_del_dia() {
+        let dawn = state(0.25).self_spin;
+        let noon = state(0.5).self_spin;
+        assert!((noon - dawn).abs() > 1e-3, "el giro propio debe avanzar");
+        // Medio dia de juego son la mitad de SELF_SPIN_DEG_PER_DAY.
+        let expected = SELF_SPIN_DEG_PER_DAY.to_radians() * 0.25;
+        assert!((noon - dawn - expected).abs() < 1e-4);
     }
 
     #[test]

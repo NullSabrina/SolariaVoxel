@@ -1088,7 +1088,11 @@ impl ApplicationHandler for App {
                     let torch = demo::build(renderer, camera);
                     println!("[engine] demo: escena lista (antorcha en {torch:?})");
                 }
+                demo::apply_look(camera);
             }
+        }
+        if let Some(day) = demo::day_count() {
+            self.day_cycle.day_count = day;
         }
 
         self.last_frame = Some(Instant::now());

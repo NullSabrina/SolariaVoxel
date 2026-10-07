@@ -2975,6 +2975,39 @@ tener dos caminos.
 287 tests; clippy limpio. Capturas `v0.30.1_fog_directional.png` y
 `v0.30.1_fog_horizonte.png`. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.31.0 - Sol, luna y estrellas
+
+### 2026-10-07 - Cuerpos celestes como cubos 3D, por interseccion rayo-caja
+
+**Decision.** El sol y la luna son **cubos 3D** dibujados en el propio pase de
+cielo (`sky.wgsl`): el ray de vista se lleva a espacio local de un cubo orientado
+(`R = Ry(self_spin) * Ry(yaw30) * Rx(pitch-20)`, centrado en `dir * 100`) y se
+hace el test de slabs; de la cara golpeada salen la normal (sombreado por cara) y
+las coordenadas locales. La **fase lunar** se aproxima con un terminador a lo
+largo de la cara local a partir de `day_count % 8`. Las **estrellas** son un
+campo determinista por hash de una rejilla esferica (brillo + parpadeo), visible
+solo de noche. `SkyState` gana `self_spin` y el uniform del cielo crece a 160
+bytes.
+
+**Motivo.** El usuario pidio "sol y luna cubos 3D que giran alrededor del
+jugador, alternando visibilidad, y desaparecen bajo el horizonte". Hacerlo en el
+shader del cielo evita buffers, depth y orden de dibujo, y no rompe el resto.
+
+**Alternativas descartadas.** Quads billboard estilo Minecraft (el usuario queria
+cubos). Raymarching analitico de esfera (no da el look de cubo). Texturas por cara
++ `texture_2d_array` en el pase de cielo: mas plumbing y menos determinista;
+LibreSprite no puede crear un sprite sin documento abierto en este entorno, asi
+que se opta por color/forma procedurales **documentando** que el rig de
+proporciones (**Blockbench**, `assets/src/models/solaria_celestial.bbmodel`) es la
+referencia de arte. Si mas adelante se quiere textura, el camino es el mismo pase.
+
+**Consecuencia.** `render/sky.wgsl` (rayo-caja, fase, estrellas),
+`render/sky.rs` (`SUN_ANG_RADIUS`/`MOON_ANG_RADIUS`, uniform 160 B),
+`scene/sky.rs` (`self_spin`, `SELF_SPIN_DEG_PER_DAY`), `engine/demo.rs`
+(`SOLARIA_LOOK`, `SOLARIA_DAY`). 288 tests; clippy limpio. Capturas
+`v0.31.0_{sun_cube,moon_cube,stars}.png`. `GENERATOR_VERSION`/`FORMAT_VERSION`
+intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

@@ -30,6 +30,26 @@ pub fn time_of_day() -> f32 {
         .rem_euclid(1.0)
 }
 
+/// Orientacion de la camara para capturas (`SOLARIA_LOOK=yaw,pitch`, grados).
+/// Permite apuntar al sol o a la luna sin tocar el codigo de cada demo.
+pub fn apply_look(camera: &mut Camera) {
+    if let Ok(s) = std::env::var("SOLARIA_LOOK") {
+        let parts: Vec<f32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        if parts.len() == 2 {
+            camera.yaw_deg = parts[0];
+            camera.pitch_deg = parts[1];
+            camera.update_view();
+        }
+    }
+}
+
+/// Dia de juego inicial (`SOLARIA_DAY`), para probar las fases lunares.
+pub fn day_count() -> Option<u64> {
+    std::env::var("SOLARIA_DAY")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+}
+
 /// ¿Mostrar el test de colision horizontal? (`SOLARIA_COLLIDE`).
 pub fn collide_active() -> bool {
     std::env::var("SOLARIA_COLLIDE").is_ok()
