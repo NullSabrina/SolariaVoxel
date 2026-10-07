@@ -10,7 +10,18 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.25.0 - Tuning del clima y la costa
+//! ## Estado actual: v0.26.0 - Interpolacion de render (timestep fijo)
+//!
+//! La fisica del jugador corre a **timestep fijo** (120 Hz) pero el render puede
+//! ir a mas FPS. Antes la camara usaba directamente la posicion de la fisica, asi
+//! que a alto FPS la vista se quedaba un paso atras (micro-tiron al andar). Ahora
+//! la posicion **logica** (`App::player_pos`) es la unica fuente de verdad de la
+//! fisica y la camara guarda la posicion de **render**, interpolada entre los dos
+//! ultimos pasos con la fraccion de tiempo acumulada (`alpha`).
+//!
+//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Hereda de v0.25.0.
+//!
+//! ## v0.25.0 - Tuning del clima y la costa
 //!
 //! Pasada de calibracion del generador con las metricas de la FASE 9:
 //! * **Contraste climatico** (`climate_contrast`, config): empuja temperatura y

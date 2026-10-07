@@ -7,7 +7,7 @@
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
 /// Vector de 3 dimensiones en coma flotante.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -70,6 +70,14 @@ impl Vec3 {
     pub fn normalize(self) -> Self {
         let len = self.length();
         if len > 0.0 { self / len } else { Self::ZERO }
+    }
+
+    /// Interpolacion lineal componente a componente (`t = 0` -> `self`,
+    /// `t = 1` -> `other`). Se usa para interpolar la posicion de render entre
+    /// dos pasos de fisica de timestep fijo.
+    #[inline]
+    pub fn lerp(self, other: Self, t: f32) -> Self {
+        self + (other - self) * t
     }
 }
 
@@ -163,5 +171,14 @@ mod tests {
     #[test]
     fn dot_de_perpendiculares_es_cero() {
         assert!(Vec3::X.dot(Vec3::Y).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lerp_interpola_entre_dos_puntos() {
+        let a = Vec3::new(0.0, 0.0, 0.0);
+        let b = Vec3::new(10.0, 20.0, -30.0);
+        assert_eq!(a.lerp(b, 0.0), a);
+        assert_eq!(a.lerp(b, 1.0), b);
+        assert_eq!(a.lerp(b, 0.5), Vec3::new(5.0, 10.0, -15.0));
     }
 }

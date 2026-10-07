@@ -2771,6 +2771,36 @@ extremos < 0.25 y > 0.75); clippy limpio. Reparto de biomas (seed 13371) pasa de
 Plains 38 / Forest 33 / Savanna 18 / Desert 4 / Swamp 6 / Tundra 0.8 / Taiga 0.7
 a Plains 30 / Forest 24 / Savanna 17 / Desert 11 / Swamp 10 / Tundra 6 / Taiga 3.
 
+## v0.26.0 — Interpolacion de render (timestep fijo)
+
+### 2026-10-07 — Separar posicion logica de posicion de render
+
+**Decision.** La fisica corre a **timestep fijo** (120 Hz) pero el render va a
+mucho mas FPS (300-600). Antes la camara usaba directamente la posicion de la
+fisica: a alto FPS, entre dos pasos de fisica habia frames con la posicion
+"vieja", y al andar se notaba un micro-tiron. Ahora:
+- `App::player_pos` es la posicion **logica** (unica fuente de verdad de la
+  fisica); `prev_player_pos` es la del inicio del frame.
+- La **camara** guarda la posicion de **render**: `lerp(prev, player_pos,
+  alpha)`, con `alpha = acumulador / FIXED_DT`.
+- `simulate_player` parte de la posicion logica y devuelve la logica; el
+  guardado usa la logica; el raycast/resaltado usan la de render.
+
+**Motivo.** FASE 12 del audit: "transform de render separado de la posicion
+logica". Sin esto, el timestep fijo a 120 Hz se quedaba un paso por detras a alto
+FPS.
+
+**Alternativas descartadas.** Interpolar dentro del controlador (mezclaria fisica
+y render); subir la frecuencia de fisica (mas CPU sin arreglar el desfase).
+
+**Tradeoffs.** La camara es una copia de la logica con posible desfase <= 1 paso
+(8 ms); el resaltado/raycast usan la posicion de render (correcto visualmente).
+
+**Consecuencia.** `engine/app.rs` (campos `player_pos`/`prev_player_pos`,
+interpolacion en `update`, `simulate_player`, `save_world`), `math/vec3.rs`
+(`Vec3::lerp` y `Default`). 261 tests (nuevo: `Vec3::lerp`); clippy limpio.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

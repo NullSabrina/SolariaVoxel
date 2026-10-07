@@ -8,27 +8,26 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.25.0` — Tuning del clima y la costa
+## Estado actual: `v0.26.0` — Interpolacion de render (timestep fijo)
 
-Calibracion con las metricas de la FASE 9:
+La fisica del jugador corre a **timestep fijo** (120 Hz) y el render puede ir a
+mas FPS. Antes la camara usaba la posicion de la fisica directamente, asi que a
+alto FPS la vista quedaba un paso atras (micro-tiron al andar). Ahora:
 
-- **Contraste climatico** (`climate_contrast`): temperatura y humedad se empujan
-  a los extremos. Antes el clima quedaba casi todo cerca de `0.5` y los biomas
-  frios/aridos eran raros (Tundra+Taiga `~1.5 %`); ahora hay regiones frias,
-  calidas, secas y humedas.
-- **Costa mas estrecha**: el perfil `continentalness -> altura` es mas empinado
-  cerca de 0, asi que playas y plataformas son mas cortas (antes el gradiente
-  suave dejaba costas muy anchas y planas).
+- La posicion **logica** (`App::player_pos`) es la unica fuente de verdad de la
+  fisica; la **camara** guarda la posicion de **render**.
+- La de render es `lerp(prev, actual, alpha)`, con `alpha = acumulador / FIXED_DT`
+  (la fraccion de tiempo pendiente del siguiente paso).
+- El guardado usa la posicion **logica**; el raycast/resaltado, la de render.
 
-Reparto medido (2048x2048, seed 13371): Plains 30 % / Forest 24 % / Savanna 17 %
-/ Desert 11 % / Swamp 10 % / Tundra 6 % / Taiga 3 %.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
-`GENERATOR_VERSION → 16`. `WORLDGEN_CONFIG_VERSION → 3`. `FORMAT_VERSION = 5`.
-
+- **Tuning** (`v0.25.0`): contraste climatico (biomas frios/aridos presentes) y
+  costas mas estrechas. Reparto: Plains 30 / Forest 24 / Savanna 17 / Desert 11 /
+  Swamp 10 / Tundra 6 / Taiga 3 %.
 - **Tooling** (`v0.24.0`, FASE 9): slices de cuevas (`cave`, `cave_yz`), capa
-  `landform`, `seed_gallery` y metricas (p50/p95/p99, costa, aire subterraneo).
-- **Landforms** (`v0.23.0`, FASE 4): `Plateau`/`Terraced`/`Cliffs`/`Rolling`.
-- **Decoracion** (`v0.22.0`, FASE 7): reglas (`DecorationRule`), claros y rocas.
+  `landform`, `seed_gallery` y metricas.
+- **Landforms** (`v0.23.0`, FASE 4) y **Decoracion** (`v0.22.0`, FASE 7).
 - **Agua** (`v0.21.0`–`v0.21.1`): modelo de Minecraft (fuente→distancia),
   fuentes infinitas, caida; el agua **generada se asienta sola** al cargar la
   columna y el tick va a 10 Hz.
@@ -108,7 +107,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-260 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+261 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash

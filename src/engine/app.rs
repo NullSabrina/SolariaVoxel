@@ -42,6 +42,12 @@ pub struct App {
     renderer: Option<Renderer>,
     camera: Option<Camera>,
     player: PlayerController,
+    /// Posicion **logica** del jugador: la unica fuente de verdad de la fisica
+    /// (a timestep fijo). La camara guarda la posicion de **render** interpolada.
+    player_pos: Vec3,
+    /// Posicion logica al **inicio** del frame, para interpolar el render entre
+    /// los dos ultimos pasos de fisica (evita el micro-tiron a alto FPS).
+    prev_player_pos: Vec3,
     input: Input,
     /// ¿Tenemos el cursor capturado (pointer lock)?
     mouse_locked: bool,
@@ -264,9 +270,19 @@ impl App {
         // Fisica a **timestep fijo**: se acumula el tiempo real y se ejecutan
         // pasos de duracion constante. Desacopla el movimiento del framerate
         // (determinismo y base para entidades/multijugador).
+        self.prev_player_pos = self.player_pos;
         let steps = fixed_steps(&mut self.accumulator, frame_dt);
         for _ in 0..steps {
             self.simulate_player(FIXED_DT);
+        }
+        // Posicion de **render**: interpolada entre los dos ultimos pasos de
+        // fisica con la fraccion de tiempo acumulada (`alpha`). Con la fisica a
+        // 120 Hz y el render a mas, sin esto la posicion se quedaria un paso
+        // atras (micro-tiron al andar).
+        let alpha = (self.accumulator / FIXED_DT).clamp(0.0, 1.0);
+        if let Some(camera) = self.camera.as_mut() {
+            camera.position = self.prev_player_pos.lerp(self.player_pos, alpha);
+            camera.update_view();
         }
     }
 
@@ -286,6 +302,8 @@ impl App {
         let Some(camera) = self.camera.as_mut() else {
             return;
         };
+        // La fisica parte de la posicion **logica** (no de la interpolada).
+        camera.position = self.player_pos;
         let world = renderer;
         let is_solid = move |point: Vec3| -> bool { world.is_solid_at(point) };
 
@@ -322,6 +340,8 @@ impl App {
             dt,
         );
         self.player = player;
+        // Recoge la posicion logica resultante del paso.
+        self.player_pos = camera.position;
     }
 
     /// Raycast desde el ojo del jugador en la direccion en que mira y actualiza
@@ -366,10 +386,9 @@ impl App {
         for (pos, record) in renderer.snapshot_modified() {
             save.set_chunk(pos, record);
         }
-        // Guardado completo: la posicion del jugador.
-        if let Some(camera) = self.camera.as_ref() {
-            save.player_pos = [camera.position.x, camera.position.y, camera.position.z];
-        }
+        // Guardado completo: la posicion **logica** del jugador (no la de render).
+        let p = self.player_pos;
+        save.player_pos = [p.x, p.y, p.z];
         let chunks = save.chunks.len();
         let requested = match self.save_worker.as_ref() {
             Some(worker) => worker.request(save, world_path()),
@@ -868,6 +887,10 @@ impl ApplicationHandler for App {
             self.player.settle(&mut camera, is_solid);
         }
         println!("[engine] jugador posado en y={:.2}", camera.position.y);
+        // Posicion logica inicial (la camara arranca en ella; el render la
+        // interpola cada frame).
+        self.player_pos = camera.position;
+        self.prev_player_pos = camera.position;
         self.camera = Some(camera);
 
         // Informe de memoria por categorias (FASE 10): medir antes de optimizar.
