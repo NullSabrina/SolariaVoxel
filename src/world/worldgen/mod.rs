@@ -25,11 +25,13 @@ pub mod biomes;
 pub mod cells;
 pub mod config;
 pub mod decoration;
+pub mod graph;
 pub mod math;
 
 pub use biomes::BiomeDefinition;
 pub use cells::CellSample;
 pub use config::{ConfigError, WORLDGEN_CONFIG_VERSION, WorldGenConfig};
+pub use graph::{Graph, GraphError, Node, NodeId, NoiseKind, Program};
 
 use std::sync::atomic::{AtomicU32, Ordering};
 

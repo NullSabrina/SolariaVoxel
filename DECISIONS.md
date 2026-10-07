@@ -3103,6 +3103,38 @@ busqueda); env `SOLARIA_INVENTORY`/`SOLARIA_SEARCH`/`SOLARIA_TOAST`. 301 tests;
 clippy limpio. Capturas `v0.40.1_toast.png`, `v0.41.0_{inventory,search}.png`.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.34.0 - Grafo de densidad (worldgen, Parte C / C1)
+
+### 2026-10-07 - El worldgen se define como datos: DAG + validador + compilador
+
+**Decision.** Nuevo `world::worldgen::graph` con `Node` (const, `Noise` fBm
+2D/3D determinista por hash, `Add/Mul/Min/Max`, `Clamp`, `Abs`, `Spline`,
+`YGradient`, `Warp`, `Cache2D`), una **arena** `Graph` (`NodeId(u32)`, DAG con
+subgrafos compartidos), `Graph::validate()` (referencias, ciclos, valores
+finitos) y `Graph::compile()` (orden **topologico plano**, sin `dyn` ni recursion
+por voxel) + evaluador. El ruido es *value noise* fractal desde un hash, sin RNG
+con estado y sin dependencias nuevas.
+
+**Motivo.** La guia plantea (con razon) que "semilla" es una entrada, no una
+arquitectura: la mejora real es pasar de generacion cableada a **generacion como
+datos** para iterar sin recompilar y poder cachear/paralelizar. El modelo DAG es
+el cimiento (C1); la integracion es incremental.
+
+**Alternativas descartadas.** Arbol de `Box<Node>` (no comparte subgrafos; para
+eso esta la arena). Evaluar con `dyn Fn` por voxel (coste indirecto; ya se
+descarto en el greedy de v0.19.1). Integrar en `terrain.rs` de golpe (arriesga
+`GENERATOR_VERSION` y mundos existentes): se hace como C2/C3 en pasos.
+
+**Pendiente honesto (documentado, NO hecho).** C2 (evaluacion en retícula 4x8x4
++ interpolacion + `Cache2D` + paralelizacion con el pool actual), C3
+(`GeneratorKind::{Legacy16,Graph}` + hash del grafo en el header + coexistencia),
+C4 (clima como canales del grafo) y C5/C6 (restricciones de decoracion,
+herramientas). El juego sigue usando el generador actual; **no** cambia el mundo.
+
+**Consecuencia.** `world/worldgen/graph.rs` (6 tests); export en `worldgen/mod.rs`.
+307 tests; clippy limpio. Sin cambio visual (logica pura). `GENERATOR_VERSION`/
+`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

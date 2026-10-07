@@ -8,25 +8,25 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.41.0` — UI creativa (inventario, nombres, i18n)
+## Estado actual: `v0.34.0` — Grafo de densidad (worldgen, C1)
 
-- **Modulo `ui` sin GPU** (`src/ui/`): estado y logica de interfaz, 100 %
-  testeable. `ui::lang` (i18n es/en) y `ui::inventory` (categorias, busqueda
-  insensible a mayusculas y **tildes**: "pie" encuentra "Piedra").
-- **Registro de bloques con categoria** creativa (`CreativeCategory`).
-- **Inventario creativo** (`v0.41.0`): pestanas por categoria, campo de
-  **busqueda** y rejilla **9x5 con scroll** (rueda). `E` para abrir.
-- **Nombre del bloque** sobre la hotbar (`v0.40.1`): aparece al cambiar de
-  ranura y se desvanece (~2 s).
-- **Pendiente de la Parte B/UI del Prompt 2**: pantalla de titulo, selector y
-  guardado **multi-mundo** (`saves/<slug>/`), menu de pausa/opciones, reasignacion
-  de teclas y nine-slice de widgets. Documentado como siguiente hito.
+- **`world::worldgen::graph`** (`v0.34.0`, Parte C): modelo de datos **DAG**
+  data-driven (`Node`: const, ruido fBm 2D/3D, add/mul/min/max, clamp, abs,
+  spline, gradiente Y, domain warp, cache 2D), con `validate()` (refs, ciclos,
+  finitos) y `compile()` (orden topologico) + evaluador determinista. Es la base
+  de la generacion "definida como datos" del Prompt 1 Parte C. **No** esta
+  integrado aun en `terrain.rs` (C2) ni serializado (RON/JSON); el juego sigue
+  usando el generador actual.
+- **UI creativa** (`v0.41.0`): modulo `ui` sin GPU (i18n es/en, inventario con
+  categorias y busqueda sin tildes), nombre del bloque sobre la hotbar.
 - **Distancia de vista y niebla** (`v0.33.0`): radios separados
   (`world::ViewSettings`), carga circular y niebla al horizonte. Ver
   [`docs/performance.md`](./docs/performance.md).
 - **Cielo y atmosfera** (`v0.30`–`v0.31.1`): gradiente por fases (OKLab), sol y
   luna como **cubos 3D** con fases lunares, estrellas, halo (Henyey-Greenstein),
   Cinturon de Venus y hora azul.
+- **Pendiente honesto**: integracion del grafo en el terreno + clima (C2–C4),
+  pantallas/menus y guardado multi-mundo del Prompt 2, y `sky_physical` opcional.
 - **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte
   (noche profunda, crepusculos astronomico/nautico/civil, golden hour, manana/tarde,
   mediodia), mezcladas en **OKLab** con `smoothstep` para que recorrer 24 h no de
@@ -128,9 +128,9 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-301 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+307 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color, distancia de
-vista e interfaz creativa). Lint:
+vista, interfaz creativa y grafo de densidad). Lint:
 
 ```bash
 cargo fmt
@@ -218,7 +218,8 @@ src/
     ├── chunk.rs        Seccion 16^3 y columna 16x16x384.
     ├── atlas.rs        Atlas de texturas (carga assets/atlas.png; fallback).
     ├── terrain.rs      Generacion: geografia, clima/biomas, superficie, cuevas.
-    ├── worldgen/       Motor de worldgen por etapas (config, math, cells, biomes).
+    ├── worldgen/       Motor de worldgen por etapas (config, math, cells, biomes,
+    │                   decoration, graph: grafo de densidad DAG).
     ├── caves.rs        Cuevas 3D (spaghetti/cheese/pillar) con densidad por Y.
     ├── mesher.rs       Meshing naive con face culling (referencia).
     ├── greedy.rs       Greedy meshing (fusiona caras; separa el agua).
