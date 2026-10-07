@@ -19,9 +19,10 @@ mod highlight;
 // construye `Vertex`, el tipo de vertice que la GPU entiende.
 pub(crate) mod mesh;
 mod mesh_worker;
+pub(crate) mod model;
 mod pipeline;
 mod renderer;
 mod ui;
 
-pub use renderer::{FrameStats, Renderer, RendererError};
+pub use renderer::{FrameStats, HandView, Renderer, RendererError};
 pub use ui::{UiQuad, region_uv};

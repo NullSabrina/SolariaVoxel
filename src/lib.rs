@@ -10,7 +10,18 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.27.0 - Overlay F3 en pantalla (fuente bitmap)
+//! ## Estado actual: v0.28.0 - Mano en primera persona (sistema de modelos)
+//!
+//! Se dibuja la **mano en primera persona**: el brazo (manga + puño + piel) y el
+//! **bloque sostenido** en la mano, con animacion de **golpe** (al romper/colocar)
+//! y **balanceo** al andar. Para ello se anade un sistema de **modelos de cubos
+//! de color** (`render/model.rs` + `scene/player.rs`) **independiente del atlas**:
+//! un pipeline nuevo con *dynamic offset* por pieza (brazo/item), sombreado por
+//! cara horneado en la CPU y luz dia/noche. Es la base del **personaje** completo.
+//!
+//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Hereda de v0.27.0.
+//!
+//! ## v0.27.0 - Overlay F3 en pantalla (fuente bitmap)
 //!
 //! La pantalla de diagnostico **F3** deja de ir en el titulo de la ventana y se
 //! dibuja **en pantalla**, al estilo de Minecraft: dos columnas con fondo oscuro

@@ -7,6 +7,7 @@
 
 mod camera;
 mod daynight;
+pub mod player;
 
 pub use camera::Camera;
 pub use daynight::{DayCycle, NIGHT_FLOOR};

@@ -8,32 +8,27 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.27.0` — Overlay F3 en pantalla
+## Estado actual: `v0.28.0` — Mano en primera persona
 
-La pantalla de diagnostico **F3** deja de ir en el titulo y se dibuja **en
-pantalla**, al estilo de Minecraft (dos columnas con fondo oscuro):
+Se dibuja la **mano en primera persona**: el brazo (manga azul, puño dorado y
+mano de piel) y el **bloque sostenido** de la ranura activa, con animacion de
+**golpe** (al romper/colocar) y **balanceo** al andar.
 
-- **Izquierda**: version, fps / `up` / `rnd` (ms), `XYZ`, bloque, chunk, orientacion
-  (con yaw/pitch), bioma, luz (cielo/bloque), hora y semilla.
-- **Derecha**: draw calls, triangulos, culling (frustum/distancia), chunks,
-  memoria, GPU, cola de fluidos y estado de guardado.
-- Tecla **F3** (o `SOLARIA_STATS=1`) lo alterna.
+Para ello se anade un sistema de **modelos de cubos de color**
+(`render/model.rs` + `scene/player.rs`), **independiente del atlas**:
 
-Para dibujar texto anadimos una **fuente bitmap 5x7** (`render/font.rs`): glifos
-empaquetados en un atlas de una textura; cada caracter es un quad.
+- Pipeline propio (`model.wgsl`) con **dynamic offset** por pieza, **sombreado
+  por cara horneado** en la CPU y luz dia/noche.
+- Es la base del **personaje** completo (siguiente version).
 
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
-- **Interpolacion de render** (`v0.26.0`): posicion logica vs de render para el
-  timestep fijo.
-- **Tuning** (`v0.25.0`) y **Tooling** (`v0.24.0`, FASE 9): slices de cuevas,
-  `seed_gallery`, metricas. **Landforms** (`v0.23.0`) y **Decoracion** (`v0.22.0`).
-- **Agua** (`v0.21.0`–`v0.21.1`): modelo de Minecraft (fuente→distancia),
-  fuentes infinitas, caida; el agua **generada se asienta sola** al cargar la
-  columna y el tick va a 10 Hz.
-- **Worldgen** (`v0.17`–`v0.20`): fases 1/2 (continentes, costas, cordilleras),
-  3 (bioma por region celular), 5 (hidrologia: rios y lagos) y 6 (cuevas
-  jerarquicas). Ver [`docs/worldgen.md`](./docs/worldgen.md).
+- **Overlay F3** (`v0.27.0`): pantalla de diagnostico en pantalla (dos columnas)
+  con una **fuente bitmap 5x7** propia.
+- **Interpolacion de render** (`v0.26.0`) y agua estilo Minecraft
+  (`v0.21.0`–`v0.21.1`).
+- **Worldgen** (`v0.17`–`v0.25`, FASE 4/6/7/9 + tuning). Ver
+  [`docs/worldgen.md`](./docs/worldgen.md).
 - **Repo** (`v0.19.1`): limpieza y orden.
 - **Formato de guardado** (`FORMAT_VERSION = 5`): independiente del generador,
   con migradores y test de datos del jugador.
@@ -107,7 +102,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-264 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+269 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash

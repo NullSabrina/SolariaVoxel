@@ -26,8 +26,10 @@ use crate::render::gui;
 use crate::render::highlight::{HighlightPipeline, cube_edges};
 use crate::render::mesh::Mesh;
 use crate::render::mesh_worker::{MeshJob, MeshOutput, MeshScheduler};
+use crate::render::model::{ModelMesh, ModelPipeline};
 use crate::render::pipeline::ScenePipeline;
 use crate::render::ui::{UiPipeline, UiQuad};
+use crate::scene::player;
 use crate::world::mesh_snapshot::section_snapshot;
 use crate::world::{
     Block, CHUNK_SIZE, ChunkPos, ChunkRecord, FluidBudget, FluidDirty, RayHit, SECTION_COUNT,
@@ -223,6 +225,17 @@ pub struct FrameStats {
     pub culled_distance: u32,
 }
 
+/// Datos de la **mano en primera persona** para un frame: la proyeccion (la mano
+/// va en espacio de vista, sin la matriz de vista) y las fases de animacion.
+#[derive(Clone, Copy, Debug)]
+pub struct HandView {
+    pub projection: Mat4,
+    /// Golpe en `0..1` (romper/colocar).
+    pub swing: f32,
+    /// Fase de balanceo al andar (radianes).
+    pub bob: f32,
+}
+
 /// Todos los recursos de GPU viven aqui.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
@@ -245,6 +258,14 @@ pub struct Renderer {
     _gui_texture: wgpu::Texture,
     /// Atlas de la fuente bitmap (overlay F3).
     _font_texture: wgpu::Texture,
+
+    /// Modelo de la mano/personaje (cubos de color).
+    model: ModelPipeline,
+    /// Brazo en primera persona y el cubo del item sostenido.
+    hand_arm: ModelMesh,
+    hand_item: ModelMesh,
+    /// Bloque del item actual (para no reconstruir su malla sin necesidad).
+    hand_item_block: Option<Block>,
 
     /// El mundo en memoria.
     world: World,
@@ -338,6 +359,15 @@ impl Renderer {
             config.format,
             Self::DEPTH_FORMAT,
         );
+        // Modelo de la mano (cubos de color) y su pipeline.
+        let model = ModelPipeline::new(&device, config.format, Self::DEPTH_FORMAT);
+        let hand_arm = ModelMesh::new(&device, &queue, "hand.arm", &player::first_person_arm());
+        let hand_item = ModelMesh::new(
+            &device,
+            &queue,
+            "hand.item",
+            &player::held_item([0.7, 0.7, 0.7]),
+        );
 
         // Radio de vista configurable (`SOLARIA_VIEW_RADIUS`, por defecto 4).
         // La niebla termina justo en el borde del area cargada (radio * 16), asi
@@ -371,6 +401,10 @@ impl Renderer {
             ui,
             _gui_texture: gui_texture,
             _font_texture: font_texture,
+            model,
+            hand_arm,
+            hand_item,
+            hand_item_block: None,
             world,
             meshes: HashMap::new(),
             mesh_queue: VecDeque::new(),
@@ -929,6 +963,21 @@ impl Renderer {
         (self.config.width, self.config.height)
     }
 
+    /// Fija el bloque que el jugador sostiene (reconstruye el cubo del item solo
+    /// si cambia).
+    pub fn set_hand_item(&mut self, block: Block) {
+        if self.hand_item_block == Some(block) {
+            return;
+        }
+        self.hand_item_block = Some(block);
+        self.hand_item = ModelMesh::new(
+            &self.device,
+            &self.queue,
+            "hand.item",
+            &player::held_item(player::item_color(block)),
+        );
+    }
+
     /// Luz de cielo (0..15) en coordenadas de voxel (overlay F3).
     pub fn sky_light_at(&self, voxel: [i32; 3]) -> u8 {
         self.world.sky_light_at(voxel)
@@ -984,7 +1033,13 @@ impl Renderer {
     }
 
     /// Dibuja y presenta un frame.
-    pub fn render(&mut self, view_projection: &Mat4, camera_pos: Vec3, ui_quads: &[UiQuad]) {
+    pub fn render(
+        &mut self,
+        view_projection: &Mat4,
+        camera_pos: Vec3,
+        ui_quads: &[UiQuad],
+        hand: Option<HandView>,
+    ) {
         // Manda a los workers el meshing pendiente (con presupuesto) y recoge lo
         // terminado, subiendolo a la GPU (validando revisiones).
         self.pump_meshing(MESH_BUDGET_MS);
@@ -1014,6 +1069,22 @@ impl Renderer {
             self.fog_end,
             self.start.elapsed().as_secs_f32(),
         );
+
+        // Mano en primera persona: la colocamos en espacio de vista y subimos sus
+        // matrices al buffer del modelo (dos slots: brazo e item). `queue.write_buffer`
+        // se aplica antes del pase, por eso se escribe todo aqui.
+        let hand_light = 0.35 + 0.65 * self.day_factor;
+        if let Some(h) = &hand {
+            let root = player::hand_transform(h.swing, h.bob);
+            self.model
+                .set(&self.queue, 0, &(h.projection * root), hand_light);
+            self.model.set(
+                &self.queue,
+                1,
+                &(h.projection * root * player::item_transform()),
+                hand_light,
+            );
+        }
 
         // Frustum de la camara: descartamos las secciones fuera de la vista sin
         // siquiera emitir su draw call.
@@ -1155,6 +1226,13 @@ impl Renderer {
             if let Some(highlight) = self.highlight_mesh.as_ref() {
                 pass.set_pipeline(self.highlight_pipeline.pipeline());
                 highlight.draw(&mut pass);
+            }
+
+            // Mano en primera persona (brazo + item). Va muy cerca de la camara,
+            // asi que gana el z-test frente al mundo.
+            if hand.is_some() {
+                self.model.draw(&mut pass, 0, &self.hand_arm);
+                self.model.draw(&mut pass, 1, &self.hand_item);
             }
 
             // Interfaz 2D (hotbar/inventario) al final, siempre encima.

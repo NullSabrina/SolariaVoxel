@@ -112,6 +112,10 @@ pub struct App {
     /// Ultimos FPS calculados (el titulo los refresca cada ~0.5 s; el overlay F3
     /// los reutiliza).
     last_fps: f32,
+    /// Animacion de la **mano**: `swing` en `0..1` (golpe al romper/colocar) y
+    /// `bob` = fase de balanceo al andar.
+    swing: f32,
+    bob: f32,
 }
 
 /// Ruta del archivo de mundo por defecto (junto al ejecutable de trabajo).
@@ -253,6 +257,13 @@ impl App {
             }
             // Recoge los guardados que hayan terminado.
             self.poll_save();
+
+            // Animacion de la mano: balanceo al andar y decaimiento del golpe.
+            let moving = self.input.forward_axis() != 0.0 || self.input.right_axis() != 0.0;
+            if moving && !self.flying {
+                self.bob += frame_dt * 7.0;
+            }
+            self.swing = (self.swing - frame_dt / 0.28).max(0.0);
         }
 
         // El giro es **por frame**: el delta del raton es de este frame, no de un
@@ -370,6 +381,7 @@ impl App {
             renderer.set_block(hit.block, crate::world::Block::Air);
             println!("[edit] bloque roto en {:?}", hit.block);
         }
+        self.swing = 1.0;
         self.update_selection();
     }
 
@@ -461,6 +473,7 @@ impl App {
             renderer.set_block(target, block);
             println!("[edit] colocado {block:?} en {target:?}");
         }
+        self.swing = 1.0;
         self.update_selection();
     }
 
@@ -1265,8 +1278,16 @@ impl ApplicationHandler for App {
                     renderer.set_environment(day_factor, sky);
                     let view_projection = camera.view_projection();
                     let position = camera.position;
+                    // Mano en primera persona (no en demo): usa la proyeccion
+                    // (la mano va en espacio de vista) y las fases de animacion.
+                    let hand = (!self.demo).then(|| crate::render::HandView {
+                        projection: camera.projection(),
+                        swing: self.swing,
+                        bob: self.bob,
+                    });
+                    renderer.set_hand_item(self.hotbar[self.hotbar_sel]);
                     renderer.sync_streaming(position);
-                    renderer.render(&view_projection, position, &ui);
+                    renderer.render(&view_projection, position, &ui, hand);
                 }
                 self.render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
 

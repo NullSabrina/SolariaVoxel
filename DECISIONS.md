@@ -2834,6 +2834,42 @@ exacto de la ventana.
 layout con tamano de superficie). 264 tests (4 de fuente); clippy limpio.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.28.0 — Mano en primera persona (sistema de modelos)
+
+### 2026-10-07 — Modelos de cubos de color + mano y bloque sostenido
+
+**Decision.** Dibujar la **mano en primera persona** (brazo: manga + puño + piel)
+y el **bloque sostenido** de la ranura activa, con animacion de **golpe** (al
+romper/colocar) y **balanceo** al andar. Para ello, un sistema de **modelos de
+cubos de color** propio:
+- `render/model.rs`: `ModelVertex` (posicion + color), `cuboids_to_mesh`
+  (con el **sombreado por cara horneado**: arriba claro, abajo oscuro),
+  `ModelMesh` (buffers GPU) y `ModelPipeline` (shader `model.wgsl`, con
+  **dynamic offset** por pieza, sin culling).
+- `scene/player.rs`: los cubos del brazo y del item (dato puro), y
+  `hand_transform(swing, bob)` en espacio de vista.
+- La mano se dibuja **en espacio de vista** (sin la matriz de vista): por eso el
+  `HandView` lleva la **proyeccion** sola. Las animaciones: `swing` (0..1, decae
+  en ~0.28 s al romper/colocar) y `bob` (avanza al andar).
+
+**Motivo.** El usuario pidio "mano en primera persona y personaje". El motor no
+tenia modelos ni animacion de entidades; hacia falta infraestructura reusable.
+
+**Alternativas descartadas.** Anadir tiles de piel al atlas (64x80 fijo, y el
+sistema de escena usa UV por bloque): un pipeline de color propio es mas simple y
+sirve igual para el personaje. Cargar `.bbmodel`/glTF: sobreingenieria para cubos.
+
+**Tradeoffs.** El modelo usa **color plano** (no textura): menos detalle que un
+skin, pero legible y barato. La mano se dibuja en el mismo pase (va muy cerca de
+la camara y gana el z-test); sin culling, para no depender del orden de vertices.
+
+**Consecuencia.** `render/{model.rs,model.wgsl}`, `scene/player.rs`,
+`render/renderer.rs` (`ModelPipeline`, `ModelMesh`, `HandView`,
+`set_hand_item`), `engine/app.rs` (estado `swing`/`bob`, paso de la mano al
+render). 269 tests (5 de modelo/mano); clippy limpio.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Captura `v0.28.0-hand.png`.
+Siguiente: **personaje** completo (tercera persona).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...
