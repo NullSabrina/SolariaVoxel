@@ -2639,6 +2639,41 @@ hasta una edicion; es aceptable (el registro se regenera al volver a generar).
 agua se registra y el agua generada converge). Sin cambio de mundo ni guardado
 (12/5).
 
+## v0.22.0 — Worldgen FASE 7: decoracion por reglas
+
+### 2026-10-07 — Decoracion con reglas, clusters, rocas y rejilla de muestras
+
+**Decision.**
+- **Reglas** (`worldgen/decoration.rs`): cada tipo de decoracion es una
+  `DecorationRule` con condiciones de **bioma, altura, humedad, pendiente y
+  cercania a rio** mas una probabilidad. Anadir decoracion = anadir una fila.
+- **Clusters**: un ruido de baja frecuencia agrupa los arboles en **bosques con
+  claros** (antes era un `hash` uniforme por columna).
+- **Rocas** (boulders): manchas de piedra/detrito en laderas altas (otro ruido de
+  baja frecuencia), solo sobre suelo firme (no flotando).
+- **Rejilla de muestras con padding** (18x18) en `generate_column`: la pendiente
+  de cada celda sale de vecinos ya muestreados, sin re-muestrear `height()` por
+  candidato (el `slope_ok` anterior hacia 4 muestras por candidato).
+
+**Motivo.** El audit de worldgen pide decoracion por reglas (FASE 7): coherencia
+regional (bosques con claros, no arboles dispersos al azar), variedad (rocas) y
+evitar artefactos (arboles flotantes o en acantilados), a la vez que se reduce el
+coste de mostrar la pendiente.
+
+**Alternativas descartadas.** Seguir con el `hash01 < tree_density` por columna
+(sin clusters ni reglas); re-muestrear vecinos por candidato (lo que ya hacia
+`slope_ok`); L-systems/estructuras complejas (fuera de alcance de la fase).
+
+**Tradeoffs.** Cambia la distribucion de arboles (se sube `GENERATOR_VERSION`).
+Las reglas cubren arboles y rocas; flores/vegetacion baja quedan para despues.
+Una columna solo recibe un tipo de decoracion (arbol **o** roca).
+
+**Consecuencia.** `worldgen/{mod,decoration}.rs` (nuevo modulo),
+`world/terrain.rs` (rejilla + decorador + `place_boulder`, se elimina
+`slope_ok`), `world/save.rs` (`GENERATOR_VERSION -> 13`). 255 tests (5 nuevos de
+decoracion); clippy limpio. Generacion practicamente igual (~6.1 ms/columna, la
+rejilla compensa el re-muestreo). `FORMAT_VERSION` intacto (5).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

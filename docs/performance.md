@@ -79,6 +79,13 @@ por tick), asi que el tick se abarata mucho:
 
 El tick sube a 20 Hz (Minecraft usa 0.25 s por paso) para que el flujo sea agil.
 
+### FASE 7 — decoracion por reglas
+
+El `terrain_generate_column` queda practicamente igual (~6.1 ms/columna): la
+**rejilla de muestras 18x18** anade muestreos, pero elimina el re-muestreo de 4
+vecinos por cada candidato de decoracion que hacia el antiguo `slope_ok`. El
+ruido 2D sigue siendo O(256) por columna (no O(256 x altura)).
+
 ## Memoria (FASE 10)
 
 `World::memory_report()` con radio 4 (**81 columnas**), mundo de terreno:

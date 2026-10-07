@@ -24,6 +24,7 @@ use noise::{NoiseFn, Perlin};
 use super::block::Block;
 use super::caves::{Carve, CaveContext, CaveSystem};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
+use super::worldgen::decoration::{DecorationKind, Decorator};
 use super::worldgen::{WorldGen, biomes};
 
 /// Altura media del terreno, en bloques (nivel del mar).
@@ -55,7 +56,7 @@ pub enum Biome {
 impl Biome {
     /// Densidad de arboles por columna (fraccion de columnas con arbol). Sale de
     /// la **definicion** del bioma (FASE 3), no de un `match` aparte.
-    fn tree_density(self) -> f32 {
+    pub(crate) fn tree_density(self) -> f32 {
         biomes::definition(self).tree_density
     }
 }
@@ -76,6 +77,8 @@ pub struct TerrainGenerator {
     cave_mask: Perlin,
     /// Cuevas 3D.
     caves: CaveSystem,
+    /// Decoracion por reglas (FASE 7): arboles con claros y rocas.
+    decorator: Decorator,
     seed: u32,
     /// Contador de evaluaciones de ruido **2D** (test de cache). Es atomico
     /// (`AtomicU32`) en vez de `Cell` para que el generador sea `Send + Sync` y
@@ -95,6 +98,7 @@ impl TerrainGenerator {
             aquifer: Perlin::new(mix(7)),
             cave_mask: Perlin::new(mix(8)),
             caves: CaveSystem::new(seed),
+            decorator: Decorator::new(seed),
             seed,
             noise_calls: AtomicU32::new(0),
         }
@@ -213,35 +217,54 @@ impl TerrainGenerator {
             > -0.30
     }
 
-    /// ¿Pendiente admisible para un arbol? Compara la altura con las 4 vecinas:
-    /// mas de 1 bloque de diferencia = ladera, no se planta.
-    fn slope_ok(&self, world_x: i32, world_z: i32, height: usize) -> bool {
-        let h = height as i32;
-        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            if (self.height(world_x + dx, world_z + dz) as i32 - h).abs() > 1 {
-                return false;
-            }
-        }
-        true
-    }
-
     /// Rellena una columna del mundo con terreno segun su posicion `(x, z)`.
+    ///
+    /// Muestrea la geografia en una **rejilla con padding de 1** (18x18) para que
+    /// la pendiente de cada celda salga de vecinos **ya calculados**, sin volver a
+    /// llamar a `height()` por candidato de decoracion (FASE 7).
     pub fn generate_column(&self, world_x: i32, world_z: i32) -> Column {
         let mut column = Column::empty();
         // Candidatos a arboles (pasada 1); se plantan en la pasada 2, cuando la
         // columna ya esta completa.
         let mut tree_candidates: Vec<(usize, usize, usize)> = Vec::new();
 
+        // --- Rejilla de muestras con padding (x, z en -1..=16) ---
+        const G: i32 = CHUNK_SIZE as i32;
+        let gw = (G + 2) as usize; // 18
+        let mut grid = Vec::with_capacity(gw * gw);
+        for gz in -1..=G {
+            for gx in -1..=G {
+                grid.push(
+                    self.worldgen
+                        .sample((world_x + gx) as f64, (world_z + gz) as f64),
+                );
+            }
+        }
+        let idx = |gx: i32, gz: i32| -> usize { ((gz + 1) as usize) * gw + (gx + 1) as usize };
+
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let wx = world_x + x as i32;
                 let wz = world_z + z as i32;
-                // --- Muestra geografica: UNA sola vez por (x, z) ---
+                // --- Muestra geografica: de la rejilla (ya muestreada) ---
                 // Geografia (FASE 1/2) + clima/bioma (FASE 3) del WorldGen.
-                let geo = self.worldgen.sample(wx as f64, wz as f64);
+                let geo = grid[idx(x as i32, z as i32)];
                 let biome = geo.biome;
-                let height =
-                    (geo.base_height.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize;
+                let height = (geo.base_height.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT);
+                // Pendiente: maxima diferencia de altura con las 4 vecinas.
+                let slope = {
+                    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                        .iter()
+                        .map(|&(dx, dz)| {
+                            (grid[idx(x as i32 + dx, z as i32 + dz)].base_height.round() as i32)
+                                .clamp(MIN_HEIGHT, MAX_HEIGHT)
+                                - height
+                        })
+                        .map(i32::abs)
+                        .max()
+                        .unwrap_or(0)
+                };
+                let height = height as usize;
                 let aquifer = self.aquifer_level(wx, wz);
                 let variant = self.surface_variant(wx, wz);
                 // Cerca del borde de una celda se mezclan materiales con el vecino.
@@ -324,16 +347,19 @@ impl TerrainGenerator {
                     column.push_water_surface(x, z, top_y);
                 }
 
-                // Decoracion: candidato a arbol (interior, densidad, pendiente).
-                let density = biome.tree_density();
-                if !coastal
-                    && density > 0.0
-                    && (2..=13).contains(&x)
-                    && (2..=13).contains(&z)
-                    && hash01(wx, wz) < density
-                    && self.slope_ok(wx, wz, height)
-                {
-                    tree_candidates.push((x, z, height));
+                // Decoracion por reglas (FASE 7): arboles con claros y rocas. Se
+                // excluyen costas y el borde del chunk (las copas no caben).
+                if !coastal && (2..=13).contains(&x) && (2..=13).contains(&z) {
+                    match self.decorator.decide(wx, wz, &geo, height as i32, slope) {
+                        Some(DecorationKind::Tree) => tree_candidates.push((x, z, height)),
+                        // Roca solo sobre suelo firme (no flotando sobre una cueva).
+                        Some(DecorationKind::Boulder)
+                            if column.get(x, height.saturating_sub(1), z).is_solid() =>
+                        {
+                            place_boulder(&mut column, x, height, z, variant);
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -543,6 +569,37 @@ fn place_tree(column: &mut Column, x: usize, ground: usize, z: usize) {
     }
 }
 
+/// Coloca una **roca** (FASE 7) sobre la superficie: un bloque base, a veces uno
+/// encima y a veces un apoyo al lado. Material segun el ruido de superficie.
+fn place_boulder(column: &mut Column, x: usize, ground: usize, z: usize, variant: f64) {
+    if ground >= WORLD_HEIGHT {
+        return;
+    }
+    let block = if variant > 0.5 {
+        Block::CoarseDirt
+    } else {
+        Block::Stone
+    };
+    column.set(x, ground, z, block);
+    let h = hash_u32(x as i32 * 53 + 11, z as i32 * 29 + 5);
+    if ground + 1 < WORLD_HEIGHT && !h.is_multiple_of(3) {
+        column.set(x, ground + 1, z, block);
+    }
+    let (dx, dz): (i32, i32) = match (h / 3) % 4 {
+        0 => (1, 0),
+        1 => (-1, 0),
+        2 => (0, 1),
+        _ => (0, -1),
+    };
+    let (lx, lz) = (x as i32 + dx, z as i32 + dz);
+    if (0..CHUNK_SIZE as i32).contains(&lx) && (0..CHUNK_SIZE as i32).contains(&lz) {
+        let (lx, lz) = (lx as usize, lz as usize);
+        if column.get(lx, ground, lz) == Block::Air {
+            column.set(lx, ground, lz, block);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,7 +647,12 @@ mod tests {
                             if here == Block::Wood && below != Block::Wood {
                                 assert!(below.is_solid(), "tronco flotando ({x},{y},{z})");
                                 let (wx, wz) = (wx0 + x as i32, wz0 + z as i32);
-                                assert!(g.slope_ok(wx, wz, y), "tronco en pendiente ({wx},{z})");
+                                let h = y as i32;
+                                let ok =
+                                    [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().all(|&(dx, dz)| {
+                                        (g.height(wx + dx, wz + dz) as i32 - h).abs() <= 1
+                                    });
+                                assert!(ok, "tronco en pendiente ({wx},{wz})");
                             }
                         }
                     }

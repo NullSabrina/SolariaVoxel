@@ -8,29 +8,29 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.21.1` — Agua estilo Minecraft
+## Estado actual: `v0.22.0` — Worldgen FASE 7: decoracion por reglas
 
-La simulacion de agua (`world/water.rs`) usa el modelo de **Minecraft (Java)**:
+La decoracion (arboles, rocas) es ahora un sistema de **reglas**
+(`worldgen/decoration.rs`):
 
-- **Nivel 8 = fuente**; el flujo vale `8 − distancia` (alcance **7 bloques**).
-- El nivel de una celda de flujo se **recalcula** desde sus vecinos
-  (`max(nivel vecino) − 1`), no de un volumen compartido → al quitar la fuente
-  el agua **retrocede y desaparece** (antes se comportaba como una banera que
-  conservaba volumen).
-- **Fuentes infinitas** (2+ vecinos fuente), **caida** a nivel 8 (el agua
-  prefiere bajar) y el flujo huerfano se seca.
-- El agua **generada** (rios/lagos) se **asienta sola al cargar la columna** (se
-  registra su superficie y se encola la parte fuera de equilibrio), en vez de
-  quedarse congelada hasta editar algo.
-- Tick **10 Hz**: mas rapido que Minecraft (0.25 s por paso) pero sin verse
-  nervioso al colocar agua.
+- Cada tipo es una `DecorationRule` con condiciones de **bioma, altura,
+  humedad, pendiente y cercania a rio**, mas una probabilidad; anadir un tipo de
+  decoracion es anadir una fila.
+- **Clusters**: los arboles se agrupan en bosques **con claros** (ruido de
+  agrupacion de baja frecuencia); ya no es un `hash` uniforme.
+- **Rocas** (boulders) en laderas altas, en manchas.
+- La pendiente y la altura salen de una **rejilla de muestras con padding**
+  (18x18, una sola pasada), sin re-muestrear `height()` por candidato.
+- Se evitan arboles **flotantes** o en **acantilados**.
 
-No cambia el mundo ni el guardado (`GENERATOR_VERSION`/`FORMAT_VERSION` = 12/5).
+`GENERATOR_VERSION → 13`. `FORMAT_VERSION` intacto (5).
 
+- **Agua** (`v0.21.0`–`v0.21.1`): modelo de Minecraft (fuente→distancia),
+  fuentes infinitas, caida; el agua **generada se asienta sola** al cargar la
+  columna y el tick va a 10 Hz.
 - **Worldgen** (`v0.17`–`v0.20`): fases 1/2 (continentes, costas, cordilleras),
   3 (bioma por region celular), 5 (hidrologia: rios y lagos) y 6 (cuevas
-  jerarquicas: spaghetti, regionales, `cheese`, pozos, canones, pilares y
-  entradas). Ver [`docs/worldgen.md`](./docs/worldgen.md).
+  jerarquicas). Ver [`docs/worldgen.md`](./docs/worldgen.md).
 - **Repo** (`v0.19.1`): limpieza y orden (codigo muerto fuera, backups de arte a
   `assets/backup/`, metadatos, licencia dual, `.gitattributes`).
 - **Formato de guardado** (`FORMAT_VERSION = 5`): independiente del generador,
@@ -105,7 +105,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-250 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+255 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash

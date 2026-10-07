@@ -24,6 +24,7 @@
 pub mod biomes;
 pub mod cells;
 pub mod config;
+pub mod decoration;
 pub mod math;
 
 pub use biomes::BiomeDefinition;

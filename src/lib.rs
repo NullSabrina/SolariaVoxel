@@ -10,7 +10,19 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.21.1 - El agua generada se asienta sola
+//! ## Estado actual: v0.22.0 - Worldgen FASE 7: decoracion por reglas
+//!
+//! La decoracion (arboles, rocas) pasa a un sistema de **reglas**
+//! (`worldgen/decoration.rs`): cada tipo es una `DecorationRule` con
+//! condiciones de bioma, altura, humedad, pendiente y cercania a rio, mas una
+//! probabilidad. Dos ruidos de baja frecuencia dan coherencia: **clusters** (los
+//! arboles se agrupan en bosques con claros) y **manchas de roca** en laderas
+//! altas. La pendiente y la altura salen de una **rejilla de muestras con
+//! padding** (una sola pasada), no de re-muestrear `height()` por candidato.
+//!
+//! `GENERATOR_VERSION -> 13`. `FORMAT_VERSION` intacto (5). Hereda de v0.21.1.
+//!
+//! ## v0.21.1 - El agua generada se asienta sola
 //!
 //! El agua de **worldgen** (rios/lagos) nacia como fuente y **nunca se
 //! encolaba**: se quedaba congelada hasta que el jugador editaba algo cerca. Al
