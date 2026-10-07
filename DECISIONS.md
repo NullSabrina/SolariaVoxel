@@ -2569,6 +2569,40 @@ Sin afluentes de cueva ni biomas subterraneos (fuera de alcance).
 refuerzo por montana, pozos verticales); clippy limpio. Fraccion de aire
 subterraneo medida ~4 %. Siguiente: FASE 7 (decoracion por reglas).
 
+## v0.21.0 — Agua estilo Minecraft (fuente -> distancia)
+
+### 2026-10-07 — El agua deja de conservar volumen
+
+**Decision.** Reescribir `world/water.rs` al modelo de **Minecraft (Java)**:
+- **Nivel 8 = fuente**; el flujo vale `8 - distancia` (alcance 7 bloques).
+- El nivel de una celda de flujo se **recalcula** desde los vecinos
+  (`max(nivel vecino) - 1`), no de un volumen compartido.
+- **Fuentes infinitas** (2+ vecinos fuente ortogonales), **caida** a nivel 8 con
+  preferencia por bajar, y el flujo huerfano (sin fuente ni agua arriba) se seca.
+- Tick **mas rapido** que Minecraft: 20 Hz (`WATER_PERIOD = 0.05`) frente a los
+  0.25 s por paso del original.
+
+**Motivo.** El modelo anterior era un **igualador que conservaba volumen**
+(transferia `diff/2`): se comportaba como una banera, no como Minecraft. El
+nivel solo bajaba por transferencias y no se recalculaba desde los vecinos, asi
+que al quitar la fuente el agua no retrocedia, y el re-encolado solo al cambiar
+hacia que el flujo se sintiera lento y a tirones (sobre todo al caer).
+
+**Alternativas descartadas.** Mantener el igualador y solo subir el tick
+(seguiria sin "sentirse" como Minecraft); implementar el `tickDelay` exacto de
+5 ticks (el usuario pidio **mas rapido** que Minecraft).
+
+**Tradeoffs.** El agua **ya no conserva volumen** (es lo correcto en Minecraft):
+se reemplazaron los tests de conservacion por tests de reglas (alcance 7,
+retroceso al quitar fuente, caida, flujo huerfano). El atajo de "oceano en
+equilibrio" se adapta: solo las fuentes con vecinos fuentes/solidos se saltan.
+
+**Consecuencia.** `world/water.rs` reescrito, `world/store.rs`
+(`water_in_equilibrium`), `engine/app.rs` (`WATER_PERIOD` a 20 Hz). 248 tests;
+clippy limpio. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (12/5): no cambia
+el mundo ni el guardado, solo la simulacion. Tick de agua ~9x mas barato
+(0.238 -> 0.027 ms) al alcanzar el equilibrio. Siguiente: FASE 7 (decoracion).
+
 ```
 ### [fecha] vX.Y.Z — Titulo
 **Decision.** ...

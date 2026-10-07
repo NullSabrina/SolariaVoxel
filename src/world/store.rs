@@ -910,18 +910,20 @@ impl World {
         self.water_at(world).level()
     }
 
-    /// ¿Es una **fuente ya en equilibrio** que no hace falta simular? Ocurre
-    /// cuando el fondo esta bloqueado o lleno y los 4 vecinos horizontales estan
-    /// a tope. Asi los oceanos generados no cuestan CPU en el tick.
+    /// ¿Es una **fuente ya en equilibrio** que no hace falta simular? Con el
+    /// modelo fuente->distancia, solo las fuentes son estables: lo son si el
+    /// fondo esta bloqueado/lleno y todos los vecinos horizontales son solidos,
+    /// estan fuera, o son tambien fuentes. Asi los oceanos generados no cuestan
+    /// CPU en el tick.
     fn water_in_equilibrium(&self, p: [i32; 3]) -> bool {
         if !self.water_at(p).is_source() {
             return false;
         }
         let below = [p[0], p[1] - 1, p[2]];
-        let below_open = self.in_bounds(below)
-            && !self.get_block(below).blocks_fluid()
-            && self.water_level(below) < MAX_LEVEL;
-        if below_open {
+        let below_ok = !self.in_bounds(below)
+            || self.get_block(below).blocks_fluid()
+            || self.water_level(below) >= MAX_LEVEL;
+        if !below_ok {
             return false;
         }
         for d in [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] {
@@ -929,7 +931,7 @@ impl World {
             if !self.in_bounds(n) || self.get_block(n).blocks_fluid() {
                 continue;
             }
-            if self.water_level(n) < MAX_LEVEL - 1 {
+            if !self.water_at(n).is_source() {
                 return false;
             }
         }

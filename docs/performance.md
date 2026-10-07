@@ -22,7 +22,7 @@ Salida de `bench_*` (dev, `opt-level = 1`):
 | `terrain_generate_column` | 3.900 ms/columna | generar una columna 16x16x384 |
 | `mesh_greedy_section` | 2.801 ms / 5 secciones | greedy + fluido de las secciones no vacías de una columna |
 | `lighting_incremental` | 0.997 ms/edición | colocar/quitar antorcha (relight de bloque **incremental**) |
-| `fluid_tick` (charca 16x16) | 0.238 ms/tick | un tick de agua |
+| `fluid_tick` (charca 16x16) | 0.027 ms/tick | un tick de agua (v0.21.0; era 0.238 ms con el modelo viejo) |
 | `save_load_column` | record 0.435 ms · `save_to` 4.908 ms · `load_from` 1.539 ms | comprimir/guardar/cargar una columna |
 
 Benchmarks heredados (`world::store::tests`):
@@ -65,6 +65,19 @@ El sistema jerarquico evalua `tubes_a` + `regional` siempre, y activa `cheese`,
 `pillar` solo cuando algun sistema ya propone cavar. Coste ~1.7x a cambio de
 cuevas mucho mas variadas. La generacion es asincrona; el `warm_streaming`
 inicial (81 columnas) pasaria de ~291 ms a ~470 ms.
+
+### v0.21.0 — agua estilo Minecraft
+
+Al pasar de un igualador que **conservaba volumen** al modelo **fuente→distancia**
+de Minecraft, la charca alcanza el **equilibrio** y sus celdas se saltan (coste 0
+por tick), asi que el tick se abarata mucho:
+
+| benchmark | antes (v0.20) | despues (v0.21) | ratio |
+|---|---|---|---|
+| `fluid_tick` (charca 16x16) | 0.238 ms/tick | 0.027 ms/tick | **~9x** |
+| `bench_tick_agua` (100 ticks) | 4.55 ms | 0.54 ms | **~8x** |
+
+El tick sube a 20 Hz (Minecraft usa 0.25 s por paso) para que el flujo sea agil.
 
 ## Memoria (FASE 10)
 

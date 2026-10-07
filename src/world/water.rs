@@ -1,28 +1,29 @@
-//! Simulacion de **agua** con niveles: automata celular (estilo Minecraft).
+//! Simulacion de **agua** con la semantica de Minecraft (Java).
 //!
 //! `Block` es un `enum` sin campos y el chunk guarda **1 byte por voxel**, asi
-//! que el *nivel* de agua no cabe en el bloque. Lo guardamos **aparte** (en
-//! `World`, como mapa de desbordes) y lo simulamos aqui.
+//! que el *nivel* de agua no cabe en el bloque: lo guardamos aparte (nibble de
+//! flujo en la columna) y lo simulamos aqui.
 //!
-//! Un tick procesa cada celda con agua:
-//! 1. **Caida**: si la celda de abajo no es solida y no esta llena, el agua baja.
-//! 2. **Propagacion horizontal**: si no puede caer, se reparte a los 4 vecinos
-//!    horizontales hasta `nivel - FLOW_DECAY`. Una fuente (nivel maximo) llena a
-//!    sus vecinos hasta `MAX_LEVEL - FLOW_DECAY`; esos, a los suyos, uno menos, y
-//!    asi: una fuente forma un charco de radio `MAX_LEVEL - 1`, no inunda el
-//!    mundo.
-//! 3. **Igualacion**: dos celdas vecinas tienden al mismo nivel (superficies
-//!    planas) porque cada una empuja su exceso hacia la mas baja.
-//! 4. **Fuentes**: `Fluid::Source` nunca se agota (es el oceano). Un bloque
-//!    `Water` colocado por el jugador tambien es fuente.
-//! 5. **Conservacion**: en modo finito (sin fuentes) el volumen total no cambia.
-//!    Cada transferencia **resta** a una celda y **suma** a otra, y una celda que
-//!    llega a 0 se convierte en aire.
+//! ## Modelo (fuente -> distancia), NO conserva volumen
 //!
-//! Fuera del alcance (documentado): flujo **hacia arriba** por presion (vasos
-//! comunicantes), cascada diagonal, evaporacion y **lava** (necesita bloques y
-//! texturas nuevas, que aporta la IA de diseno). Los bordes de chunk no
-//! cargados simplemente se saltan (el agua no los cruza todavia).
+//! * **Nivel 8 = fuente** (inagotable). El flujo vale `8 - distancia`, asi que
+//!   una fuente alcanza **7 bloques** en horizontal y se agota (nivel 1).
+//! * El nivel de una celda de flujo **se recalcula** desde sus vecinos
+//!   (`max(nivel vecino) - 1`), no de un volumen compartido. Por eso, al quitar
+//!   la fuente, el agua **retrocede** a su nivel por distancia y desaparece.
+//! * **Fuente infinita**: una celda de flujo con **2+ vecinos fuente**
+//!   ortogonales se vuelve fuente (el clasico 2x2).
+//! * **Caida**: si hay agua/fuente **arriba**, la celda es *falling* a nivel 8;
+//!   al tocar suelo se reparte a `8 -> 7`. El agua **prefiere bajar**; solo se
+//!   extiende en horizontal si no puede caer.
+//! * Una celda de flujo **sin fuente** (ni agua arriba) desaparece.
+//!
+//! A diferencia de Minecraft (tick cada 5 ticks = 0.25 s), aqui el tick es mas
+//! rapido (ver `WATER_PERIOD` en `engine::app`), pero las reglas son las mismas.
+//!
+//! Fuera del alcance (documentado): presion hacia arriba (vasos comunicantes),
+//! evaporacion y **lava** (bloques/texturas aparte). Los bordes de chunk no
+//! cargados se saltan (`in_bounds`).
 
 use std::collections::VecDeque;
 
@@ -47,8 +48,8 @@ pub struct FluidBudget {
 impl Default for FluidBudget {
     fn default() -> Self {
         Self {
-            cells: 8192,
-            ms: 4.0,
+            cells: 16_384,
+            ms: 6.0,
         }
     }
 }
@@ -76,7 +77,7 @@ impl FluidBudget {
 ///
 /// * `None` — no hay agua.
 /// * `Source` — fuente inagotable (oceano o agua colocada por el jugador).
-/// * `Flow(l)` — agua que fluye con nivel `1..=MAX_LEVEL`.
+/// * `Flow(l)` — agua que fluye con nivel `1..=MAX_LEVEL` (`MAX_LEVEL` = caida).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fluid {
     None,
@@ -135,20 +136,12 @@ const H_DIRS: [[i32; 3]; 4] = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
 
 /// ¿El agua que fluye en `p` toca **dos o mas fuentes** ortogonales? Entonces
 /// pasa a `Fluid::Source`: es la regla clasica del 2x2 (apoyar agua junto a un
-/// manantial la fija). Exigir 2 fuentes evita que un charco normal se convierta
-/// en manantial infinito (y preserva la conservacion en modo finito).
+/// manantial la fija).
 pub fn check_2x2_source<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
-    if !matches!(grid.fluid(p), Fluid::Flow(_)) {
+    if grid.fluid(p).is_source() {
         return false;
     }
-    let fuentes = H_DIRS
-        .iter()
-        .filter(|d| {
-            let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
-            grid.in_bounds(n) && grid.fluid(n).is_source()
-        })
-        .count();
-    if fuentes >= 2 {
+    if count_horizontal_sources(grid, p) >= 2 {
         grid.set_fluid(p, Fluid::Source);
         true
     } else {
@@ -156,104 +149,110 @@ pub fn check_2x2_source<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> boo
     }
 }
 
-/// ¿El agua en `p` esta **en equilibrio** (estatica)? Ocurre cuando el fondo
-/// esta bloqueado o lleno y los 4 vecinos horizontales tienen su mismo nivel.
-/// Entonces el tick no debe tocarla: los oceanos generados salen gratis.
-fn at_equilibrium<G: FluidGrid + ?Sized>(grid: &G, p: [i32; 3]) -> bool {
-    let level = grid.fluid(p).level();
+/// Cuantos vecinos horizontales son fuentes.
+fn count_horizontal_sources<G: FluidGrid + ?Sized>(grid: &G, p: [i32; 3]) -> u32 {
+    H_DIRS
+        .iter()
+        .filter(|d| {
+            let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+            grid.in_bounds(n) && grid.fluid(n).is_source()
+        })
+        .count() as u32
+}
+
+/// Nivel que le corresponde a `p` segun sus vecinos (`getNewLiquid`).
+///
+/// Las fuentes nunca cambian por esta regla. Una celda de flujo:
+/// * con **2+ vecinos fuente** -> se convierte en fuente;
+/// * con **agua encima** -> *falling* a `MAX_LEVEL`;
+/// * si no, `max(nivel vecino) - 1` (0 -> se elimina).
+fn get_new_level<G: FluidGrid + ?Sized>(grid: &G, p: [i32; 3]) -> Fluid {
+    if grid.fluid(p).is_source() {
+        return Fluid::Source;
+    }
+    let mut max_n = 0u8;
+    for d in H_DIRS {
+        let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+        if !grid.in_bounds(n) || grid.is_solid(n) {
+            continue;
+        }
+        let l = grid.fluid(n).level();
+        if l > max_n {
+            max_n = l;
+        }
+    }
+    if count_horizontal_sources(grid, p) >= 2 {
+        return Fluid::Source;
+    }
+    // Agua (o fuente) justo encima -> el agua "cae" a nivel maximo.
+    let above = [p[0], p[1] + 1, p[2]];
+    if grid.in_bounds(above) && grid.fluid(above).level() > 0 {
+        return Fluid::Flow(MAX_LEVEL);
+    }
+    if max_n <= 1 {
+        Fluid::None
+    } else {
+        Fluid::from_level(max_n - FLOW_DECAY)
+    }
+}
+
+/// Reparte el agua de `p` (de nivel `level`): primero **abajo** (a nivel 8,
+/// *falling*); si no puede caer, a los vecinos horizontales con `nivel - 1`.
+fn spread<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3], level: u8) -> bool {
+    // 1. Caida: si el fondo puede recibir, el agua va hacia abajo y NO se
+    //    extiende en horizontal (preferencia por bajar).
     let below = [p[0], p[1] - 1, p[2]];
-    let below_ok =
-        !grid.in_bounds(below) || grid.is_solid(below) || grid.fluid(below).level() >= MAX_LEVEL;
-    if !below_ok {
+    if grid.in_bounds(below) && !grid.is_solid(below) {
+        let bf = grid.fluid(below);
+        if !bf.is_source() && bf.level() < MAX_LEVEL {
+            grid.set_fluid(below, Fluid::Flow(MAX_LEVEL));
+            return true;
+        }
+    }
+
+    // 2. Horizontal: cada vecino sube a `nivel - 1` si esta mas bajo.
+    let target = level.saturating_sub(FLOW_DECAY);
+    if target == 0 {
         return false;
     }
-    H_DIRS.iter().all(|d| {
+    let mut changed = false;
+    for d in H_DIRS {
         let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
-        !grid.in_bounds(n) || grid.is_solid(n) || grid.fluid(n).level() == level
-    })
+        if !grid.in_bounds(n) || grid.is_solid(n) {
+            continue;
+        }
+        let nf = grid.fluid(n);
+        if nf.is_source() || nf.level() >= target {
+            continue;
+        }
+        grid.set_fluid(n, Fluid::Flow(target));
+        changed = true;
+    }
+    changed
 }
 
 /// Procesa **una** celda con agua. Devuelve `true` si cambio algo.
 pub fn step_cell<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
-    if !grid.fluid(p).is_water() {
+    let cur = grid.fluid(p);
+    if !cur.is_water() {
         return false;
     }
-    // 0. Fuentes 2x2: el flujo con 2+ fuentes contiguas se fija.
-    if check_2x2_source(grid, p) {
-        return true;
-    }
-    // 0b. Equilibrio: agua estatica (mismo nivel que los vecinos, fondo firme).
-    //     Salimos ANTES de calcular nada: es el caso de los oceanos.
-    if at_equilibrium(grid, p) {
-        return false;
-    }
-
-    let f = grid.fluid(p);
-    let is_source = f.is_source();
-    let mut level = f.level();
     let mut changed = false;
 
-    // 1. Caida: el agua prefiere bajar.
-    let below = [p[0], p[1] - 1, p[2]];
-    let mut below_blocked = true;
-    if grid.in_bounds(below) && !grid.is_solid(below) {
-        let bf = grid.fluid(below).level();
-        if bf < MAX_LEVEL {
-            let t = (MAX_LEVEL - bf).min(level);
-            if t > 0 {
-                grid.set_fluid(below, Fluid::from_level(bf + t));
-                if !is_source {
-                    level -= t;
-                    grid.set_fluid(p, Fluid::from_level(level));
-                }
-                changed = true;
-            }
-            below_blocked = bf + t >= MAX_LEVEL;
-            if !is_source && level == 0 {
-                return true;
-            }
+    // 1. Recalcular el nivel por distancia a la fuente.
+    let new = get_new_level(grid, p);
+    if new != cur {
+        grid.set_fluid(p, new);
+        changed = true;
+        if new == Fluid::None {
+            return true; // los vecinos se re-encolaran y retrocederan
         }
     }
 
-    // 2. Propagacion horizontal: una fuente siempre; el agua que fluye, solo si
-    //    no puede bajar mas (abajo solido o lleno).
-    if is_source || below_blocked {
-        for d in H_DIRS {
-            let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
-            if !grid.in_bounds(n) || grid.is_solid(n) {
-                continue;
-            }
-            let nf = grid.fluid(n).level();
-            let target = if is_source {
-                MAX_LEVEL - FLOW_DECAY
-            } else {
-                level.saturating_sub(FLOW_DECAY)
-            };
-            if nf >= target {
-                continue;
-            }
-            // Mitad de la diferencia, al menos 1, sin pasar del objetivo.
-            let diff = level.saturating_sub(nf);
-            let mut give = (diff / 2).max(1).min(target - nf);
-            if is_source {
-                grid.set_fluid(n, Fluid::from_level(nf + give));
-                changed = true;
-            } else {
-                give = give.min(level);
-                if give == 0 {
-                    continue;
-                }
-                grid.set_fluid(n, Fluid::from_level(nf + give));
-                level -= give;
-                grid.set_fluid(p, Fluid::from_level(level));
-                changed = true;
-                if level == 0 {
-                    break;
-                }
-            }
-        }
+    // 2. Repartir (bajar o extenderse en horizontal).
+    if new.is_water() && spread(grid, p, new.level()) {
+        changed = true;
     }
-
     changed
 }
 
@@ -377,18 +376,14 @@ mod tests {
     }
 
     #[test]
-    fn un_bloque_cae_hasta_el_suelo() {
+    fn una_fuente_cae_hasta_el_suelo_y_se_queda() {
         let mut g = TestGrid::new(0);
-        g.set([0, 5, 0], Fluid::Flow(MAX_LEVEL));
+        g.set([0, 5, 0], Fluid::Source);
         for _ in 0..20 {
             tick_all(&mut g);
         }
         assert!(g.fluid([0, 1, 0]).is_water(), "deberia posarse en el suelo");
-        assert_eq!(
-            g.fluid([0, 5, 0]),
-            Fluid::None,
-            "la celda de arriba se vacia"
-        );
+        assert_eq!(g.fluid([0, 5, 0]), Fluid::Source, "la fuente no se agota");
     }
 
     #[test]
@@ -412,94 +407,85 @@ mod tests {
     }
 
     #[test]
-    fn dos_niveles_vecinos_se_igualan() {
-        // Canal cerrado por paredes para que solo puedan intercambiar entre si.
+    fn el_alcance_horizontal_es_siete_en_un_canal() {
         let mut g = TestGrid::new(0);
-        g.wall([-1, 1, 0]);
-        g.wall([2, 1, 0]);
-        g.wall([0, 1, -1]);
-        g.wall([0, 1, 1]);
-        g.wall([1, 1, -1]);
-        g.wall([1, 1, 1]);
-        g.set([0, 1, 0], Fluid::Flow(6));
-        g.set([1, 1, 0], Fluid::Flow(2));
-        let total = g.sum();
-        for _ in 0..20 {
+        // Paredes laterales para formar un canal de 1 de ancho en +X.
+        for x in 0..=MAX_LEVEL as i32 + 1 {
+            g.wall([x, 1, -1]);
+            g.wall([x, 1, 1]);
+        }
+        g.wall([MAX_LEVEL as i32 + 1, 1, 0]);
+        g.set([0, 1, 0], Fluid::Source);
+        for _ in 0..80 {
             tick_all(&mut g);
         }
-        assert_eq!(g.sum(), total, "el volumen se conserva");
-        let a = g.fluid([0, 1, 0]).level() as i32;
-        let b = g.fluid([1, 1, 0]).level() as i32;
-        assert!((a - b).abs() <= 1, "no se igualaron: {a} vs {b}");
+        for d in 1..MAX_LEVEL {
+            assert_eq!(g.fluid([d as i32, 1, 0]).level(), MAX_LEVEL - d, "d={d}");
+        }
+        assert_eq!(g.fluid([MAX_LEVEL as i32, 1, 0]), Fluid::None);
     }
 
     #[test]
-    fn el_volumen_se_conserva_en_modo_finito() {
-        // Caja cerrada con paredes; reparto inicial irregular, sin fuentes.
+    fn un_flujo_sin_fuente_desaparece() {
         let mut g = TestGrid::new(0);
-        for x in -3..=3 {
-            for z in -3..=3 {
-                for y in 1..=4 {
-                    let border = x == -3 || x == 3 || z == -3 || z == 3 || y == 4;
-                    if border {
-                        g.wall([x, y, z]);
-                    }
-                }
-            }
-        }
-        // Estado inicial deterministico.
-        let mut seed = 12345u32;
-        for x in -2..=2 {
-            for z in -2..=2 {
-                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                let lvl = ((seed >> 16) % 6) as u8; // 0..=5
-                if lvl > 0 {
-                    g.set([x, 1, z], Fluid::Flow(lvl));
-                }
-            }
-        }
-        let total = g.sum();
-        for _ in 0..1000 {
+        g.set([0, 1, 0], Fluid::Flow(5));
+        for _ in 0..5 {
             tick_all(&mut g);
         }
-        assert_eq!(g.sum(), total, "se perdio o gano agua");
+        assert_eq!(g.fluid([0, 1, 0]), Fluid::None, "un flujo huerfano se seca");
+    }
+
+    #[test]
+    fn el_agua_no_conserva_volumen() {
+        // Una sola fuente crea agua a su alrededor: el volumen aumenta.
+        let mut g = TestGrid::new(0);
+        g.set([0, 1, 0], Fluid::Source);
+        let antes = g.sum();
+        for _ in 0..80 {
+            tick_all(&mut g);
+        }
         assert!(
-            g.cells.values().all(|f| f.level() <= MAX_LEVEL),
-            "hay un nivel fuera de rango"
+            g.sum() > antes,
+            "una fuente deberia crear agua (no conserva)"
         );
     }
 
     #[test]
-    fn la_fuente_no_se_agota_al_propagarse() {
+    fn quitar_la_fuente_drena_la_charca() {
         let mut g = TestGrid::new(0);
         g.set([0, 1, 0], Fluid::Source);
+        for _ in 0..80 {
+            tick_all(&mut g);
+        }
+        assert!(g.fluid([3, 1, 0]).is_water(), "el charco deberia existir");
+        // Quitamos la fuente: el agua retrocede y desaparece.
+        g.set([0, 1, 0], Fluid::None);
         for _ in 0..200 {
             tick_all(&mut g);
         }
-        assert_eq!(g.fluid([0, 1, 0]), Fluid::Source);
-        // Sigue habiendo agua al lado despues de "drenar" la charca.
-        assert!(g.fluid([1, 1, 0]).is_water());
+        assert!(
+            g.cells.is_empty(),
+            "el agua deberia haberse drenado: {:?}",
+            g.cells
+        );
     }
 
     #[test]
-    fn la_cola_deduplica_y_vacia() {
-        let mut q = DirtyQueue::new();
-        q.push([1, 2, 3]);
-        q.push([1, 2, 3]);
-        q.push([4, 5, 6]);
-        assert_eq!(q.len(), 2);
-        assert_eq!(q.pop(), Some([1, 2, 3]));
-        assert_eq!(q.pop(), Some([4, 5, 6]));
-        assert!(q.is_empty());
-        q.push([0, 0, 0]);
-        q.clear();
-        assert!(q.is_empty());
+    fn el_agua_cae_en_columna_vertical() {
+        let mut g = TestGrid::new(0);
+        g.set([0, 6, 0], Fluid::Source);
+        for _ in 0..30 {
+            tick_all(&mut g);
+        }
+        for y in 1..=6 {
+            assert!(g.fluid([0, y, 0]).is_water(), "falta agua en y={y}");
+        }
     }
 
     #[test]
     fn el_agua_no_se_sale_por_el_fondo_del_mundo() {
         let mut g = TestGrid::new(0);
-        g.set([0, 1, 0], Fluid::Flow(MAX_LEVEL));
+        g.set([0, 1, 0], Fluid::Source);
         for _ in 0..10 {
             tick_all(&mut g);
         }
@@ -559,5 +545,20 @@ mod tests {
             }
         }
         assert!(q.is_empty(), "el agua en equilibrio no debe reencolarse");
+    }
+
+    #[test]
+    fn la_cola_deduplica_y_vacia() {
+        let mut q = DirtyQueue::new();
+        q.push([1, 2, 3]);
+        q.push([1, 2, 3]);
+        q.push([4, 5, 6]);
+        assert_eq!(q.len(), 2);
+        assert_eq!(q.pop(), Some([1, 2, 3]));
+        assert_eq!(q.pop(), Some([4, 5, 6]));
+        assert!(q.is_empty());
+        q.push([0, 0, 0]);
+        q.clear();
+        assert!(q.is_empty());
     }
 }

@@ -8,26 +8,26 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.20.0` — Worldgen FASE 6: cuevas jerarquicas
+## Estado actual: `v0.21.0` — Agua estilo Minecraft
 
-`world/caves.rs` deja de ser un unico campo de densidad y pasa a **varios
-sistemas** que se suman, cada uno con su escala:
+La simulacion de agua (`world/water.rs`) se reescribio al modelo de **Minecraft
+(Java)**:
 
-- **Spaghetti** (dos campos de tubos que se cruzan) y **tuneles regionales**
-  (mas anchos, baja frecuencia).
-- **Camaras `cheese`** (blobs grandes, profundos), **pozos verticales** y
-  **canones** (largos en X, en banda media).
-- **Mascara de preservacion** (pilares/puentes) y **entradas** raras
-  (grietas/sinkholes) que rompen la corteza.
-- Densidad **atenuada por profundidad** (`surface - y`) y **reforzada bajo
-  montanas** (`mountain_mask`). El trabajo 2D se calcula una vez por columna
-  (`CaveContext`), y el caso sin cueva sale pronto.
+- **Nivel 8 = fuente**; el flujo vale `8 − distancia` (alcance **7 bloques**).
+- El nivel de una celda de flujo se **recalcula** desde sus vecinos
+  (`max(nivel vecino) − 1`), no de un volumen compartido → al quitar la fuente
+  el agua **retrocede y desaparece** (antes se comportaba como una banera que
+  conservaba volumen).
+- **Fuentes infinitas** (2+ vecinos fuente), **caida** a nivel 8 (el agua
+  prefiere bajar) y el flujo huerfano se seca.
+- Tick **mas rapido** que Minecraft: **20 Hz** (Minecraft usa 0.25 s por paso).
 
-`GENERATOR_VERSION → 12`.
+No cambia el mundo ni el guardado (`GENERATOR_VERSION`/`FORMAT_VERSION` = 12/5).
 
 - **Worldgen** (`v0.17`–`v0.20`): fases 1/2 (continentes, costas, cordilleras),
   3 (bioma por region celular), 5 (hidrologia: rios y lagos) y 6 (cuevas
-  jerarquicas) completadas. Ver [`docs/worldgen.md`](./docs/worldgen.md).
+  jerarquicas: spaghetti, regionales, `cheese`, pozos, canones, pilares y
+  entradas). Ver [`docs/worldgen.md`](./docs/worldgen.md).
 - **Repo** (`v0.19.1`): limpieza y orden (codigo muerto fuera, backups de arte a
   `assets/backup/`, metadatos, licencia dual, `.gitattributes`).
 - **Formato de guardado** (`FORMAT_VERSION = 5`): independiente del generador,
@@ -102,8 +102,8 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-246 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
-fluidos, raycast, worldgen y cuevas). Lint:
+248 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+fluidos estilo Minecraft, raycast, worldgen y cuevas). Lint:
 
 ```bash
 cargo fmt

@@ -10,7 +10,22 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.20.0 - Worldgen FASE 6: cuevas jerarquicas
+//! ## Estado actual: v0.21.0 - Agua estilo Minecraft (fuente -> distancia)
+//!
+//! `world/water.rs` deja de ser un **igualador que conserva volumen** (se
+//! comportaba como una banera) y pasa al modelo de **Minecraft**:
+//! * **Nivel 8 = fuente**; el flujo vale `8 - distancia` (alcance 7).
+//! * El nivel de una celda de flujo se **recalcula** desde sus vecinos
+//!   (`max - 1`), no de un volumen compartido → al quitar la fuente el agua
+//!   **retrocede y desaparece**.
+//! * **Fuentes infinitas** (2+ vecinos fuente), **caida** a nivel 8 con
+//!   preferencia por bajar, y el flujo huerfano se seca.
+//! * Tick **mas rapido** que Minecraft (20 Hz frente a 0.25 s por paso).
+//!
+//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (12/5): no cambia el mundo ni
+//! el guardado, solo la simulacion. Hereda de v0.20.0.
+//!
+//! ## v0.20.0 - Worldgen FASE 6: cuevas jerarquicas
 //!
 //! `world/caves.rs` pasa de un unico campo de densidad a **varios sistemas**
 //! (tubos spaghetti que se cruzan, tuneles regionales, camaras `cheese`, pozos

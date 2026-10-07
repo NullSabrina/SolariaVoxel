@@ -124,9 +124,10 @@ const HOTBAR_SLOTS: usize = 9;
 /// Escala de la interfaz (pixels de mundo -> pixels de pantalla).
 const UI_SCALE: f32 = 2.0;
 
-/// Periodo del tick de **agua**, en segundos (10 Hz). Va aparte de la fisica y
-/// del render: el agua fluye mas despacio y cuesta menos por frame.
-const WATER_PERIOD: f32 = 0.1;
+/// Periodo del tick de **agua**, en segundos (20 Hz). Va aparte de la fisica y
+/// del render. Es **mas rapido** que Minecraft (que usa 5 ticks = 0.25 s por
+/// paso) para que el agua responda agil sin dejar de ser un automata por pasos.
+const WATER_PERIOD: f32 = 0.05;
 
 /// Periodo del **autoguardado** en segundo plano (segundos). El mundo se guarda
 /// sin bloquear el render.
