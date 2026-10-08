@@ -26,7 +26,9 @@ use super::caves::{Carve, CaveContext, CaveSystem};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 use super::generator::GeneratorKind;
 use super::worldgen::decoration::{DecorationKind, Decorator};
-use super::worldgen::graph::{Graph, Program, default_density_graph, default_height_graph};
+use super::worldgen::graph::{
+    Graph, Program, climate_graph, default_density_graph, default_height_graph,
+};
 use super::worldgen::{WorldGen, biomes};
 
 /// Altura media del terreno, en bloques (nivel del mar).
@@ -94,6 +96,8 @@ pub struct TerrainGenerator {
     /// Grafo de **densidad 3D** + programa (solo si `kind == Graph`): decide
     /// solido/aire con cuevas y voladizos.
     density_graph: Option<(Graph, Program)>,
+    /// Grafo de **clima** `(temperatura, lluvia)` + programas (solo `Graph`).
+    climate: Option<((Graph, Program), (Graph, Program))>,
 }
 
 impl TerrainGenerator {
@@ -121,6 +125,12 @@ impl TerrainGenerator {
         } else {
             (None, None)
         };
+        let climate = (kind == GeneratorKind::Graph).then(|| {
+            (
+                compile(climate_graph(seed as u64, 0x51ED_2701_3C6E_F372)),
+                compile(climate_graph(seed as u64, 0xA076_1D64_78BD_642F)),
+            )
+        });
         Self {
             worldgen: WorldGen::new(seed),
             surface_detail: Perlin::new(mix(6)),
@@ -133,6 +143,7 @@ impl TerrainGenerator {
             kind,
             height_graph,
             density_graph,
+            climate,
         }
     }
 
@@ -292,6 +303,19 @@ impl TerrainGenerator {
         (h.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize
     }
 
+    /// Clima `(temperatura, lluvia)` del **grafo**, o `fallback` (WorldGen) si no
+    /// hay grafo de clima.
+    fn graph_climate(&self, world_x: i32, world_z: i32, fallback: (f32, f32)) -> (f32, f32) {
+        let Some((t, r)) = &self.climate else {
+            return fallback;
+        };
+        let eval = |(g, p): &(Graph, Program)| {
+            p.eval(g, world_x as f32, 0.0, world_z as f32)
+                .clamp(0.0, 1.0)
+        };
+        (eval(t), eval(r))
+    }
+
     /// Genera una columna con el **campo de densidad 3D** del grafo, evaluado en
     /// una **retícula gruesa 4x4x4** e interpolado trilinealmente (C2): asi el
     /// ruido 3D no se paga por voxel. El bioma, los materiales (por altura de
@@ -324,8 +348,12 @@ impl TerrainGenerator {
                 let wx = world_x + x as i32;
                 let wz = world_z + z as i32;
                 let geo = self.worldgen.sample(wx as f64, wz as f64);
-                let biome = geo.biome;
                 let surface = self.graph_height(wx, wz);
+                // Clima del grafo -> bioma por scoring (C4); el resto del pipeline
+                // (materiales, decoracion) usa ese bioma.
+                let (temp, rain) = self.graph_climate(wx, wz, (geo.temperature, geo.humidity));
+                let elevation = (surface as f32 / 256.0).clamp(0.0, 1.0);
+                let biome = biomes::select(temp, rain, elevation);
                 let variant = self.surface_variant(wx, wz);
                 let coastal = surface <= (SEA_LEVEL as usize) + 1;
                 for y in 0..WORLD_HEIGHT {
@@ -1271,5 +1299,25 @@ mod tests {
             hash_column(&g.generate_column(0, 0)),
             "el campo de densidad no es determinista"
         );
+    }
+
+    #[test]
+    fn el_clima_del_grafo_varia_y_da_varios_biomas() {
+        let g = TerrainGenerator::with_kind(13_371, GeneratorKind::Graph);
+        let (mut min, mut max) = (1.0f32, 0.0f32);
+        let mut biomas: Vec<Biome> = Vec::new();
+        for i in 0..300 {
+            let x = i * 97 - 9000;
+            let z = i * 53 - 5000;
+            let (t, r) = g.graph_climate(x, z, (0.5, 0.5));
+            min = min.min(t);
+            max = max.max(t);
+            let b = biomes::select(t, r, 0.3);
+            if !biomas.contains(&b) {
+                biomas.push(b);
+            }
+        }
+        assert!(max - min > 0.3, "el clima del grafo deberia variar");
+        assert!(biomas.len() > 1, "deberia haber varios biomas");
     }
 }

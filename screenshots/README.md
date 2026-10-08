@@ -109,3 +109,4 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.43.3_controls_acentos.png` | Fuente con tildes: 'ATRAS' con acento. |
 | `v0.44.0_graph.png` | Mundo con el generador **graph** (altura del grafo de densidad). |
 | `v0.44.1_graph_density.png` | Mundo graph con campo de densidad 3D (cuevas/voladizos). |
+| `v0.44.2_graph_climate.png` | Mundo graph con clima (temperatura/lluvia) del grafo -> biomas. |

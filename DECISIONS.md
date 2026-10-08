@@ -3354,6 +3354,31 @@ sigue viniendo de `WorldGen`.
 334 tests; clippy limpio. Captura `v0.44.1_graph_density.png`.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.44.2 - Clima como canales del grafo (Parte C, C4)
+
+### 2026-10-07 - Temperatura y lluvia del grafo eligen el bioma
+
+**Decision.** `graph::climate_graph(seed, salt)` produce una banda de clima `0..1`
+(ruido 2D de baja frecuencia con contraste). El camino `Graph` evalua **dos**
+grafos de clima (temperatura y lluvia) y elige el bioma con el scoring existente
+`biomes::select(temp, rain, elevacion)`, donde `elevacion = altura/256`; el bioma
+resultante decide materiales y decoracion (pipeline comun). El generador legacy
+sigue con su clima de `WorldGen`.
+
+**Motivo.** La guia (C4) pide canales de clima con nombre en el grafo. Se reutiliza
+el selector de biomas ya existente en vez de reimplementarlo.
+
+**Alternativas descartadas.** Reescribir `WorldGen` (riesgo alto). Cambiar el clima
+del camino legacy (romperia mundos existentes). Mezclar clima graph + WorldGen
+(menos claro).
+
+**Pendiente honesto.** Rios/acuifero del grafo y restricciones de decoracion (C5).
+
+**Consecuencia.** `world/worldgen/graph.rs` (`climate_graph`),
+`world/terrain.rs` (`climate` + `graph_climate` + `biomes::select`). 335 tests;
+clippy limpio. Captura `v0.44.2_graph_climate.png`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

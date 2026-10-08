@@ -8,24 +8,27 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.44.1` — Worldgen con grafo de densidad 3D (Parte C)
+## Estado actual: `v0.44.2` — Worldgen con grafo (altura, densidad y clima)
 
-- **Campo de densidad 3D** (`v0.44.1`): el camino `Graph` evalúa un grafo de
-  densidad (`superficie(x,z) − y + cueva`) en una **retícula gruesa 4×4×4**
-  interpolada trilinealmente, así el ruido 3D no se paga por vóxel; el ruido 3D
-  recortado a la parte positiva cava **cuevas/túneles** (sin islas flotantes). El
-  océano solo rellena por encima del terreno (las cuevas bajo el mar quedan secas).
+- **Clima como canales del grafo** (`v0.44.2`): el camino `Graph` evalúa grafos de
+  **temperatura** y **lluvia** y elige el bioma con el scoring existente
+  (`biomes::select`); el bioma decide materiales y decoración. *(El generador
+  legacy sigue con su clima de `WorldGen`.)*
+- **Campo de densidad 3D** (`v0.44.1`): densidad `superficie − y + cueva` en una
+  **retícula gruesa 4×4×4** interpolada trilinealmente; el ruido 3D recortado cava
+  **cuevas/túneles** sin islas flotantes. El océano solo rellena por encima del
+  terreno.
 - **Grafo + coexistencia** (`v0.44.0`): `GeneratorKind::{Legacy16, Graph}` en
-  `level.json` (sin migrar el binario). El grafo se serializa a **JSON**. Mundos
+  `level.json` (sin migrar el binario). Grafo serializable a **JSON**. Mundos
   nuevos: `SOLARIA_GENERATOR=graph`. Determinista (test 1 vs N hilos).
-- **Fix**: la propagación de **luz de bloque** ya no entra en columnas no cargadas
-  (antes podía crecer sin cota al editar cerca del borde de carga).
+- **Fix**: la luz de bloque no propaga a columnas no cargadas (antes podía crecer
+  sin cota).
 - **Fuente con tildes** (`v0.43.3`), **Opciones/Controles** (`v0.43.1`/`v0.43.2`),
-  **mundos múltiples y pantallas** (`v0.42.0`), **astros texturizados** (`v0.35.0`,
-  LibreSprite), **UI creativa** (`v0.41.0`), **distancia de vista** (`v0.33.0`) y
+  **mundos múltiples y pantallas** (`v0.42.0`), **astros texturizados** (`v0.35.0`),
+  **UI creativa** (`v0.41.0`), **distancia de vista** (`v0.33.0`) y
   **cielo/atmosfera** (`v0.30`–`v0.31.1`).
-- **Pendiente honesto**: clima como canales del grafo (C4), cuevas del camino graph
-  sin acuífero, restricciones de decoración (C5), toolkit nine-slice.
+- **Pendiente honesto**: cuevas del grafo sin acuífero, restricciones de decoración
+  (C5), toolkit nine-slice, `sky_physical` opcional.
 
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
@@ -121,7 +124,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-334 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+335 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color, distancia de
 vista, interfaz creativa, grafo de densidad, libreria de mundos, pantallas y
 opciones). Lint:
