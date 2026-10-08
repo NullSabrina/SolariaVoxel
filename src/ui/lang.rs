@@ -62,6 +62,13 @@ const ES: &[(&str, &str)] = &[
     ("cat.special", "Especiales"),
     ("ui.search", "Buscar"),
     ("ui.inventory", "Inventario creativo"),
+    ("act.forward", "Adelante"),
+    ("act.back", "Atras"),
+    ("act.left", "Izquierda"),
+    ("act.right", "Derecha"),
+    ("act.jump", "Saltar"),
+    ("act.fly", "Volar"),
+    ("act.inventory", "Inventario"),
 ];
 
 /// Traducciones al ingles.
@@ -89,6 +96,13 @@ const EN: &[(&str, &str)] = &[
     ("cat.special", "Special"),
     ("ui.search", "Search"),
     ("ui.inventory", "Creative inventory"),
+    ("act.forward", "Forward"),
+    ("act.back", "Back"),
+    ("act.left", "Left"),
+    ("act.right", "Right"),
+    ("act.jump", "Jump"),
+    ("act.fly", "Fly"),
+    ("act.inventory", "Inventory"),
 ];
 
 fn table(lang: Lang) -> &'static [(&'static str, &'static str)] {

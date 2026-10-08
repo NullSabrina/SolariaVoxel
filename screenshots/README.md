@@ -104,3 +104,4 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.42.0_pause.png` | Menu de pausa (Esc). |
 | `v0.43.1_title.png` | Titulo con boton "Opciones". |
 | `v0.43.1_options.png` | Menu de opciones (distancia, niebla, FOV, idioma...). |
+| `v0.43.2_controls.png` | Pantalla de Controles (reasignar teclas, con intercambio de conflictos). |

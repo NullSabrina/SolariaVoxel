@@ -14,6 +14,8 @@ pub enum Screen {
     CreateWorld,
     /// Opciones (video, juego, teclas).
     Options,
+    /// Controles (reasignar teclas).
+    Controls,
     /// Jugando (mundo + HUD).
     Playing,
     /// Menu de pausa.

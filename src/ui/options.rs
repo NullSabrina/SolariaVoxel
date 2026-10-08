@@ -62,6 +62,17 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("inventory", "KeyE"),
 ];
 
+/// Acciones reasignables, en orden de menu, y su clave i18n.
+pub const BINDABLE_ACTIONS: &[(&str, &str)] = &[
+    ("forward", "act.forward"),
+    ("back", "act.back"),
+    ("left", "act.left"),
+    ("right", "act.right"),
+    ("jump", "act.jump"),
+    ("fly", "act.fly"),
+    ("inventory", "act.inventory"),
+];
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -136,6 +147,11 @@ impl Options {
             .iter()
             .find(|b| b.action == action)
             .map(|b| b.key.as_str())
+    }
+
+    /// Restablece las teclas a los valores por defecto.
+    pub fn reset_bindings(&mut self) {
+        self.bindings = Options::default().bindings;
     }
 
     /// Reasigna una tecla a una accion. Si la tecla ya estaba en otra accion,

@@ -149,6 +149,8 @@ pub struct App {
     world_sel: usize,
     /// Campo enfocado en "crear mundo" (0 = nombre, 1 = semilla).
     create_focus: usize,
+    /// Accion esperando una tecla nueva en la pantalla de Controles.
+    rebinding: Option<String>,
     /// Slug del mundo que se esta renombrando (si `Some`, "Crear" renombra).
     rename_target: Option<String>,
     /// Peticion de salida (se atiende tras procesar el evento).
@@ -308,7 +310,7 @@ impl App {
             self.poll_save();
 
             // Animacion de la mano: balanceo al andar y decaimiento del golpe.
-            let moving = self.input.forward_axis() != 0.0 || self.input.right_axis() != 0.0;
+            let moving = self.move_forward_axis() != 0.0 || self.move_right_axis() != 0.0;
             if moving && !self.flying {
                 self.bob += frame_dt * 7.0;
             }
@@ -355,12 +357,39 @@ impl App {
         }
     }
 
+    /// Codigo de tecla asignado a una accion (o `default` si falta).
+    fn binding_code(&self, action: &str, default: KeyCode) -> KeyCode {
+        self.options
+            .key_for(action)
+            .and_then(super::input::parse_key)
+            .unwrap_or(default)
+    }
+
+    /// Eje adelante/atras con las teclas asignadas.
+    fn move_forward_axis(&self) -> f32 {
+        self.input.axis_with(
+            self.binding_code("forward", KeyCode::KeyW),
+            self.binding_code("back", KeyCode::KeyS),
+        )
+    }
+
+    /// Eje derecha/izquierda con las teclas asignadas.
+    fn move_right_axis(&self) -> f32 {
+        self.input.axis_with(
+            self.binding_code("right", KeyCode::KeyD),
+            self.binding_code("left", KeyCode::KeyA),
+        )
+    }
+
     /// Un paso de fisica del jugador de duracion `dt` (fija).
     fn simulate_player(&mut self, dt: f32) {
-        let forward = self.input.forward_axis();
-        let right = self.input.right_axis();
-        let jump = self.input.jump_axis();
-        let jump_held = self.input.jump_held();
+        // Movimiento con las teclas **asignadas** (reasignables en Controles).
+        let forward = self.move_forward_axis();
+        let right = self.move_right_axis();
+        let jump = self
+            .input
+            .is_pressed(self.binding_code("jump", KeyCode::Space));
+        let jump_held = jump;
         let flying = self.flying;
 
         // La consulta de solido mira el mundo (incluye `Unloaded` = muro, para no
@@ -1061,7 +1090,8 @@ impl App {
     /// Vuelve atras desde un menu (Esc). `Title` es la base.
     fn menu_back(&mut self) {
         match self.screens.top() {
-            Screen::Pause | Screen::Options => {
+            Screen::Pause | Screen::Options | Screen::Controls => {
+                self.rebinding = None;
                 self.screens.pop();
                 // Al cerrar la pausa (y no quedar menus) se recaptura el raton.
                 if self.screens.is_playing() && !self.demo {
@@ -1210,9 +1240,31 @@ impl App {
                     "Hecho".into(),
                 ]
             }
+            Screen::Controls => {
+                let mut rows: Vec<String> = crate::ui::options::BINDABLE_ACTIONS
+                    .iter()
+                    .map(|(action, key_key)| {
+                        let label = crate::ui::translate(self.lang, key_key);
+                        if self.rebinding.as_deref() == Some(*action) {
+                            format!("{label}: <pulsa una tecla>")
+                        } else {
+                            let k = self
+                                .options
+                                .key_for(action)
+                                .map(super::input::key_display)
+                                .unwrap_or_else(|| "?".to_string());
+                            format!("{label}: {k}")
+                        }
+                    })
+                    .collect();
+                rows.push("Restablecer".into());
+                rows.push("Hecho".into());
+                rows
+            }
             Screen::Pause => vec![
                 "Volver al juego".into(),
                 "Opciones".into(),
+                "Controles".into(),
                 "Guardar mundo ahora".into(),
                 "Guardar y salir al titulo".into(),
             ],
@@ -1306,15 +1358,42 @@ impl App {
             Screen::Pause => match i {
                 0 => self.resume_play(),
                 1 => self.screens.push(Screen::Options),
-                2 => self.save_world(),
-                3 => {
+                2 => {
+                    self.rebinding = None;
+                    self.screens.push(Screen::Controls);
+                }
+                3 => self.save_world(),
+                4 => {
                     self.save_world();
                     self.screens.to_title();
                 }
                 _ => {}
             },
+            Screen::Controls => self.controls_action(i),
             Screen::Options => self.options_action(i),
             Screen::Playing => {}
+        }
+    }
+
+    /// Accion de una fila de Controles: iniciar rebind, restablecer o salir.
+    fn controls_action(&mut self, i: usize) {
+        let n = crate::ui::options::BINDABLE_ACTIONS.len();
+        if i < n {
+            self.rebinding = Some(crate::ui::options::BINDABLE_ACTIONS[i].0.to_string());
+        } else if i == n {
+            self.options.reset_bindings();
+            self.save_options();
+        } else {
+            self.rebinding = None;
+            self.menu_back();
+        }
+    }
+
+    /// Guarda `options.json` (sin aplicar).
+    fn save_options(&self) {
+        let path = self.world_base.join(crate::ui::options::OPTIONS_FILE);
+        if let Err(e) = self.options.save(&path) {
+            eprintln!("[options] no se pudo guardar: {e}");
         }
     }
 
@@ -1494,6 +1573,18 @@ impl App {
                 }
             }
             Screen::Options => {}
+            Screen::Controls => {
+                // Si hay una accion esperando tecla, la captura y reasigna.
+                if let Some(action) = self.rebinding.clone()
+                    && let Some(name) = super::input::key_name(code)
+                {
+                    if let Some(other) = self.options.rebind(&action, name) {
+                        println!("[controles] '{action}' intercambiada con '{other}'");
+                    }
+                    self.save_options();
+                    self.rebinding = None;
+                }
+            }
             Screen::Playing => {}
         }
     }
@@ -1526,6 +1617,7 @@ impl App {
             }
             Screen::Pause => "PAUSA".to_string(),
             Screen::Options => "OPCIONES".to_string(),
+            Screen::Controls => "CONTROLES".to_string(),
             Screen::Playing => String::new(),
         };
         let scale = UI_SCALE * 2.0;
@@ -1934,6 +2026,11 @@ impl ApplicationHandler for App {
                     s.push(Screen::Options);
                     s
                 }
+                "controls" => {
+                    let mut s = ScreenStack::with_title();
+                    s.push(Screen::Controls);
+                    s
+                }
                 _ => self.screens.clone(),
             };
         }
@@ -1987,8 +2084,9 @@ impl ApplicationHandler for App {
                         }
                     } else if pressed {
                         match code {
-                            // E: cierra la mesa; si no, abre/cierra el inventario.
-                            KeyCode::KeyE => {
+                            // E (o la tecla asignada a "inventario"): cierra la
+                            // mesa; si no, abre/cierra el inventario.
+                            c if c == self.binding_code("inventory", KeyCode::KeyE) => {
                                 if self.crafting_open {
                                     self.close_crafting();
                                     println!("[crafteo] mesa cerrada");
@@ -2007,8 +2105,8 @@ impl ApplicationHandler for App {
                                     );
                                 }
                             }
-                            // F: alterna modo vuelo.
-                            KeyCode::KeyF => {
+                            // F (o la tecla asignada a "volar"): alterna modo vuelo.
+                            c if c == self.binding_code("fly", KeyCode::KeyF) => {
                                 self.flying = !self.flying;
                                 println!(
                                     "[engine] modo vuelo: {}",

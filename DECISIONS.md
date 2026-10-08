@@ -1,16 +1,16 @@
-# Decisiones de diseÃ±o (DECISIONS.md)
+# Decisiones de diseño (DECISIONS.md)
 
 Registro de decisiones tecnicas de Solaria Voxel. Cada entrada explica **que**
 se decidio, **por que** y **que alternativas** se descartaron. Se anade una
 entrada por cada decision relevante, no por cada linea de codigo.
 
-Formato: `## [fecha] vX.Y.Z â€” Titulo`
+Formato: `## [fecha] vX.Y.Z — Titulo`
 
 ---
 
-## v0.1.0 â€” Base del proyecto
+## v0.1.0 — Base del proyecto
 
-### 2026-10-04 â€” El motor se escribe desde cero, sin motor de juego
+### 2026-10-04 — El motor se escribe desde cero, sin motor de juego
 
 **Decision.** No usamos Bevy, ni Fyrox, ni Godot. Construimos el motor nosotros.
 
@@ -21,7 +21,7 @@ completo esconde justo lo que queremos aprender.
 **Consecuencia.** Asumimos mas trabajo y mas codigo propio. A cambio, cada linea
 esta documentada y bajo nuestro control.
 
-### 2026-10-04 â€” Capa de plataforma: `winit` + `wgpu` (no OpenGL crudo)
+### 2026-10-04 — Capa de plataforma: `winit` + `wgpu` (no OpenGL crudo)
 
 **Decision.** Para ventana y GPU usamos `winit` (ventana/eventos) y `wgpu`
 (abstraccion de GPU). No escribimos Vulkan/D3D12 directamente.
@@ -38,7 +38,7 @@ esta documentada y bajo nuestro control.
 lento y no representa lo que hara un motor real); OpenGL crudo con `glow`
 (API antigua, peor encaje futuro con WebGPU).
 
-### 2026-10-04 â€” Separacion por modulos `engine` / `render` / `scene` / `math`
+### 2026-10-04 — Separacion por modulos `engine` / `render` / `scene` / `math`
 
 **Decision.** El codigo se organiza en cuatro modulos con responsabilidades
 claras, y el renderer es una **envoltura fina** sobre wgpu.
@@ -46,7 +46,7 @@ claras, y el renderer es una **envoltura fina** sobre wgpu.
 **Motivo.** Que la logica del juego no sepa de wgpu. Si algun dia cambiamos de
 API grafica, solo cambia `render`. Facilita testear `math` y `scene` sin GPU.
 
-### 2026-10-04 â€” Matematica propia en lugar de `glam`
+### 2026-10-04 — Matematica propia en lugar de `glam`
 
 **Decision.** Implementamos `Vec3` y `Mat4` nosotros, en `src/math`.
 
@@ -57,7 +57,7 @@ usaremos para transformar chunks y para el frustum culling (v0.11.2).
 puede sustituir por `glam` mas adelante sin tocar el resto del motor: los
 modulos solo dependen de la interfaz de `math`.
 
-### 2026-10-04 â€” Convenio de ejes: mano derecha, -Z al frente, column-major
+### 2026-10-04 — Convenio de ejes: mano derecha, -Z al frente, column-major
 
 **Decision.**
 - Sistema de mano derecha: +X derecha, +Y arriba, **-Z al frente**.
@@ -67,7 +67,7 @@ modulos solo dependen de la interfaz de `math`.
 `[0,1]`) y con `raw-window-handle`. Documentado en el modulo `math` para no
 volver a decidirlo.
 
-### 2026-10-04 â€” Color de cielo definido en sRGB y convertido a lineal
+### 2026-10-04 — Color de cielo definido en sRGB y convertido a lineal
 
 **Decision.** Elegimos el azul cielo en espacio sRGB (como se ve en pantalla) y
 lo convertimos a espacio lineal antes de pasarlo a `LoadOp::Clear`.
@@ -77,7 +77,7 @@ disponible). En ese caso la GPU espera colores lineales y aplica ella la
 correccion de gamma; pasar valores sRGB directos daria un color mas claro del
 intencionado.
 
-### 2026-10-04 â€” Perfiles de compilacion: dependencias optimizadas en `dev`
+### 2026-10-04 — Perfiles de compilacion: dependencias optimizadas en `dev`
 
 **Decision.** En `[profile.dev]` ponemos `opt-level = 1` para nuestro codigo, y
 `[profile.dev.package."*"] opt-level = 3` para las dependencias.
@@ -88,9 +88,9 @@ sacrificar tiempos de compilacion de nuestro crate.
 
 ---
 
-## v0.1.1 â€” Camara FPS basica
+## v0.1.1 — Camara FPS basica
 
-### 2026-10-04 â€” El input se desacopla de la camara
+### 2026-10-04 — El input se desacopla de la camara
 
 **Decision.** La camara no lee eventos de winit. Un modulo `engine::input`
 mantiene el estado (teclas pulsadas, delta del raton) y la camara solo recibe
@@ -99,7 +99,7 @@ valores ya resueltos: `add_look(dx, dy)` y `walk(forward, right, up, dt)`.
 **Motivo.** Testear la camara sin arrancar una ventana, y poder cambiar
 "raton+teclado" por otra fuente de input (mando, red) sin tocar la camara.
 
-### 2026-10-04 â€” Pointer lock opt-in, liberado con Escape y al perder foco
+### 2026-10-04 — Pointer lock opt-in, liberado con Escape y al perder foco
 
 **Decision.** El cursor se captura solo al hacer click, y se libera con
 `Escape` o cuando la ventana pierde el foco (alt-tab). Hacer click otra vez
@@ -108,7 +108,7 @@ recaptura.
 **Motivo.** Secuestrar el raton nada mas abrir es hostil (no puedes ni mover la
 ventana). Liberar al perder foco evita dejar el cursor atrapado al alt-tab.
 
-### 2026-10-04 â€” Movimiento por delta time, con `dt` limitado a 0.1 s
+### 2026-10-04 — Movimiento por delta time, con `dt` limitado a 0.1 s
 
 **Decision.** El desplazamiento es `velocidad * dt` (no por frame). El `dt` se
 limita a 0.1 s como maximo.
@@ -117,7 +117,7 @@ limita a 0.1 s como maximo.
 "teletransporte" cuando el proceso se congela (arrastrar la ventana, un
 breakpoint) y vuelve con un `dt` enorme.
 
-### 2026-10-04 â€” Teclas por codigo fisico (`PhysicalKey`)
+### 2026-10-04 — Teclas por codigo fisico (`PhysicalKey`)
 
 **Decision.** WASD se detecta por la posicion fisica de la tecla, no por la
 letra.
@@ -127,9 +127,9 @@ controles. `KeyCode::KeyW` significa "la tecla que esta donde la W", no la letra
 
 ---
 
-## v0.1.2 â€” Primer cubo
+## v0.1.2 — Primer cubo
 
-### 2026-10-04 â€” `bytemuck` para convertir structs a bytes
+### 2026-10-04 — `bytemuck` para convertir structs a bytes
 
 **Decision.** Anadimos `bytemuck` (con `derive`) y marcamos `Vertex`/`Uniforms`
 como `Pod` con `#[repr(C)]`.
@@ -138,7 +138,7 @@ como `Pod` con `#[repr(C)]`.
 bytes. `bytemuck` lo hace sin `unsafe` manual y falla en compilacion si el
 struct tiene padding inesperado. Escribirlo a mano seria mas fragil.
 
-### 2026-10-04 â€” Z-buffer desde el principio
+### 2026-10-04 — Z-buffer desde el principio
 
 **Decision.** El primer pipeline ya incluye una textura de profundidad
 (`Depth32Float`) y `DepthStencilState`.
@@ -147,7 +147,7 @@ struct tiene padding inesperado. Escribirlo a mano seria mas fragil.
 las delanteras y el resultado seria incorrecto. Es mas barato meterlo ahora que
 retrofitearlo cuando ya hay muchos objetos.
 
-### 2026-10-04 â€” Back-face culling desactivado (por ahora)
+### 2026-10-04 — Back-face culling desactivado (por ahora)
 
 **Decision.** `cull_mode: None`; no descartamos caras traseras todavia.
 
@@ -155,7 +155,7 @@ retrofitearlo cuando ya hay muchos objetos.
 (CCW/CW) de los vertices, que es una fuente clasica de errores. Lo activaremos
 al hacer meshing de chunks, donde el ahorro si importa.
 
-### 2026-10-04 â€” MVP en un solo uniform; el renderer es duena del modelo
+### 2026-10-04 — MVP en un solo uniform; el renderer es duena del modelo
 
 **Decision.** El uniform contiene una unica matriz `mvp`. La `App` pasa al
 renderer la `view_projection` de la camara; el renderer la multiplica por su
@@ -168,9 +168,9 @@ un objeto.
 
 ---
 
-## v0.2.0 â€” Primer chunk estatico
+## v0.2.0 — Primer chunk estatico
 
-### 2026-10-04 â€” Bloques como `u8`, chunk de 4096 bytes
+### 2026-10-04 — Bloques como `u8`, chunk de 4096 bytes
 
 **Decision.** Cada bloque es un `enum` con `#[repr(u8)]`; un chunk guarda
 4096 de ellos en un array plano.
@@ -179,7 +179,7 @@ un objeto.
 el minimo razonable y deja claro el coste. En v0.11.0 anadiremos una paleta
 (por si un chunk usa pocos tipos) para bajar de 1 byte/bloque.
 
-### 2026-10-04 â€” Face culling en el mesher (en vez de un cubo por voxel)
+### 2026-10-04 — Face culling en el mesher (en vez de un cubo por voxel)
 
 **Decision.** El mesher no emite los 6 cubos por bloque: solo emite las caras
 que dan al aire.
@@ -189,7 +189,7 @@ descartar caras ocultas es igual de sencillo y reduce la geometria a una
 fraccion (un chunk de terreno pasa de ~147k a ~3.2k triangulos). No tiene
 sentido generar lo que nunca se ve.
 
-### 2026-10-04 â€” Atlas de texturas generado por codigo (sin assets)
+### 2026-10-04 — Atlas de texturas generado por codigo (sin assets)
 
 **Decision.** El atlas (8 tiles de 16x16) se genera por codigo como una rejilla
 con ruido determinista; no cargamos imagenes de disco.
@@ -198,7 +198,7 @@ con ruido determinista; no cargamos imagenes de disco.
 control de versiones como codigo. Cuando haya texturas hechas a mano, se
 sustituira el generador por un cargador de PNG sin cambiar el mesher.
 
-### 2026-10-04 â€” Fuera del chunk = aire
+### 2026-10-04 — Fuera del chunk = aire
 
 **Decision.** `Chunk::get_or_air` devuelve aire para coordenadas fuera del
 chunk, asi que el mesher dibuja la cara exterior.
@@ -206,7 +206,7 @@ chunk, asi que el mesher dibuja la cara exterior.
 **Motivo.** Con un solo chunk es lo correcto y lo mas simple. Cuando haya
 varios chunks (v0.3.1), esta funcion pasara a consultar el chunk vecino.
 
-### 2026-10-04 â€” Terreno de ejemplo deterministico (placeholder)
+### 2026-10-04 — Terreno de ejemplo deterministico (placeholder)
 
 **Decision.** `Chunk::generate_demo` crea una colina con senos/cosenos y un
 arbol. No es generacion procedural "de verdad".
@@ -214,7 +214,7 @@ arbol. No es generacion procedural "de verdad".
 **Motivo.** Meter el ruido Perlin y los biomas es el objetivo de v0.3.0. Este
 placeholder solo asegura que haya algo interesante que mirar y probar en v0.2.0.
 
-### 2026-10-04 â€” `world` depende de `render::mesh::Vertex`
+### 2026-10-04 — `world` depende de `render::mesh::Vertex`
 
 **Decision.** El mesher (en `world`) construye `render::mesh::Vertex` y `mesh`
 es `pub(crate)`.
@@ -226,9 +226,9 @@ consciente.
 
 ---
 
-## v0.3.0 â€” Generacion de terreno
+## v0.3.0 — Generacion de terreno
 
-### 2026-10-04 â€” Ruido Perlin con dos octavas manuales (crate `noise`)
+### 2026-10-04 — Ruido Perlin con dos octavas manuales (crate `noise`)
 
 **Decision.** La altura es `64 + base*20 + detalle*4`, con dos capas Perlin a
 distinta frecuencia (0.010 y 0.045). No usamos `Fbm`.
@@ -237,7 +237,7 @@ distinta frecuencia (0.010 y 0.045). No usamos `Fbm`.
 complejidad de configurar fractales. Es facil de leer y de ajustar. Si mas
 adelante queremos mas octavas, se sustituye sin cambiar la interfaz publica.
 
-### 2026-10-04 â€” El generador es un tipo con semilla
+### 2026-10-04 — El generador es un tipo con semilla
 
 **Decision.** `TerrainGenerator::new(seed)` guarda la semilla y dos `Perlin`.
 
@@ -245,7 +245,7 @@ adelante queremos mas octavas, se sustituye sin cambiar la interfaz publica.
 versionado de generador que pide la guia para v0.5.0: podremos reconstruir el
 generador a partir de `(version, seed)` guardados en el header del mundo.
 
-### 2026-10-04 â€” Altura en `48..96` (dentro de la seccion 3)
+### 2026-10-04 — Altura en `48..96` (dentro de la seccion 3)
 
 **Decision.** La altura queda en `48..96`, con la superficie cerca de `y=64`.
 
@@ -253,7 +253,7 @@ generador a partir de `(version, seed)` guardados en el header del mundo.
 dibujado) y dentro de la seccion 3, que es donde caera la camara. Cuando
 lleguen oceanos/cuevas subiremos el rango.
 
-### 2026-10-04 â€” `generate_demo` se elimina
+### 2026-10-04 — `generate_demo` se elimina
 
 **Decision.** El terreno de ejemplo de v0.2.x se sustituye por el generador
 Perlin; la columna se genera con `TerrainGenerator::generate_column(0, 0)`.
@@ -263,9 +263,9 @@ varias columnas con coordenadas globales, y el mundo empezara a extenderse.
 
 ---
 
-## v0.3.1 â€” Mundo infinito (visual)
+## v0.3.1 — Mundo infinito (visual)
 
-### 2026-10-04 â€” Streaming por columnas disparado por el jugador
+### 2026-10-04 — Streaming por columnas disparado por el jugador
 
 **Decision.** El `Renderer` guarda el centro de la rejilla cargada; cuando el
 jugador cruza a otra columna (`posicion / 16`), regenera toda la rejilla 3x3.
@@ -275,7 +275,7 @@ Sin cache todavia.
 complicar el renderer con un pool de meshes y generacion en hilos (eso es
 v0.5.1). Al alejarse, el terreno se genera en la nueva zona.
 
-### 2026-10-04 â€” Posiciones en coordenadas de mundo (sin modelo por columna)
+### 2026-10-04 — Posiciones en coordenadas de mundo (sin modelo por columna)
 
 **Decision.** El mesher recibe un `origin` y escribe las posiciones ya en
 coordenadas de mundo; todas las secciones comparten la misma matriz `view_projection`.
@@ -284,7 +284,7 @@ coordenadas de mundo; todas las secciones comparten la misma matriz `view_projec
 instancias o reescribir uniform por draw). Para voxeles, que apenas se mueven,
 posicionar la geometria en el mundo es lo mas simple y rapido.
 
-### 2026-10-04 â€” Rejilla 3x3 con regeneracion completa (sin cache)
+### 2026-10-04 — Rejilla 3x3 con regeneracion completa (sin cache)
 
 **Decision.** Al cambiar de columna se descartan las mallas antiguas y se
 regeneran las 9. No hay cache de columnas ya generadas.
@@ -295,9 +295,9 @@ codigo legible.
 
 ---
 
-## v0.3.2 â€” Colisiones basicas
+## v0.3.2 — Colisiones basicas
 
-### 2026-10-04 â€” El controlador recibe `is_solid` como parametro
+### 2026-10-04 — El controlador recibe `is_solid` como parametro
 
 **Decision.** `PlayerController::update(..., is_solid: impl Fn(Vec3) -> bool, ...)`
 recibe la consulta del mundo en cada llamada, en lugar de guardarla dentro.
@@ -307,7 +307,7 @@ la `App`. Guardar una closure con captura dentro del controlador obligaria a
 `Box<dyn Fn>` y a perder `Copy`. Pasarla por parametro mantiene el controlador
 trivial, testeable con una funcion plana (`|p| p.y < 4.0`) y sin acoplarlo a wgpu.
 
-### 2026-10-04 â€” Fisica por subpasos (no un solo paso)
+### 2026-10-04 — Fisica por subpasos (no un solo paso)
 
 **Decision.** Al integrar la velocidad vertical dividimos el desplazamiento en
 subpasos de como maximo 0.5 bloques.
@@ -316,7 +316,7 @@ subpasos de como maximo 0.5 bloques.
 por encima de un bloque fino en un solo paso y atravesarlo. Los subpasos lo
 evitan con coste minimo.
 
-### 2026-10-04 â€” Streaming ampliado a 7x7 y "settle" al arrancar
+### 2026-10-04 — Streaming ampliado a 7x7 y "settle" al arrancar
 
 **Decision.** El radio de columnas pasa de 1 (3x3) a 3 (7x7 = 112x112 bloques) y
 la camara se posa sobre el primer bloque solido al arrancar.
@@ -326,18 +326,18 @@ incompatible con andar a ras de suelo (te teletransportabas al regenerar). Un
 radio mayor cubre bastante terreno para caminar. La regeneracion en hilos/cache
 llega en v0.5.1; entonces el radio podra volver a ser pequeno.
 
-### 2026-10-04 â€” Modo vuelo con `F`
+### 2026-10-04 — Modo vuelo con `F`
 
 **Decision.** `F` alterna volar (sin gravedad, Espacio/Shift vertical).
 
 **Motivo.** Muy util para depurar y explorar el mundo mientras las colisiones son
-todavia basicas. Es tambien el embriÃ³n del modo creativo.
+todavia basicas. Es tambien el embrión del modo creativo.
 
 ---
 
-## v0.4.0 â€” Romper y colocar bloques
+## v0.4.0 — Romper y colocar bloques
 
-### 2026-10-04 â€” Raycast con el algoritmo de Amanatides-Woo (DDA 3D)
+### 2026-10-04 — Raycast con el algoritmo de Amanatides-Woo (DDA 3D)
 
 **Decision.** Recorremos la rejilla de voxeles eje a eje (DDA) en vez de dar
 pasitos finos muestreando puntos.
@@ -346,7 +346,7 @@ pasitos finos muestreando puntos.
 saltarse ninguna ni repetir), es rapido y devuelve con precision la cara de
 entrada. Un muestreo a pasos fijos puede atravesar esquinas y es mas lento.
 
-### 2026-10-04 â€” El raycast y el mesher reciben `is_solid`/consultan la Column
+### 2026-10-04 — El raycast y el mesher reciben `is_solid`/consultan la Column
 
 **Decision.** La funcion `raycast` recibe una closure `is_solid`; el `Renderer`
 la construye para el chunk central.
@@ -354,7 +354,7 @@ la construye para el chunk central.
 **Motivo.** Igual que en el controlador: mantiene el algoritmo puro y testeable
 con un "suelo" plano, sin depender del mundo ni de wgpu.
 
-### 2026-10-04 â€” Solo se edita el chunk central
+### 2026-10-04 — Solo se edita el chunk central
 
 **Decision.** Las 48 columnas vecinas son de solo lectura; el jugador solo puede
 romper/colocar en su chunk central (16x16).
@@ -364,7 +364,7 @@ exige que el `Renderer` guarde todas las columnas y sus mallas indexadas por
 seccion (v0.5.1, con el pool de chunks). El chunk central siempre esta donde el
 jugador, que es donde va a tocar.
 
-### 2026-10-04 â€” Resaltado con `LineList` y color plano (sin textura)
+### 2026-10-04 — Resaltado con `LineList` y color plano (sin textura)
 
 **Decision.** El bloque apuntado se dibuja como 12 aristas (`PrimitiveTopology::
 LineList`) con un pipeline propio que comparte el bind group de la escena
@@ -375,7 +375,7 @@ una celda. Compartir el layout del pipeline evita duplicar el uniform y el bind
 group. `depth_write_enabled=false` + un poco de *bias* evitan el z-fighting con
 las caras del propio bloque.
 
-### 2026-10-04 â€” Regenerar solo la seccion afectada
+### 2026-10-04 — Regenerar solo la seccion afectada
 
 **Decision.** Al romper/colocar, `mesh_section` regenera unicamente la seccion
 editada (y la contigua si el bloque estaba en su borde).
@@ -385,9 +385,9 @@ editada (y la contigua si el bloque estaba en su borde).
 
 ---
 
-## v0.4.1 â€” Greedy meshing
+## v0.4.1 — Greedy meshing
 
-### 2026-10-04 â€” Greedy propio (en vez de la crate `block-mesh`)
+### 2026-10-04 — Greedy propio (en vez de la crate `block-mesh`)
 
 **Decision.** Implementamos el greedy meshing nosotros en `world/greedy.rs` en
 lugar de integrar la crate `block-mesh`.
@@ -396,7 +396,7 @@ lugar de integrar la crate `block-mesh`.
 geometria a una API externa. `mesh_column` (naive) se mantiene como referencia y
 para comparar en tests.
 
-### 2026-10-04 â€” La mascara del plano es dinamica (16 x v_hi)
+### 2026-10-04 — La mascara del plano es dinamica (16 x v_hi)
 
 **Decision.** En lugar de una mascara fija 16x16, cada plano usa una mascara de
 16 x `v_hi`, donde `v_hi` es el alto del plano (16 por seccion, 384 si es una
@@ -406,7 +406,7 @@ columna entera).
 completa; una mascara 16x16 se salia de rango. Dimensionarla segun el rango
 mantiene el algoritmo general (sirve para seccion y para columna entera).
 
-### 2026-10-04 â€” No se fusionan caras de distinto `(bloque, cara)`
+### 2026-10-04 — No se fusionan caras de distinto `(bloque, cara)`
 
 **Decision.** La clave de fusion es `(block_id, face)`, no solo el tile.
 
@@ -414,7 +414,7 @@ mantiene el algoritmo general (sirve para seccion y para columna entera).
 dificultaria el raycast/edicion despues. Con `(bloque, cara)` el resultado sigue
 siendo por-material, que es lo correcto.
 
-### 2026-10-04 â€” Resultado medido
+### 2026-10-04 — Resultado medido
 
 **Dato.** Rejilla 7x7: las 48 columnas vecinas pasan a ~1344 triangulos (antes,
 decenas de miles). Una capa plana de 16x16: de 256 caras (512 triangulos) a 1
@@ -426,9 +426,9 @@ cuando lleguen mas bloques. No es un fallo de geometria, es del atlas.
 
 ---
 
-## v0.5.0 â€” Versionado y guardado del mundo
+## v0.5.0 — Versionado y guardado del mundo
 
-### 2026-10-04 â€” bincode 2 con derive nativo (no serde)
+### 2026-10-04 — bincode 2 con derive nativo (no serde)
 
 **Decision.** Usamos `bincode 2` con sus derives `Encode`/`Decode` en lugar de
 serde.
@@ -437,7 +437,7 @@ serde.
 por serde. Ademas, la version 3.0.0 de bincode en crates.io es una broma (solo
 contiene un `compile_error!`); fijamos la 2.x estable.
 
-### 2026-10-04 â€” Tres versiones distintas y desacopladas
+### 2026-10-04 — Tres versiones distintas y desacopladas
 
 **Decision.** `FORMAT_VERSION` (layout binario), `GENERATOR_VERSION` (algoritmo
 de terreno) y `ENGINE_VERSION` (motor) se guardan por separado en el header, y
@@ -447,7 +447,7 @@ cada `ChunkRecord` lleva su propia `format_version`.
 el generador cambie, y viceversa. Versionar por chunk permite migrar solo los
 que hagan falta.
 
-### 2026-10-04 â€” Guardar el chunk completo, no un diff
+### 2026-10-04 — Guardar el chunk completo, no un diff
 
 **Decision.** Cada `ChunkRecord` guarda los 4096 bloques enteros (4 KB), no solo
 lo que cambio.
@@ -456,7 +456,7 @@ lo que cambio.
 formato y la migracion. El ahorro de espacio llega en v0.5.2 (LZ4) y v0.11.0
 (paleta).
 
-### 2026-10-04 â€” Solo se persiste el chunk central
+### 2026-10-04 — Solo se persiste el chunk central
 
 **Decision.** En v0.5.0 se guarda/carga unicamente el chunk central (la seccion
 de terreno) porque es el unico editable.
@@ -466,7 +466,7 @@ memoria (v0.5.1) y se pueda editar en cualquier columna, se guardaran todos los
 chunks modificados. El formato (`HashMap<ChunkPos, ChunkRecord>`) ya lo soporta
 sin cambios.
 
-### 2026-10-04 â€” `exiting` como red de seguridad, con flag anti-doble-guardado
+### 2026-10-04 — `exiting` como red de seguridad, con flag anti-doble-guardado
 
 **Decision.** Se guarda en `CloseRequested`/Escape y tambien en `exiting`, pero
 con un flag `world_saved` para no escribir dos veces.
@@ -477,9 +477,9 @@ evita la doble escritura que vimos en la prueba.
 
 ---
 
-## v0.5.1 â€” Streaming de chunks
+## v0.5.1 — Streaming de chunks
 
-### 2026-10-04 â€” `World` con cache de columnas y streaming por radio
+### 2026-10-04 — `World` con cache de columnas y streaming por radio
 
 **Decision.** Introducimos `world::store::World`: `HashMap<ChunkPos, Column>`
 con las columnas cargadas, mas `modified: HashMap<ChunkPos, ChunkRecord>`. El
@@ -490,7 +490,7 @@ nada que ya este cargado.
 se regenera todo; (2) las columnas existen, asi que el mesher puede consultar
 vecinos. Las ediciones se guardan en `modified`, que tambien hace de cache.
 
-### 2026-10-04 â€” El mesher recibe una consulta de bloque (`greedy_section_query`)
+### 2026-10-04 — El mesher recibe una consulta de bloque (`greedy_section_query`)
 
 **Decision.** `greedy_range`/`mask_value` reciben un `query(x,y,z) -> Block` en
 coordenadas locales, **pero que puede mirar fuera** de la columna.
@@ -499,7 +499,7 @@ coordenadas locales, **pero que puede mirar fuera** de la columna.
 en el borde, la consulta devuelve el bloque del chunk vecino y oculta la cara si
 tambien es solido. Mantiene el greedy puro y testeable.
 
-### 2026-10-04 â€” El renderer cachea mallas por (columna, seccion)
+### 2026-10-04 — El renderer cachea mallas por (columna, seccion)
 
 **Decision.** `meshes: HashMap<ChunkPos, [Option<Mesh>; 24]>`. Al entrar/salir
 columnas se construyen/liberan solo esas mallas.
@@ -508,7 +508,7 @@ columnas se construyen/liberan solo esas mallas.
 coste solo aparece al cruzar de chunk. De paso, editar un bloque regenera la
 columna y sus 4 vecinas (su cara de borde tambien cambia).
 
-### 2026-10-04 â€” Generacion sincrona todavia
+### 2026-10-04 — Generacion sincrona todavia
 
 **Decision.** La generacion de columnas sigue en el hilo principal; no usamos
 `rayon` aun.
@@ -520,9 +520,9 @@ mayor; la estructura (`StreamChange`) ya esta preparada.
 
 ---
 
-## v0.5.2 â€” Compresion de chunks (LZ4)
+## v0.5.2 — Compresion de chunks (LZ4)
 
-### 2026-10-04 â€” LZ4 (`lz4_flex`) en el propio `ChunkRecord`, formato v2
+### 2026-10-04 — LZ4 (`lz4_flex`) en el propio `ChunkRecord`, formato v2
 
 **Decision.** Los 4096 bloques se guardan comprimidos con LZ4 dentro del
 `ChunkRecord` (`compressed: bool` + `blocks`), y `FORMAT_VERSION` sube a 2.
@@ -534,7 +534,7 @@ y leer uno sin descomprimir los demas.
 **Medida.** Un chunk de terreno real: **4096 -> 31 bytes (x132)**. El aire y las
 zonas uniformes comprimen casi a cero.
 
-### 2026-10-04 â€” Migrador v1 -> v2 incluido en la cadena por defecto
+### 2026-10-04 — Migrador v1 -> v2 incluido en la cadena por defecto
 
 **Decision.** `MigrationChain::with_builtins()` registra `V1ToV2`, que comprime
 los chunks que vienen sin comprimir.
@@ -551,9 +551,9 @@ implementamos, pero queda anotado para el futuro.
 
 ---
 
-## v0.6.0 â€” Iluminacion basica
+## v0.6.0 — Iluminacion basica
 
-### 2026-10-04 â€” Skylight "columnar" simple, no flood-fill 3D todavia
+### 2026-10-04 — Skylight "columnar" simple, no flood-fill 3D todavia
 
 **Decision.** `Column::compute_skylight` marca 15 las celdas a cielo abierto
 (por encima de la primera cosa solida de su columna vertical) y 0 el resto. No
@@ -564,17 +564,17 @@ subsuelo oscuro. El flood fill 3D (que iluminaria cuevas cercanas a la
 superficie y suavizaria bordes) es v0.6.1/v0.6.2; el metodo esta aislado para
 sustituirlo sin tocar el mesher ni el shader.
 
-### 2026-10-04 â€” Luz por vertice, normalizada 0..1
+### 2026-10-04 — Luz por vertice, normalizada 0..1
 
 **Decision.** `Vertex` gana `light: f32` (0..1). El mesher la calcula desde la
 celda de aire frente a la cara y la incluye en `FaceKey` (para no fusionar caras
 con distinta luz). El shader aplica `ambient + (1-ambient)*light`.
 
 **Motivo.** Iluminacion barata (sin lighting de pantalla), suave entre caras por
-interpolacion, y sin coste de memoria por bloque en la GPU. El mÃ­nimo ambiental
+interpolacion, y sin coste de memoria por bloque en la GPU. El mínimo ambiental
 (0.15) evita que la oscuridad deje zonas ilegibles.
 
-### 2026-10-04 â€” La luz se recomputa al editar
+### 2026-10-04 — La luz se recomputa al editar
 
 **Decision.** `World::set_block` recalcula la skylight de la columna editada.
 
@@ -582,7 +582,7 @@ interpolacion, y sin coste de memoria por bloque en la GPU. El mÃ­nimo ambient
 columna (16x16x384) es barato. La propagacion incremental (solo lo afectado) es
 v0.12.1; por ahora recomputar la columna entera es correcto y simple.
 
-### 2026-10-04 â€” Memoria de la luz: 1 byte por celda (de momento)
+### 2026-10-04 — Memoria de la luz: 1 byte por celda (de momento)
 
 **Decision.** La luz se guarda como `Vec<u8>` de 16x16x384 = ~98 KB por columna.
 
@@ -591,9 +591,9 @@ pasara a 4 bits por celda (mitad) o a una textura de luz.
 
 ---
 
-## v0.6.1 â€” Block light (antorchas)
+## v0.6.1 — Block light (antorchas)
 
-### 2026-10-04 â€” Flood-fill BFS para la luz de bloque
+### 2026-10-04 — Flood-fill BFS para la luz de bloque
 
 **Decision.** `compute_block_light` usa una cola (BFS) desde cada emisor; la luz
 pierde 1 por paso y no atraviesa solidos.
@@ -602,7 +602,7 @@ pierde 1 por paso y no atraviesa solidos.
 primera vez (a diferencia de DFS, que podria fijar un nivel bajo antes de
 encontrar un camino mejor). Es el algoritmo clasico de luz de Minecraft.
 
-### 2026-10-04 â€” Luz final = max(cielo, bloque)
+### 2026-10-04 — Luz final = max(cielo, bloque)
 
 **Decision.** `combined_light` devuelve el maximo de las dos luces, y es lo que
 se manda al shader.
@@ -610,7 +610,7 @@ se manda al shader.
 **Motivo.** Coincide con Minecraft: una antorcha ilumina una cueva (bloque alto,
 cielo 0), pero no oscurece una zona ya iluminada por el sol.
 
-### 2026-10-04 â€” La antorcha es "visible no solida"
+### 2026-10-04 — La antorcha es "visible no solida"
 
 **Decision.** `Block::is_solid` es false para la antorcha, pero existe
 `is_visible`; el mesher dibuja `is_solid || is_visible` y solo oculta caras
@@ -620,7 +620,7 @@ contra vecinos **solidos**.
 bloques vecinos, pero si debe dibujarse. Separar "solido" (colisiona/oculta) de
 "visible" (se dibuja) es lo que lo hace limpio.
 
-### 2026-10-04 â€” Antorcha como bloque completo (v0.6.1), no cruz de planos
+### 2026-10-04 — Antorcha como bloque completo (v0.6.1), no cruz de planos
 
 **Decision.** De momento la antorcha es un bloque de 1x1x1 con su tile; no una
 cruz de dos planos (el aspecto clasico).
@@ -628,14 +628,14 @@ cruz de dos planos (el aspecto clasico).
 **Motivo.** Mantiene el mesher y el atlas simples. La representacion como cruz
 necesitaria geometria no cubica y un pase de transparencia. Queda para pulido.
 
-### 2026-10-04 â€” Modo demo por variable de entorno
+### 2026-10-04 — Modo demo por variable de entorno
 
 **Decision.** `SOLARIA_DEMO=1` coloca antorchas cerca del jugador al arrancar.
 
 **Motivo.** Permite capturar el efecto de la luz sin interactuar (yo no puedo
 hacer click en la app). No afecta al juego normal si la variable no esta.
 
-### 2026-10-04 (v0.6.2) â€” La antorcha se dibuja como cruz de dos planos, no cubo
+### 2026-10-04 (v0.6.2) — La antorcha se dibuja como cruz de dos planos, no cubo
 
 **Decision.** El mesher deja de emitir el cubo de 6 caras para `Block::Torch` y
 emite **dos quads verticales cruzados** (planos `X = centro` y `Z = centro` del
@@ -653,7 +653,7 @@ dos caras emitiendose una sola vez.
 sombra (v0.6.1). (b) Emitir los planos como caras dobles explicitas: innecesario
 sin culling.
 
-### 2026-10-04 (v0.6.2) â€” El raycast golpea bloques visibles no solidos
+### 2026-10-04 (v0.6.2) — El raycast golpea bloques visibles no solidos
 
 **Decision.** El predicado del raycast pasa de `is_solid` a `is_solid ||
 is_visible` (en `Renderer::raycast`). El algoritmo ya no habla de "solido": es
@@ -666,10 +666,10 @@ mantiene la cara de entrada para colocar el bloque nuevo al lado.
 **Consecuencia.** La antorcha tambien se resalta con el wireframe (el resaltado
 usa el mismo `RayHit`).
 
-### 2026-10-04 (v0.6.2) â€” Pendiente: palo 3D y antorcha de pared
+### 2026-10-04 (v0.6.2) — Pendiente: palo 3D y antorcha de pared
 
 **Decision (para una version posterior).** El `.bbmodel` de Blockbench tiene el
-palo como **cubo** `7,0,7â†’9,10,9` ademas de los dos planos. En v0.6.2 solo se
+palo como **cubo** `7,0,7→9,10,9` ademas de los dos planos. En v0.6.2 solo se
 emiten los dos planos (el palo va dibujado dentro de la textura). Tampoco hay
 aun **antorcha de pared** (inclinada 22.5 grados sobre una cara vertical).
 
@@ -677,7 +677,7 @@ aun **antorcha de pared** (inclinada 22.5 grados sobre una cara vertical).
 que separar la textura de la llama de la del palo; es mas limpio hacerlo en una
 version dedicada al modelo completo, junto con la orientacion en pared.
 
-### 2026-10-04 (v0.6.3) â€” Version de consolidacion, no de features
+### 2026-10-04 (v0.6.3) — Version de consolidacion, no de features
 
 **Decision.** Antes de seguir avanzando por el roadmap (biomas, cuevas,
 gameplay), dedicamos una version a reforzar calidad: tests, documentacion de
@@ -698,7 +698,7 @@ cero warnings.
 (es geometria del jugador) y gana tests. La escena demo se extrae a
 `engine::demo`. Nuevo `ARCHITECTURE.md`.
 
-### 2026-10-04 (v0.6.3) â€” El atlas procedural tambien hace cutout
+### 2026-10-04 (v0.6.3) — El atlas procedural tambien hace cutout
 
 **Decision.** El `build_pixels` (fallback cuando no existe `assets/atlas.png`)
 genera el tile de la antorcha con **fondo transparente** (alfa 0), igual que el
@@ -712,7 +712,7 @@ bug que resolvimos en v0.6.2 para el atlas real). Se detecto al escribir el test
 **Consecuencia.** `tile_color` pasa a devolver RGBA en lugar de RGB. Nuevos
 tests: transparencia del tile 8 y que las capas del atlas no mezclan vecinos.
 
-### 2026-10-04 (v0.6.3) â€” Relacion con la guia: stack propio y desfase de versiones
+### 2026-10-04 (v0.6.3) — Relacion con la guia: stack propio y desfase de versiones
 
 **Decision.** Registramos explicitamente la relacion entre este proyecto y la
 guia de referencia (guia iterativa de motor de voxeles) para que no se pierda:
@@ -734,7 +734,7 @@ guia de referencia (guia iterativa de motor de voxeles) para que no se pierda:
 roadmap, para decidir con criterio si se prioriza el ciclo dia/noche (hueco con
 la guia) o el pulido del modelo (palo 3D / antorcha de pared).
 
-### 2026-10-04 (v0.6.4) â€” Ciclo dia/noche con luz de cielo y de bloque separadas
+### 2026-10-04 (v0.6.4) — Ciclo dia/noche con luz de cielo y de bloque separadas
 
 **Decision.** Anadimos `scene::DayCycle` (hora del mundo) y separamos la luz del
 vertice en **`sky`** (cielo) y **`block`** (antorchas). El shader dibuja
@@ -756,7 +756,7 @@ estrecha a proposito (evita un rosa desaturado a media manana). `Renderer`
 gana `set_environment` y `set_blocks` (aplicar muchos bloques en un lote).
 `SOLARIA_TIME` fija la hora de las capturas.
 
-### 2026-10-04 (v0.6.4) â€” `Renderer::set_blocks` para editar en lote
+### 2026-10-04 (v0.6.4) — `Renderer::set_blocks` para editar en lote
 
 **Decision.** Nuevo metodo para aplicar **muchos** cambios de bloque y regenerar
 las mallas afectadas **una sola vez**, en lugar de una vez por bloque.
@@ -768,7 +768,7 @@ Con el lote baja a menos de un segundo.
 **Consecuencia.** `demo::build` reune las ediciones en un `Vec` y llama a
 `set_blocks` una vez.
 
-### 2026-10-04 (v0.6.5) â€” Colision horizontal del jugador
+### 2026-10-04 (v0.6.5) — Colision horizontal del jugador
 
 **Decision.** El movimiento horizontal deja de ser `Camera::walk` (sin colision)
 y pasa por `PlayerController::move_horizontal`: el jugador es una **caja** (radio
@@ -790,7 +790,7 @@ nuevos (pared, deslizamiento, espacio libre, no chocar con el suelo). Demo
 `SOLARIA_COLLIDE=1` empuja al jugador contra un muro para verificar en captura
 que se detiene delante (z=18.37 con el muro en 18).
 
-### 2026-10-05 (v0.7.0) â€” Biomas con ruido Worley
+### 2026-10-05 (v0.7.0) — Biomas con ruido Worley
 
 **Decision.** El generador reparte el mundo en tres biomas (desierto, bosque,
 nieve) con un ruido **Worley** (cellular) de baja frecuencia (`0.02`, celdas de
@@ -813,7 +813,7 @@ sube a 1 -> 2 (cambia la generacion). Los mundos guardados siguen cargando: los
 bloques se guardan por id y `Snow` es un id nuevo sin colision. `TILES` pasa de
 9 a 10; el tile 9 ya cabia en el atlas 64x48.
 
-### 2026-10-05 (v0.7.1) â€” Altura y bioma por bloque (terreno suave)
+### 2026-10-05 (v0.7.1) — Altura y bioma por bloque (terreno suave)
 
 **Decision.** `generate_column` calcula `height(world_x + x, world_z + z)` y
 `biome_at(world_x + x, world_z + z)` **para cada bloque** de la columna, en
@@ -833,7 +833,7 @@ suavizaria dentro del chunk pero no arreglaria los saltos entre chunks vecinos.
 (b) Subir la frecuencia del ruido: no elimina las mesetas, solo las hace mas
 pequenas. La causa era el muestreo, no la escala.
 
-**Nota.** El bioma tambien pasa a ser por bloque. En la practica Worley varÃ­a
+**Nota.** El bioma tambien pasa a ser por bloque. En la practica Worley varía
 lento (celdas de ~50 bloques), asi que el cambio apenas se nota, pero es
 coherente: cada bloque pregunta su propio bioma.
 
@@ -847,7 +847,7 @@ bucle interno. Los tests siguen verdes (98). `GENERATOR_VERSION = 3`; los mundos
 v3 se reproducen igual, los v2 conservan sus ediciones guardadas (los bloques se
 guardan por id).
 
-### 2026-10-05 (v0.7.2) â€” Fisica vertical por huella + auto-escalon
+### 2026-10-05 (v0.7.2) — Fisica vertical por huella + auto-escalon
 
 **Decision.** La fisica vertical (`PlayerController::update`) y el `settle` dejan
 de sondear un unico punto (el centro de los pies) y pasan a mirar la **huella
@@ -885,7 +885,7 @@ v0.7.1 habia asignado a las cuevas: las **cuevas** pasan a **v0.7.3** y los
 calendario. `GENERATOR_VERSION` **no** cambia (la generacion de terreno es
 identica; esto es fisica).
 
-### 2026-10-05 (v0.7.3) â€” Re-mesheo de vecinas al hacer streaming
+### 2026-10-05 (v0.7.3) — Re-mesheo de vecinas al hacer streaming
 
 **Decision.** Al cargar o descargar columnas por streaming, ademas de meshear las
 que entran/salen, se **reconstruyen las mallas de sus 4-vecinas** ya cargadas
@@ -922,7 +922,7 @@ una antorcha se habria saltado (bug latente; hay test). 103 tests.
 **Desplazamiento de roadmap.** Cuevas pasa a **v0.7.4** y oceanos a **v0.7.5**.
 `GENERATOR_VERSION` sigue en 3 (el terreno no cambia).
 
-### 2026-10-05 (v0.7.4) â€” Rendimiento, niebla y luz que cruza chunks
+### 2026-10-05 (v0.7.4) — Rendimiento, niebla y luz que cruza chunks
 
 **Decision.** Cuatro cambios de renderizado/iluminacion que estaban anotados como
 "limitaciones":
@@ -961,7 +961,7 @@ donde si habra techos; se hara alli, junto con la propagacion entre chunks.
 **Desplazamiento de roadmap.** Cuevas pasa a **v0.7.5** y oceanos a **v0.7.6**.
 `GENERATOR_VERSION` sigue en 3.
 
-### 2026-10-05 (v0.7.5) â€” Cuevas + luz de cielo lateral
+### 2026-10-05 (v0.7.5) — Cuevas + luz de cielo lateral
 
 **Decision.** El hito `v0.7.5` de la guia: **cuevas** con **ruido Perlin 3D** y
 umbral. Y la deuda que v0.7.4 dejo anotada: **luz de cielo con propagacion
@@ -1002,7 +1002,7 @@ benchmark. 114 tests.
 **Sin desplazamiento de roadmap.** A diferencia de las ultimas versiones, este SI
 era el hito `v0.7.5`: **oceanos** sigue en **v0.7.6**.
 
-### 2026-10-05 (v0.7.6) â€” Optimizacion del streaming (fin de los tirones de FPS)
+### 2026-10-05 (v0.7.6) — Optimizacion del streaming (fin de los tirones de FPS)
 
 **Decision.** Eliminar el tiron de FPS al descubrir chunks, **midiendo** donde se
 iba el frame antes de tocar nada (un benchmark que simula un cruce de chunk):
@@ -1039,7 +1039,7 @@ evidencia.
 
 **Alternativas descartadas.** (a) Mover generacion/meshing a hilos: la solucion
 "de libro", pero exige compartir el `World` y subir mallas desde hilos; mas
-maquinaria de la necesaria ahora. (b) Bajar el radio de carga: bajarÃ­a la
+maquinaria de la necesaria ahora. (b) Bajar el radio de carga: bajaría la
 calidad. (c) Bajar el presupuesto de meshing: pop-in visible; 6 ms es el punto
 donde no se nota.
 
@@ -1051,7 +1051,7 @@ tests. `GENERATOR_VERSION` sigue en 4.
 reservaba para oceanos: **oceanos pasa a v0.7.7**. No se adelanta nada; solo el
 arreglo que pidio el usuario tiene su propia version.
 
-### 2026-10-05 (v0.7.7) â€” Texturas de tierra con grano fino (referencia Luanti)
+### 2026-10-05 (v0.7.7) — Texturas de tierra con grano fino (referencia Luanti)
 
 **Decision.** Redibujar el **dirt** (tile 2) y el **lateral de hierba** (tile 1)
 del atlas como **grano fino de bajo contraste**, manteniendo **nuestra paleta**
@@ -1062,14 +1062,14 @@ procedural** (`atlas.rs`) se alinea con el mismo grano.
 (oscuro `78,52,38` vs claro `166,124,86`) agrupados en **manchas grandes**. Al
 mirar como lo resuelve **Luanti/Minetest** (texturas 16x16, `grass_side`
 superpuesta sobre `dirt`, upscaling nearest): su tierra es un marron casi uniforme
-con **grano por pÃ­xel** y muy pocos tonos extremos. Reproducimos esa estructura
+con **grano por píxel** y muy pocos tonos extremos. Reproducimos esa estructura
 con nuestros colores: se **comprime el contraste** (los tonos extremos pasan a ser
-~5% de los pÃ­xeles) y se **reparte por pÃ­xel** con un hash determinista, en vez de
+~5% de los píxeles) y se **reparte por píxel** con un hash determinista, en vez de
 en bloques. La franja de hierba del lateral pasa a tener un **borde irregular**.
 
 **Alternativas descartadas.** (a) Cambiar la paleta a la de Minetest: la peticion
 era mejorar **con nuestra paleta**. (b) Solo bajar la opacidad/contraste global:
-aplana el relieve y pierde textura; el grano por pÃ­xel mantiene el detalle.
+aplana el relieve y pierde textura; el grano por píxel mantiene el detalle.
 (c) Textura mas grande (32x32): el motor y el atlas son de 16x16.
 
 **Consecuencia.** `assets/atlas.png` redibujado (dirt + grass side; antorcha y
@@ -1080,7 +1080,7 @@ color. 115 tests. `GENERATOR_VERSION` no cambia.
 **Roadmap.** **Oceanos pasa a v0.7.8** (la optimizacion de v0.7.6 ya habia corrido
 el numero).
 
-### 2026-10-05 (v0.7.8) â€” Oceanos (agua translucida, playas y nado)
+### 2026-10-05 (v0.7.8) — Oceanos (agua translucida, playas y nado)
 
 **Decision.** Hito `v0.7.x` de la guia: **oceanos**. Bloque **`Water`** (id 9,
 tile 10), generacion de mares/lagos, playas de arena, **pase de transparencia** y
@@ -1122,7 +1122,7 @@ renderer (opaco + agua); `ScenePipeline::water_pipeline`; `Renderer::is_water_at
 parametro `in_water` en `PlayerController::update`. Demo `SOLARIA_OCEAN=1`. 117
 tests.
 
-### 2026-10-05 (v0.7.9) â€” Arboles, hojas transparentes y texturas de madera
+### 2026-10-05 (v0.7.9) — Arboles, hojas transparentes y texturas de madera
 
 **Decision.** Cerrar la **Etapa 1** con lo que faltaba: **vegetacion**
 (arboles). Ademas, mejorar las texturas de **tronco/extremo/tablones** y hacer las
@@ -1157,7 +1157,7 @@ tile 7 con alfa 0. 118 tests. Demo de arboles verificada en captura.
 verdad. Siguiente: **Etapa 2 (gameplay, v0.8.x)**: hotbar/inventario, crafteo,
 mobs y **guardado completo** (posicion del jugador).
 
-### 2026-10-05 (v0.8.0) â€” Hotbar, inventario y guardado de posicion (Etapa 2)
+### 2026-10-05 (v0.8.0) — Hotbar, inventario y guardado de posicion (Etapa 2)
 
 **Decision.** Empezar la **Etapa 2 (gameplay)** con: **hotbar** de 9 ranuras,
 **inventario** desplegable (`E`) y **guardado completo de la posicion** del
@@ -1193,7 +1193,7 @@ compatible de v2 (`WorldSaveV2`). 123 tests.
 **Pendiente (Etapa 2).** **Crafteo** (rejilla + recetas; la segunda referencia del
 usuario) y **mobs**. El crafteo reusara `render::ui`.
 
-### 2026-10-05 (v0.8.1) â€” Texturas cartoon y hotbar fiel a la referencia D
+### 2026-10-05 (v0.8.1) — Texturas cartoon y hotbar fiel a la referencia D
 
 **Decision.** Reestilizado visual completo: (1) los 12 tiles del atlas se
 **repintaron en LibreSprite** con la paleta "Solaria Cartoon" (3 tonos cercanos
@@ -1224,7 +1224,7 @@ la ventana no llega a asentarse (el foco lo tiene otro proceso y
 `SetForegroundWindow` falla); con espera larga la UI aparece siempre. No es bug
 del juego (quads y config verificados): es entorno de captura.
 
-### 2026-10-05 (v0.8.2) â€” Mesa de crafteo funcional estilo Minecraft
+### 2026-10-05 (v0.8.2) — Mesa de crafteo funcional estilo Minecraft
 
 **Decision.** Mesa de crafteo completa con nuestra hotbar D: nuevo
 `Block::CraftingTable` (id 11; tiles 12 lateral / 13 tapa; atlas 64x64), click
@@ -1242,7 +1242,7 @@ entrada: los tablones salen de ITEMS (se craftean) y entra la mesa.
 estado y arte; el modelo sin-mano (inventario -> primera celda libre, celda ->
 limpiar, resultado -> tomar) es simple y testeable. (b) Panel bitmap propio
 para la ventana: las ranuras D ya se auto-enmarcan; se reutiliza SLOT_REGION y
-solo se aÃ±ade la region ARROW en el hueco libre de `gui.png`. (c) Abrir la mesa
+solo se añade la region ARROW en el hueco libre de `gui.png`. (c) Abrir la mesa
 tambien con `E`: `E` es del inventario; la mesa se abre/cierra con click
 derecho, `E` y Escape.
 
@@ -1251,7 +1251,7 @@ derecho, `E` y Escape.
 entre dibujo y clic. Demo `SOLARIA_CRAFT=1`. El crafteo reusara esto para mas
 recetas; los conteos llegaran con los drops (pendientes de la guia).
 
-### 2026-10-05 (v0.8.3) â€” Segunda pasada de texturas: analisis MC/Luanti + dim
+### 2026-10-05 (v0.8.3) — Segunda pasada de texturas: analisis MC/Luanti + dim
 
 **Decision.** Repintar 8 tiles con criterio Minecraft/Luanti (16x16, luz
 cenital, 3-4 valores, formas de 2-4px, sin ruido de 1px ni negros): tierra e
@@ -1268,7 +1268,7 @@ mesa. El dim mejora la legibilidad de rejilla y resultado sobre fondos claros.
 
 **Alternativas descartadas.** (a) Clonar pixeles de MC/Luanti: dibujo original
 con la doctrina, no copias. (b) Redimensionar `gui.png` para un panel de
-crafteo bitmap: las ranuras D se auto-enmarcan; solo se aÃ±adio la region DIM
+crafteo bitmap: las ranuras D se auto-enmarcan; solo se añadio la region DIM
 (8x8) en hueco libre.
 
 **Consecuencia.** `atlas::grain` (ruido 2x2 en el fallback para hierba, tierra,
@@ -1282,7 +1282,7 @@ Cielo con dim medido: 120,181,247 -> 86,131,180 (mezcla 51% negro exacta).
 
 
 
-### 2026-10-05 (v0.8.4) â€” Fisica AABB de entidades + simulacion de agua
+### 2026-10-05 (v0.8.4) — Fisica AABB de entidades + simulacion de agua
 
 **Decision.** Abrir dos sistemas de "mecanicas" adaptados a este motor (que
 guarda **1 byte por voxel** con un `enum Block` sin campos, asi que **no** se
@@ -1329,7 +1329,7 @@ charca 16x16 en ~2 ms (~0.02 ms/tick); el objetivo de "1M de bloques activos <
 16 ms" **no** se alcanza con este diseno (sin paralelismo por chunk ni
 almacenamiento compacto). 143 tests.
 
-### 2026-10-05 (v0.8.5) â€” Clima, biomas avanzados, cuevas 3D y acuiferos
+### 2026-10-05 (v0.8.5) — Clima, biomas avanzados, cuevas 3D y acuiferos
 
 **Decision.** Reescribir la generacion del mundo (`GENERATOR_VERSION` 6 -> 7):
 
@@ -1367,7 +1367,7 @@ bloques; `atlas.rs` `TILES` 14 -> 17 (64x80) con tiles 14-16 procedurales;
 153 tests. **Asset pendiente**: `assets/atlas.png` es 64x64 y se ignora (medida
 esperada 64x80) hasta que la IA de diseno lo repinte; mientras, atlas procedural.
 
-### 2026-10-05 (v0.8.6) â€” Lava, obsidiana y texturas de tierras nuevas
+### 2026-10-05 (v0.8.6) — Lava, obsidiana y texturas de tierras nuevas
 
 **Decision.** (1) Pintar en LibreSprite los tiles 14-16 pendientes
 (`CoarseDirt`, `Gravel`, `Podzol`) y crecer el atlas a 64x80. (2) Nuevos bloques
@@ -1393,7 +1393,7 @@ al buffer translucido, nada en agua y flota igual. Demo `SOLARIA_CAVE=1` (busca
 una poza real; si no hay, talla muestra). 155 tests (pozas con suelo, agua que
 no entra en lava).
 
-### 2026-10-05 (v0.8.7) â€” Optimizacion de worldgen (cache 2D, cuevas por densidad) y fluidos
+### 2026-10-05 (v0.8.7) — Optimizacion de worldgen (cache 2D, cuevas por densidad) y fluidos
 
 **Decision.** Optimizar y refinar la generacion sin perder lo de v0.8.6 (lava):
 
@@ -1433,7 +1433,7 @@ sirviendo de filtro rapido de fuentes; la logica general queda en `step_cell`.
 `check_2x2_source`, tests). 159 tests; clippy limpio. Conserva la lava/obsidiana
 de v0.8.6 y sus tests.
 
-### 2026-10-05 (v0.8.8) â€” Agua como liquido continuo (mesher + shader)
+### 2026-10-05 (v0.8.8) — Agua como liquido continuo (mesher + shader)
 
 **Decision.** Sustituir el render del agua por cubos por una **lamina continua**:
 
@@ -1468,7 +1468,7 @@ agua, guarda `start: Instant` y pasa `time`). 161 tests; clippy limpio. El agua
 del oceano (nivel 8) se ve igual que antes; las rampas aparecen en flujos y
 bordes de nivel.
 
-### 2026-10-05 (v0.8.9) â€” Inventario completo (todos los bloques) y antorcha 3D
+### 2026-10-05 (v0.8.9) — Inventario completo (todos los bloques) y antorcha 3D
 
 **Decision.**
 1. **Item system**: `ITEMS` pasa de 9 bloques fijos a la lista **completa** de
@@ -1501,7 +1501,7 @@ actualizados); `water.rs` (`check_2x2_source` y su test). 161 tests; clippy
 limpio. Backend de terreno/agua del prompt anterior (cache de ruido 2D,
 acuiferos, deteccion de equilibrio) ya venia de v0.8.7/v0.8.8.
 
-### 2026-10-05 (v0.8.10) â€” Antorcha corregida para coincidir con el .bbmodel
+### 2026-10-05 (v0.8.10) — Antorcha corregida para coincidir con el .bbmodel
 
 **Decision.** La antorcha se dibuja como el **palo** del modelo, no como una
 cruz plana. El `.bbmodel` tiene tres cubos, pero el analisis de sus texturas (5
@@ -1525,7 +1525,7 @@ aparecerian cuando en el modelo son transparentes.
 3D), helper `emit_box`; tests de conteo actualizados (24 vertices, 72 indices).
 161 tests; clippy limpio. Captura `v0.8.10_antorcha.png` (poste con llama).
 
-### 2026-10-05 (v0.8.11) â€” Agua interactiva y antorcha correcta
+### 2026-10-05 (v0.8.11) — Agua interactiva y antorcha correcta
 
 **Decision.**
 1. **Antorcha**: deshacer el experimento de v0.8.9/v0.8.10. El `.bbmodel` tiene 3
@@ -1555,7 +1555,7 @@ instante (es fuente) y bloquea el acceso al fondo.
 (`surface_height` = nivel/8 * 14/16, tests actualizados). 161 tests; clippy
 limpio. Captura `v0.8.11_oceano.png`.
 
-### 2026-10-05 (v0.8.12) â€” Persistencia v4: columna completa, atomica y validada (auditoria P0)
+### 2026-10-05 (v0.8.12) — Persistencia v4: columna completa, atomica y validada (auditoria P0)
 
 **Decision.** Primera fase de la auditoria maestra (orden obligatorio: primero
 correccion de datos). Se atacan cinco P0 de persistencia:
@@ -1605,7 +1605,7 @@ conocidos**: el estado de fluidos dinamicos (niveles) aun no se persiste (los
 bloques `Water`/`Lava` si); el guardado sigue sincrono en el hilo principal
 (se abordara en la fase de save asincrono).
 
-### 2026-10-05 (v0.8.13) â€” Guardado en segundo plano (auditoria P0: async save)
+### 2026-10-05 (v0.8.13) — Guardado en segundo plano (auditoria P0: async save)
 
 **Decision.** Sacar la serializacion y la E/S de disco del hilo principal:
 
@@ -1638,7 +1638,7 @@ el ultimo estado; se espera.
 dirty sigue en el hilo principal; el mundo guarda mientras el hilo carga el
 `WorldSave` completo en memoria (sin streaming incremental de E/S aun).
 
-### 2026-10-05 (v0.8.14) â€” Streaming de terreno por jobs (auditoria FASE 2)
+### 2026-10-05 (v0.8.14) — Streaming de terreno por jobs (auditoria FASE 2)
 
 **Decision.** Generar las columnas del mundo **fuera del hilo principal**:
 
@@ -1667,7 +1667,7 @@ chunk). Con jobs + revisiones, el frame no paga la generacion.
   (`Box<Column>` en el canal y en `World::columns`). Verificado: con 64 MB de
   pila no fallaba -> era tamano de pila.
 * **Camara cayendo**: `Unloaded = solido` hacia que `settle` posara al jugador en
-  el techo (yâ‰ˆ384) y luego cayera; y esa posicion se guardaba. Se separan las
+  el techo (y≈384) y luego cayera; y esa posicion se guardaba. Se separan las
   consultas (fisica vs posar) y se sanea la posicion al cargar.
 
 **Consecuencia.** `world/streaming.rs` nuevo; `store.rs` (`Arc` generador,
@@ -1679,7 +1679,7 @@ terreno. **Limites**: la fisica aun usa `Unloaded = solido` (puede frenar un
 frame al entrar a un chunk pendiente); la luz sigue siendo reconstruccion global
 en cada cambio de streaming; el meshing sigue en el hilo principal.
 
-### 2026-10-05 (v0.8.15) â€” Luz de bloque incremental (auditoria P0)
+### 2026-10-05 (v0.8.15) — Luz de bloque incremental (auditoria P0)
 
 **Decision.** Editar un bloque ya **no** recalcula la luz de bloque de todo el
 mundo cargado. `World::relight_block(p, new_block)`:
@@ -1711,7 +1711,7 @@ tests; clippy `-D warnings` limpio. **Limite restante**: los cambios de streamin
 siguen llamando al recalculo global de luz de bloque (columnas nuevas con
 antorchas); se acotara despues.
 
-### 2026-10-05 (v0.8.16) â€” Meshing por secciones (auditoria FASE 6, dirty sections)
+### 2026-10-05 (v0.8.16) — Meshing por secciones (auditoria FASE 6, dirty sections)
 
 **Decision.** La cola de (re)meshing pasa de **columna** a **seccion**
 `(ChunkPos, section)`:
@@ -1728,7 +1728,7 @@ antorchas); se acotara despues.
 * Streaming y agua siguen encolando todas las secciones de la columna (el pump
   salta las vacias); `set_blocks` (demo) y `tick_water` usan las nuevas colas.
 
-**Motivo.** El audit pide meshing por **dirty sections** (Â§9.2): no reconstruir
+**Motivo.** El audit pide meshing por **dirty sections** (§9.2): no reconstruir
 una columna entera (ni 9) si solo cambio una seccion. Reduce el coste por edicion
 de ~216 secciones a 1-4.
 
@@ -1744,7 +1744,7 @@ escena (parcela + antorcha) se ve correcta. **Limites**: el meshing CPU sigue en
 el hilo principal (amortizado por el presupuesto del pump); los buffers GPU se
 recrean por seccion (sin pool/reuso aun).
 
-### 2026-10-05 (v0.8.17) â€” Meshing CPU asincrono con revisiones (auditoria FASE 6)
+### 2026-10-05 (v0.8.17) — Meshing CPU asincrono con revisiones (auditoria FASE 6)
 
 **Decision.** El greedy/fluido deja de correr en el hilo principal:
 
@@ -1760,7 +1760,7 @@ recrean por seccion (sin pool/reuso aun).
    **revision** por `(columna, seccion)` y sube a GPU, descartando resultados
    obsoletos. Las secciones vacias se saltan sin snapshot (y limpian su malla).
 
-**Motivo.** El audit (Â§9) pide separar **CPU mesh** (workers) de **GPU upload**
+**Motivo.** El audit (§9) pide separar **CPU mesh** (workers) de **GPU upload**
 (hilo principal) con revisiones y sin re-meshear trabajo viejo.
 
 **Alternativas descartadas.** Pasar closures/`&World` a los workers: no es `Send`
@@ -1774,23 +1774,23 @@ ve correcta, sin stderr; meshing repartido entre frames. **Limites**: los buffer
 GPU se siguen creando por re-mesheo (sin pool/reuso aun); el snapshot se construye
 en el hilo principal (5832 lecturas/job, barato pero no cero); sin LOD/batching.
 
-### 2026-10-05 (v0.8.18) â€” Reuso de buffers GPU (auditoria FASE 6)
+### 2026-10-05 (v0.8.18) — Reuso de buffers GPU (auditoria FASE 6)
 
 **Decision.** Al re-meshear una seccion no se crean/destruyen buffers GPU:
 
 * `Mesh` reserva cada buffer con holgura (`next_power_of_two`) y guarda su
   capacidad; `Mesh::update(device, queue, vertices, indices)`:
-  - si el nuevo tamano cabe â†’ `queue.write_buffer` (sin allocacion);
-  - si no cabe â†’ recrea solo ese buffer con la nueva capacidad.
+  - si el nuevo tamano cabe → `queue.write_buffer` (sin allocacion);
+  - si no cabe → recrea solo ese buffer con la nueva capacidad.
 * `Renderer::poll_meshing` usa `update_mesh` (actualiza la `Mesh` existente de la
   seccion, o la crea si no habia). `Mesh::draw` sale si no hay indices.
 
-**Motivo.** El audit (Â§9.4) pide reutilizar buffers GPU; crear un `Buffer` por
+**Motivo.** El audit (§9.4) pide reutilizar buffers GPU; crear un `Buffer` por
 re-mesheo es churn (allocaciones + descriptors) y ademas se pagaba en cada
 edicion de un bloque.
 
 **Alternativas descartadas.** Arena/ring buffer global: mas complejo y no
-necesario mientras el tamaÃ±o por seccion es acotado; per-section pool con
+necesario mientras el tamaño por seccion es acotado; per-section pool con
 capacidad holgada ya elimina el churn.
 
 **Consecuencia.** `render/mesh.rs` (capacidades + `update`), `renderer.rs`
@@ -1800,7 +1800,7 @@ capacidad holgada ya elimina el churn.
 
 ---
 
-### 2026-10-05 (v0.9.0) â€” Fluido local por columna (auditoria FASE 7, parte 1)
+### 2026-10-05 (v0.9.0) — Fluido local por columna (auditoria FASE 7, parte 1)
 
 **Decision.** El estado del agua deja de ser un `HashMap<[i32; 3], Fluid>`
 global. Los niveles de flujo pasan a la `Column`, empaquetados en **nibbles**
@@ -1838,7 +1838,7 @@ reabrir.
 
 ---
 
-### 2026-10-05 (v0.9.1) â€” Persistencia de fluidos (auditoria FASE 7, parte 2)
+### 2026-10-05 (v0.9.1) — Persistencia de fluidos (auditoria FASE 7, parte 2)
 
 **Decision.** El formato de archivo sube a **v5**: `ChunkRecord` gana el campo
 `fluid` (nivel de flujo por celda, mismo indice `(y,z,x)` que `blocks`,
@@ -1848,7 +1848,7 @@ los espejos posicionales `ChunkRecordV4` y `WorldSaveV4` y el migrador
 todo `Water` vuelve como **fuente**, que es exactamente como se comportaba.
 `apply_record` restaura bloques y niveles de flujo.
 
-**Motivo.** El audit (P1 agua, Â§11.5 / Â§5.6) exige que el agua que fluye
+**Motivo.** El audit (P1 agua, §11.5 / §5.6) exige que el agua que fluye
 sobreviva a cerrar y reabrir. Antes solo vivia en el `HashMap` en memoria (v0.9.0
 lo movio a la columna), asi que al recargar todo el flujo volvia a fuente y el
 mundo "perdia" el nivel real.
@@ -1873,7 +1873,7 @@ cuello de botella: el coste de re-meshear de mas al fluir agua.
 
 ---
 
-### 2026-10-05 (v0.9.2) â€” Remeshing incremental de fluidos (auditoria FASE 7, parte 3)
+### 2026-10-05 (v0.9.2) — Remeshing incremental de fluidos (auditoria FASE 7, parte 3)
 
 **Decision.** `World::tick_water` devuelve `Vec<FluidDirty>` (seccion + marcas de
 borde X/Z de chunk) en vez de `Vec<ChunkPos>`. El renderer encola **solo** la
@@ -1882,7 +1882,7 @@ tambien las secciones correspondientes de la(s) columna(s) vecina(s). La
 simulacion pasa a tener un presupuesto configurable `FluidBudget { cells, ms }`
 (por entorno con `SOLARIA_FLUID_BUDGET_CELLS` / `SOLARIA_FLUID_BUDGET_MS`).
 
-**Motivo.** El audit (Â§11.4) pide no re-meshear el anillo 3x3 completo si solo
+**Motivo.** El audit (§11.4) pide no re-meshear el anillo 3x3 completo si solo
 cambio una celda. El codigo anterior re-mesheaba 9 columnas x 24 secciones por
 cada tick con agua activa; en una cascada se disparaba el coste de meshing. La
 geometria de agua de una seccion lee la celda de arriba (cara superior) y las
@@ -1907,7 +1907,7 @@ vecinas (correcto pero no minimo); no se midio aun el ahorro con benchmark
 
 ---
 
-### 2026-10-05 (v0.9.3) â€” Transparencia ordenada del agua (auditoria FASE 7, parte 4)
+### 2026-10-05 (v0.9.3) — Transparencia ordenada del agua (auditoria FASE 7, parte 4)
 
 **Decision.** El pase translucido del agua deja de iterar el `HashMap` de mallas
 sin orden: cada frame se recogen las secciones con malla de agua que pasan el
@@ -1916,7 +1916,7 @@ allocar por frame), se ordenan de **lejos a cerca** por distancia al centro de l
 seccion a la camara y se dibujan en ese orden. Se mantiene **z-test ON y z-write
 OFF** (ya configurado en `pipeline.rs`).
 
-**Motivo.** El audit (Â§11.5) pide transparencia correcta: el blending alfa es
+**Motivo.** El audit (§11.5) pide transparencia correcta: el blending alfa es
 sensible al orden y el orden de un `HashMap` no esta definido, asi que el agua
 podia componerse de forma inconsistente entre frames/campo de vision. El agua no
 debe escribir z (taparia las caras de agua que tiene detras) pero si consultarlo
@@ -1941,7 +1941,7 @@ cuello de botella: la duplicacion de definiciones de bloque (FASE 9, registry).
 
 ---
 
-### 2026-10-05 (v0.10.0) â€” Registro central de bloques (auditoria FASE 9)
+### 2026-10-05 (v0.10.0) — Registro central de bloques (auditoria FASE 9)
 
 **Decision.** La metadata de los bloques se centraliza en `world/registry.rs`
 (`BlockDefinition` + tabla `BLOCKS` + fachada `BlockRegistry`). `Block` sigue
@@ -1951,7 +1951,7 @@ siendo un `u8` y delega sus consultas (`is_solid`, `is_visible`, `is_liquid`,
 (`TILE_COUNT`); `app.rs` usa `BlockRegistry::items()` en vez de su propio `ITEMS`;
 `Block::from_u8`/`is_known_id` se derivan de `ALL_BLOCKS`.
 
-**Motivo.** El audit (FASE 9, Â§13) pide una definicion central para eliminar la
+**Motivo.** El audit (FASE 9, §13) pide una definicion central para eliminar la
 duplicacion entre `block.rs`, `ITEMS` de `app.rs` y los tiles de `atlas.rs`. Esa
 duplicacion es una fuente real de bugs: anadir un bloque obligaba a tocar el
 `match` de `face_tile`, la lista del inventario y `TILES` por separado, y nada
@@ -1980,7 +1980,7 @@ historicos, coherencia de `RenderKind`); clippy `-D warnings` limpio. **Limite**
 
 ---
 
-### 2026-10-05 (v0.11.0) â€” Memoria: medir por categorias y luz de bloque dispersa (auditoria FASE 10)
+### 2026-10-05 (v0.11.0) — Memoria: medir por categorias y luz de bloque dispersa (auditoria FASE 10)
 
 **Decision.** (1) Se anade `world/memory.rs` (`WorldMemory`) y
 `World::memory_report()`, que miden el mundo cargado por categorias (bloques,
@@ -2024,7 +2024,7 @@ calls y culling con mundo grande (FASE 11).
 
 ---
 
-### 2026-10-05 (v0.12.0) â€” Culling por distancia y metricas de frame (auditoria FASE 11, parte 1)
+### 2026-10-05 (v0.12.0) — Culling por distancia y metricas de frame (auditoria FASE 11, parte 1)
 
 **Decision.** Se anade `FrameStats` (columnas, secciones dibujadas, draw calls,
 triangulos, culls por frustum/distancia) al renderer, y un **culling jerarquico
@@ -2033,14 +2033,14 @@ por distancia** sobre el frustum: una seccion cuya AABB entera queda mas alla de
 del cielo). La distancia se mide punto-AABB (`nearest_dist2`). Los stats se
 muestran en el titulo y, con `SOLARIA_STATS=1`, se trazan por consola.
 
-**Motivo.** El audit (FASE 11, Â§17) pide culling jerarquico (frustum -> distancia
+**Motivo.** El audit (FASE 11, §17) pide culling jerarquico (frustum -> distancia
 -> seccion -> chunk) y **medir antes/despues**. Hasta ahora todo lo que pasaba el
 frustum se dibujaba aunque estuviera totalmente en la niebla.
 
 **Medicion (vista de oceano, radio 4, 81 columnas).**
 ```
 con culling por distancia:  dc=128  tri=36986  cull_frustum=178  cull_dist=164
-sin culling por distancia:  dcâ‰ˆ292  (128 + 164)
+sin culling por distancia:  dc≈292  (128 + 164)
 ```
 ~56% menos draw calls. Los triangulos bajan en la misma proporcion en las
 secciones cullidas.
@@ -2066,7 +2066,7 @@ todavia un timestep fijo (FASE 12).
 
 ---
 
-### 2026-10-05 (v0.13.0) â€” Fisica a timestep fijo y colisiones unificadas (auditoria FASE 12)
+### 2026-10-05 (v0.13.0) — Fisica a timestep fijo y colisiones unificadas (auditoria FASE 12)
 
 **Decision.** (1) La fisica del jugador corre a **timestep fijo**
 (`FIXED_DT = 1/120`) con un acumulador acotado (`MAX_FIXED_STEPS = 8`,
@@ -2110,7 +2110,7 @@ faltan diagnosticos/overlay y benchmarks (FASE 13).
 
 ---
 
-### 2026-10-05 (v0.14.0) â€” Diagnosticos y benchmarks (auditoria FASE 13)
+### 2026-10-05 (v0.14.0) — Diagnosticos y benchmarks (auditoria FASE 13)
 
 **Decision.** (1) Overlay **F3** (o `SOLARIA_STATS=1`) que muestra en el titulo de
 la ventana fps, tiempos de `update`/`render`, draw calls, triangulos, columnas,
@@ -2144,7 +2144,7 @@ cambios de streaming sigue siendo global (~19-20 ms/cruce, ver
 
 ---
 
-### 2026-10-05 (v0.15.0) â€” Migracion v1 real y test de determinismo
+### 2026-10-05 (v0.15.0) — Migracion v1 real y test de determinismo
 
 **Decision.** (1) Se anaden `ChunkRecordV1`/`WorldSaveV1` (formato v1: una
 seccion de 4096 bytes **sin comprimir**, sin el flag `compressed` ni
@@ -2176,7 +2176,7 @@ binaria v1 en disco (se sintetiza en el test); la migracion de v0 no existe
 
 ---
 
-### 2026-10-05 (v0.15.1) â€” Cache de emisores de luz por columna
+### 2026-10-05 (v0.15.1) — Cache de emisores de luz por columna
 
 **Decision.** `Column` guarda una **cache perezosa de emisores** de luz
 (`Vec<(indice local, nivel)>`), construida al primer acceso y **invalidada en
@@ -2213,7 +2213,7 @@ descargar columnas.
 
 ---
 
-### 2026-10-05 (v0.15.2) â€” Luz de bloque regional (siembra de frontera)
+### 2026-10-05 (v0.15.2) — Luz de bloque regional (siembra de frontera)
 
 **Decision.** `World::recompute_block_light_region(changed)` limpia y reconstruye
 la luz de bloque solo de la **region** = `changed` (columnas cargadas/descargadas)
@@ -2226,7 +2226,7 @@ mantiene como referencia y en tests.
 
 **Motivo.** El audit pide luz incremental/regional y la medicion
 (`docs/performance.md`) mostraba ~12 ms por cruce tras cachear emisores, con el
-BFS propagando por **todo** el mundo cargado. El recÃ¡lculo regional acota el
+BFS propagando por **todo** el mundo cargado. El recálculo regional acota el
 trabajo a las columnas afectadas y, sobre todo, **escala con el radio** (O(perimetro)
 en vez de O(area)).
 
@@ -2253,14 +2253,14 @@ al radio), pero la ruta regional no depende del area del mundo.
 `render/renderer.rs` (ruta regional). 208 tests (nuevo: equivalencia
 regional==global con altas/bajas/frontera); clippy `-D warnings` limpio. **Bug
 corregido en el camino**: el BFS re-encolaba celdas de columnas no cargadas
-(`put_block_light` es no-op) â†’ bucle infinito; ahora escribe directo en la
+(`put_block_light` es no-op) → bucle infinito; ahora escribe directo en la
 columna y solo encola si escribio. **Limite**: con lava muy densa el coste sigue
 dominado por el BFS. Siguiente cuello: batching/LOD (draw calls) o interpolacion
 de render.
 
 ---
 
-### 2026-10-05 (v0.15.3) â€” Hardening de tests (raycast y streaming)
+### 2026-10-05 (v0.15.3) — Hardening de tests (raycast y streaming)
 
 **Decision.** Se anaden los casos de prueba de robustez que pedia la auditoria:
 `raycast` (origen dentro de un bloque, rayos negativos, direccion nula, direccion
@@ -2268,7 +2268,7 @@ casi cero, `max_distance = 0`, borde de chunk x=15->16, predicado que atraviesa
 liquidos, rayo sobre un borde de celda, diagonal en coordenadas negativas) y
 streaming (carga y edicion en **chunks negativos**).
 
-**Motivo.** El audit (Â§21 "Raycast robusto" y Â§41 "tests obligatorios") listaba
+**Motivo.** El audit (§21 "Raycast robusto" y §41 "tests obligatorios") listaba
 estos casos; solo habia 4 tests de raycast, todos de casos "comodos". La logica
 del DDA (empates de `t_max`, signos, coordenadas negativas) es justo donde
 aparecen bugs sutiles.
@@ -2283,7 +2283,7 @@ Siguiente cuello: batching/LOD, interpolacion de render o overlay de texto.
 
 ---
 
-### 2026-10-05 (v0.16.0) â€” Radio de vista configurable (y por que NO hay batching/LOD)
+### 2026-10-05 (v0.16.0) — Radio de vista configurable (y por que NO hay batching/LOD)
 
 **Decision.** El radio de carga/render se configura con `SOLARIA_VIEW_RADIUS`
 (1..=12, por defecto 4). La niebla (`fog_start/fog_end`) y el **culling por
@@ -2322,7 +2322,7 @@ lento. Siguiente: interpolacion de render y overlay de texto.
 
 ---
 
-### 2026-10-05 (v0.16.1) â€” Persistencia end-to-end (tests de integracion)
+### 2026-10-05 (v0.16.1) — Persistencia end-to-end (tests de integracion)
 
 **Decision.** Dos tests de integracion de guardado: (1) **roundtrip completo** de
 un mundo editado (bloques a y=5 y y=200 mas una fuente de agua) via
@@ -2330,7 +2330,7 @@ un mundo editado (bloques a y=5 y y=200 mas una fuente de agua) via
 `warm_streaming`; (2) **recuperacion tras crash**: se corrompe el archivo
 principal y se comprueba que el `.bak` (guardado atomico anterior) sigue cargando.
 
-**Motivo.** El audit (Â§41) pide tests de "crash simulation durante save" y de
+**Motivo.** El audit (§41) pide tests de "crash simulation durante save" y de
 guardado/carga integrados. Hasta ahora habia tests de registro (una columna) pero
 ninguno ejercitaba el flujo **mundo completo**: volcar -> guardar -> cargar ->
 reconstruir, ni la recuperacion del `.bak`.
@@ -2344,10 +2344,10 @@ registro, migracion (v1/v3/v4/v5) y mundo completo, incluida la recuperacion.
 
 ---
 
-### 2026-10-05 (v0.17.0) â€” Worldgen por etapas: celular + continentes + costas (FASE 1/2)
+### 2026-10-05 (v0.17.0) — Worldgen por etapas: celular + continentes + costas (FASE 1/2)
 
 **Contexto.** El generador antiguo derivaba el relieve del **bioma** (un `match`
-de amplitudes) sobre un `Fbm` continental que no separaba tierra/ocÃ©ano: las
+de amplitudes) sobre un `Fbm` continental que no separaba tierra/océano: las
 costas se reducian a `height <= SEA_LEVEL + 1` y los biomas eran umbrales de
 clima, sin regiones geometricas. La auditoria de worldgen pide jerarquia
 espacial: celdas -> continentes -> clima -> landforms -> hidrologia -> ...
@@ -2367,7 +2367,7 @@ preview offline (`examples/worldgen_preview.rs`) que exporta PNG y metricas.
   equivalencia; se extrajo la geografia a un modulo y `terrain.rs` la consume.
 - Campo continental como un solo `Fbm`: se combino macro + detalle (0.78/0.22)
   y domain warping para romper la regularidad.
-- Clasificar tierra/ocÃ©ano punto a punto con un segundo ruido: la auditoria pide
+- Clasificar tierra/océano punto a punto con un segundo ruido: la auditoria pide
   clasificar por la **celda** (identidad geometrica); el id de celda es estable y
   da coherencia regional (costas, futuras features).
 - Empaquetar la altura y el bioma en la misma fase (como antes): mantenerlos
@@ -2393,7 +2393,7 @@ oceano 31-55% segun seed, abisal presente, picos hasta el techo de mundo.
 
 ---
 
-### 2026-10-05 (v0.17.1) â€” Fix: overrun del buffer GPU de malla
+### 2026-10-05 (v0.17.1) — Fix: overrun del buffer GPU de malla
 
 **Contexto.** Al caminar hacia tierra, el juego se cerraba con
 `wgpu Validation Error: In Queue::write_buffer ... would end up overrunning the
@@ -2423,11 +2423,11 @@ visible; el test de la invariante evita que reaparezca.
 
 ---
 
-### 2026-10-05 (v0.18.0) â€” Worldgen FASE 3: bioma por region celular
+### 2026-10-05 (v0.18.0) — Worldgen FASE 3: bioma por region celular
 
 **Contexto.** En v0.17.0 el relieve dejo de depender del bioma, pero el bioma
 seguia saliendo de una cascada de `if` sobre umbrales de clima: regions amorfas,
-sin identidad geomÃ©trica ni relacion con las celdas que ya usabamos para las
+sin identidad geométrica ni relacion con las celdas que ya usabamos para las
 costas.
 
 **Decision.** Nuevo `worldgen/biomes.rs`:
@@ -2454,7 +2454,7 @@ costas.
 - Mover `Biome` a `biomes.rs`: churn de imports; se deja el `enum` en `terrain`
   (la logica de seleccion si vive en `biomes`).
 
-**Tradeoffs.** `GENERATOR_VERSION â†’ 10`: cambian materiales/vegetacion (el
+**Tradeoffs.** `GENERATOR_VERSION → 10`: cambian materiales/vegetacion (el
 relieve es el mismo que v9). Los biomas `Tundra`/`Taiga` son raros en climas
 templados (correcto por scoring, pero el porcentaje depende mucho de la seed).
 
@@ -2464,7 +2464,7 @@ reparto; `layer` biome/height/continental), `save.rs` (v10). 241 tests; clippy
 limpio. Preview: 7 biomas con regiones coherentes; verificado en juego caminando
 varios chunks sin crash. Siguiente: FASE 5 hidrologia/rios.
 
-### 2026-10-05 (v0.19.0) â€” Worldgen FASE 5: hidrologia (rios y lagos)
+### 2026-10-05 (v0.19.0) — Worldgen FASE 5: hidrologia (rios y lagos)
 
 **Contexto.** Tras continentes/biomas, faltaba la capa que convierte relieve en
 agua. La auditoria pide rios estructurales (cauces, anchos variables) y no
@@ -2472,15 +2472,15 @@ agua. La auditoria pide rios estructurales (cauces, anchos variables) y no
 
 **Decision.** Hidrologia analitica y determinista dentro de `WorldGen::sample`:
 - La **linea del rio** es una **cresta** (`ridge = 1 - |river_noise|`) deformada
-  por su propio **domain warping** â†’ trazados sinuosos y alargados.
-- **Caudal** `flow = 0.35Â·humedad + 0.65Â·ruido_ancho`; de ahi el ancho y la
+  por su propio **domain warping** → trazados sinuosos y alargados.
+- **Caudal** `flow = 0.35·humedad + 0.65·ruido_ancho`; de ahi el ancho y la
   profundidad (`lerp(min,max,flow)`).
-- **Cauce**: `river_proximity = smoothstep(1-width, 1, ridge) Â· landness`;
-  `cut = proximity^power Â· depth`; el terreno baja `cut` y el material pasa a
+- **Cauce**: `river_proximity = smoothstep(1-width, 1, ridge) · landness`;
+  `cut = proximity^power · depth`; el terreno baja `cut` y el material pasa a
   arena/grava donde el cauce es claro.
-- **Nivel de agua** `h - depthÂ·0.30` (contenido bajo el borde); cerca del mar,
+- **Nivel de agua** `h - depth·0.30` (contenido bajo el borde); cerca del mar,
   `max(agua, sea)`; cualquier columna bajo el mar se inunda a mar.
-- **Lagos**: `valle Â· humedad Â· cuenca` sobre un umbral â†’ depresion rellena.
+- **Lagos**: `valle · humedad · cuenca` sobre un umbral → depresion rellena.
 - `TerrainSample` gana `river_proximity` y `surface_water`; `generate_column`
   rellena agua hasta `surface_water` (mar/rio/lago).
 
@@ -2503,9 +2503,9 @@ solidas y no se simula hasta que el jugador lo toca. `GENERATOR_VERSION -> 11`.
 limpio. Preview: rios serpenteantes que llegan al mar. Verificado en juego sin
 crash. Siguiente: FASE 6 (cuevas jerarquicas).
 
-## v0.19.1 â€” Limpieza y orden del repositorio
+## v0.19.1 — Limpieza y orden del repositorio
 
-### 2026-10-07 â€” Higiene antes de seguir con el worldgen
+### 2026-10-07 — Higiene antes de seguir con el worldgen
 
 **Decision.** Antes de continuar el worldgen (FASE 6+) hacemos una pasada de
 orden, sin tocar el mundo ni el formato:
@@ -2532,9 +2532,9 @@ mundo, asi que `GENERATOR_VERSION`/`FORMAT_VERSION` quedan intactos (11 / 5).
 **Consecuencia.** Solo cambios de repo/docs; mismos 244 tests y clippy limpio.
 Disco liberado: ~3.5 GB. `Cargo.toml` y el titulo pasan a `v0.19.1`.
 
-## v0.20.0 â€” Worldgen FASE 6: cuevas jerarquicas
+## v0.20.0 — Worldgen FASE 6: cuevas jerarquicas
 
-### 2026-10-07 â€” Cuevas por capas (no un unico campo de densidad)
+### 2026-10-07 — Cuevas por capas (no un unico campo de densidad)
 
 **Decision.** Sustituir el campo unico (`tunnels*0.7 + chambers*0.3`) por varios
 sistemas que se suman, cada uno con su escala y su activacion barata:
@@ -2569,9 +2569,9 @@ Sin afluentes de cueva ni biomas subterraneos (fuera de alcance).
 refuerzo por montana, pozos verticales); clippy limpio. Fraccion de aire
 subterraneo medida ~4 %. Siguiente: FASE 7 (decoracion por reglas).
 
-## v0.21.0 â€” Agua estilo Minecraft (fuente -> distancia)
+## v0.21.0 — Agua estilo Minecraft (fuente -> distancia)
 
-### 2026-10-07 â€” El agua deja de conservar volumen
+### 2026-10-07 — El agua deja de conservar volumen
 
 **Decision.** Reescribir `world/water.rs` al modelo de **Minecraft (Java)**:
 - **Nivel 8 = fuente**; el flujo vale `8 - distancia` (alcance 7 bloques).
@@ -2603,9 +2603,9 @@ clippy limpio. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (12/5): no cambia
 el mundo ni el guardado, solo la simulacion. Tick de agua ~9x mas barato
 (0.238 -> 0.027 ms) al alcanzar el equilibrio. Siguiente: FASE 7 (decoracion).
 
-## v0.21.1 â€” El agua generada se asienta sola y tick a 10 Hz
+## v0.21.1 — El agua generada se asienta sola y tick a 10 Hz
 
-### 2026-10-07 â€” Despertar el agua de worldgen al cargar
+### 2026-10-07 — Despertar el agua de worldgen al cargar
 
 **Decision.**
 - El agua de **worldgen** (rios/lagos) nacia como fuente y **nunca entraba al
@@ -2639,9 +2639,9 @@ hasta una edicion; es aceptable (el registro se regenera al volver a generar).
 agua se registra y el agua generada converge). Sin cambio de mundo ni guardado
 (12/5).
 
-## v0.22.0 â€” Worldgen FASE 7: decoracion por reglas
+## v0.22.0 — Worldgen FASE 7: decoracion por reglas
 
-### 2026-10-07 â€” Decoracion con reglas, clusters, rocas y rejilla de muestras
+### 2026-10-07 — Decoracion con reglas, clusters, rocas y rejilla de muestras
 
 **Decision.**
 - **Reglas** (`worldgen/decoration.rs`): cada tipo de decoracion es una
@@ -2674,9 +2674,9 @@ Una columna solo recibe un tipo de decoracion (arbol **o** roca).
 decoracion); clippy limpio. Generacion practicamente igual (~6.1 ms/columna, la
 rejilla compensa el re-muestreo). `FORMAT_VERSION` intacto (5).
 
-## v0.23.0 â€” Worldgen FASE 4: landforms (mesetas, terrazas, acantilados)
+## v0.23.0 — Worldgen FASE 4: landforms (mesetas, terrazas, acantilados)
 
-### 2026-10-07 â€” Perfiles de relieve por region
+### 2026-10-07 — Perfiles de relieve por region
 
 **Decision.** Anadir un **perfil de landform** por region que transforma la
 altura base:
@@ -2706,9 +2706,9 @@ Sin overhangs (limitacion honesta).
 seleccion de landform, mesetas aplanan); clippy limpio. Preview `height` con
 anillos de terraza; generacion dentro del mismo orden. `FORMAT_VERSION` = 5.
 
-## v0.24.0 â€” Worldgen FASE 9: tooling y calibracion
+## v0.24.0 — Worldgen FASE 9: tooling y calibracion
 
-### 2026-10-07 â€” Previews de cuevas, seed gallery y metricas
+### 2026-10-07 — Previews de cuevas, seed gallery y metricas
 
 **Decision.** Completar el **tooling** de worldgen para equilibrar con datos:
 - `worldgen_preview` gana la capa `landform` (colorea el perfil de region) y
@@ -2741,9 +2741,9 @@ dibujar etiquetas de seed en la galeria (requiere fuente bitmap).
 tests (nuevo: `cave_carve_at` determinista y encuentra cuevas); clippy limpio.
 Previews: `worldgen_preview_13371_{landform,cave,cave_yz}.png`, `seed_gallery.png`.
 
-## v0.25.0 â€” Tuning del clima y la costa
+## v0.25.0 — Tuning del clima y la costa
 
-### 2026-10-07 â€” Mas contraste climatico y costas mas estrechas
+### 2026-10-07 — Mas contraste climatico y costas mas estrechas
 
 **Decision.** Calibrar el generador con las metricas de la FASE 9:
 - **Contraste climatico** (`climate_contrast = 1.5`, config): `t' = 0.5 +
@@ -2771,9 +2771,9 @@ extremos < 0.25 y > 0.75); clippy limpio. Reparto de biomas (seed 13371) pasa de
 Plains 38 / Forest 33 / Savanna 18 / Desert 4 / Swamp 6 / Tundra 0.8 / Taiga 0.7
 a Plains 30 / Forest 24 / Savanna 17 / Desert 11 / Swamp 10 / Tundra 6 / Taiga 3.
 
-## v0.26.0 â€” Interpolacion de render (timestep fijo)
+## v0.26.0 — Interpolacion de render (timestep fijo)
 
-### 2026-10-07 â€” Separar posicion logica de posicion de render
+### 2026-10-07 — Separar posicion logica de posicion de render
 
 **Decision.** La fisica corre a **timestep fijo** (120 Hz) pero el render va a
 mucho mas FPS (300-600). Antes la camara usaba directamente la posicion de la
@@ -2801,9 +2801,9 @@ interpolacion en `update`, `simulate_player`, `save_world`), `math/vec3.rs`
 (`Vec3::lerp` y `Default`). 261 tests (nuevo: `Vec3::lerp`); clippy limpio.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
-## v0.27.0 â€” Overlay F3 en pantalla (fuente bitmap)
+## v0.27.0 — Overlay F3 en pantalla (fuente bitmap)
 
-### 2026-10-07 â€” Pantalla de depuracion estilo Minecraft + fuente bitmap
+### 2026-10-07 — Pantalla de depuracion estilo Minecraft + fuente bitmap
 
 **Decision.** Mover el diagnostico **F3** del titulo de la ventana a un overlay
 **en pantalla** con dos columnas (izquierda: version, fps/tiempos, XYZ/bloque/
@@ -2834,11 +2834,11 @@ exacto de la ventana.
 layout con tamano de superficie). 264 tests (4 de fuente); clippy limpio.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
-## v0.28.0 â€” Mano en primera persona (sistema de modelos)
+## v0.28.0 — Mano en primera persona (sistema de modelos)
 
-### 2026-10-07 â€” Modelos de cubos de color + mano y bloque sostenido
+### 2026-10-07 — Modelos de cubos de color + mano y bloque sostenido
 
-**Decision.** Dibujar la **mano en primera persona** (brazo: manga + puÃ±o + piel)
+**Decision.** Dibujar la **mano en primera persona** (brazo: manga + puño + piel)
 y el **bloque sostenido** de la ranura activa, con animacion de **golpe** (al
 romper/colocar) y **balanceo** al andar. Para ello, un sistema de **modelos de
 cubos de color** propio:
@@ -2870,9 +2870,9 @@ render). 269 tests (5 de modelo/mano); clippy limpio.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Captura `v0.28.0-hand.png`.
 Siguiente: **personaje** completo (tercera persona).
 
-## v0.29.0 â€” Personaje y camara en tercera persona
+## v0.29.0 — Personaje y camara en tercera persona
 
-### 2026-10-07 â€” Humanoide con animacion de andar + F5
+### 2026-10-07 — Humanoide con animacion de andar + F5
 
 **Decision.**
 - **Personaje** (`scene/player.rs::character`): humanoide de 1.8 (pies en `y=0`,
@@ -3082,7 +3082,7 @@ limpio. Capturas `v0.33.0_{view_r12,view_r16,fog_short}.png`.
   asigna a la ranura activa.
 
 **Motivo.** El usuario pidio "inventario creativo con categorias, busqueda, scroll"
-y "nombre del bloque al cambiar de ranura". Se aisló la logica en `ui` para poder
+y "nombre del bloque al cambiar de ranura". Se aisl� la logica en `ui` para poder
 probarla sin GPU (regla del repo).
 
 **Alternativas descartadas.** `serde_json` + `assets/lang/*.json` (dependencia
@@ -3125,7 +3125,7 @@ eso esta la arena). Evaluar con `dyn Fn` por voxel (coste indirecto; ya se
 descarto en el greedy de v0.19.1). Integrar en `terrain.rs` de golpe (arriesga
 `GENERATOR_VERSION` y mundos existentes): se hace como C2/C3 en pasos.
 
-**Pendiente honesto (documentado, NO hecho).** C2 (evaluacion en retícula 4x8x4
+**Pendiente honesto (documentado, NO hecho).** C2 (evaluacion en ret�cula 4x8x4
 + interpolacion + `Cache2D` + paralelizacion con el pool actual), C3
 (`GeneratorKind::{Legacy16,Graph}` + hash del grafo en el header + coexistencia),
 C4 (clima como canales del grafo) y C5/C6 (restricciones de decoracion,
@@ -3194,7 +3194,7 @@ renderer al pulsar "Jugar": mas limpio en teoria, pero reestructura el arranque 
 la demo; se mantiene el renderer listo bajo el titulo.
 
 **Pendiente honesto.** Menu de **opciones** + reasignacion de teclas, toolkit de
-widgets nine-slice, fuente con tildes/¿¡ en el render, y multi-mundo con
+widgets nine-slice, fuente con tildes/�� en el render, y multi-mundo con
 miniaturas. La reasignacion de teclas y las opciones persistidas no estan.
 
 **Consecuencia.** `world/library.rs` (8 tests), `ui/screens.rs` (3 tests),
@@ -3233,6 +3233,34 @@ nine-slice y fuente con tildes en el render.
 (`new(..., view: ViewSettings)`), `engine/app.rs` (carga/aplicacion de opciones,
 pantalla y ruta de guardado). 325 tests; clippy limpio. Capturas
 `v0.43.1_{title,options}.png`. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
+## v0.43.2 - Pantalla de Controles (reasignacion de teclas)
+
+### 2026-10-07 - Rebind real con captura de tecla e intercambio de conflictos
+
+**Decision.** Nueva pantalla `Screen::Controls` (desde pausa). Lista las acciones
+reasignables (`ui::options::BINDABLE_ACTIONS`) con su tecla; clicar una fila entra
+en modo captura y la siguiente tecla reasigna (`Options::rebind`, que **intercambia**
+si la tecla ya estaba en uso), con "Restablecer" y "Hecho". `engine::input` gana
+`key_name`/`parse_key`/`key_display` (conjunto curado de teclas) y `Input::axis_with`.
+El movimiento, el salto, volar e inventario usan las teclas **asignadas** (con
+default W/S/A/D/Space/F/E), asi que reasignar tiene efecto real.
+
+**Motivo.** El Prompt 2 pide "las teclas se reasignan sin conflictos silenciosos";
+la logica ya estaba probada, faltaba exponerla y aplicarla al input.
+
+**Alternativas descartadas.** Rebinding por texto (fragil). Bloquear la tecla en
+conflicto en vez de intercambiar (peor UX). Mover el parseo de `KeyCode` a `ui`
+(`ui` es puro y no debe depender de winit: se queda en `engine::input`).
+
+**Pendiente honesto.** No se reasignan las teclas fijas (F3/F5/Escape) ni el
+bootstrap de "abrir controles"; falta el toolkit nine-slice y la fuente con tildes.
+
+**Consecuencia.** `engine/input.rs` (macro de teclas + `axis_with`, 1 test nuevo),
+`ui/options.rs` (`BINDABLE_ACTIONS`, `reset_bindings`), `ui/screens.rs`
+(`Controls`), `engine/app.rs` (pantalla, captura, movimiento con bindings).
+326 tests; clippy limpio. Captura `v0.43.2_controls.png`. `GENERATOR_VERSION`/
+`FORMAT_VERSION` intactos (16/5).
 
 ## Plantilla para nuevas entradas
 
