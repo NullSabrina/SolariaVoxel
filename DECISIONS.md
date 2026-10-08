@@ -3935,6 +3935,47 @@ tests). **356 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.45.3`.
 Rendimiento: `warm_streaming` 81 columnas = **291.5 ms** (igual que la linea base;
 el escaneo de bordes es despreciable frente a la generacion).
 
+## v0.45.4 (MEGA PROMPT 2) - Fase D: malla de agua
+
+### 2026-10-08 - Cascadas sin rendijas; caras de agua verificadas
+
+**Decision.** En `fluid_mesher`, las caras **laterales** de una celda con agua
+**encima** (columna de caida) suben hasta el **borde del bloque** (`1.0`) en vez de
+hasta la superficie (`0.875`). Sin esto quedaba una rendija de 2/16 entre cada par
+de bloques de la cascada (la cara del bloque de abajo terminaba en 0.875 y la del
+de arriba empezaba en 1.0) y se veia a escalones. Las celdas de **superficie**
+(sin agua encima) conservan su altura por nivel (rampas).
+
+**Motivo.** Seccion 2.7 del Prompt 2 (escalones en cascadas).
+
+**Hallazgo honesto sobre 2.7.** El caso "pared de agua entre nivel 8 y nivel 1 al
+lado" **no** se reproduce en el mesher actual: las caras laterales ya se **omiten**
+contra agua de cualquier nivel (no solo el mismo), y las esquinas del quad superior
+toman el **maximo** de las celdas que comparten la esquina, asi que dos niveles
+adyacentes forman una rampa, no una pared. El problema real y arreglado era la
+**rendija vertical** entre bloques de una columna de caida.
+
+**Tests.** `las_caras_de_agua_no_salen_contra_solido_ni_igual_nivel` (conteo de
+quads: 5 una celda aislada, 4 contra solido, 8 dos celdas de agua adyacentes) y
+`una_cascada_no_deja_rendijas_entre_bloques` (no hay vertice en la altura 0.875 en
+la cara de la cascada; el borde del bloque de abajo llega a 1.0).
+
+**UV.** El quad superior usa UV en **coordenadas de mundo** (`ox + xf`), asi que la
+textura es continua al cruzar chunks (no hay costura); las caras laterales usan
+0..1 por bloque (tile de agua plano, sin costura visible). Verificado por lectura;
+no requiere cambio.
+
+**Alternativas descartadas.**
+- Subir `surface_height` a 1.0: romperia el "no es un cubo macizo" (el agua debe
+  quedar 2/16 por debajo del borde).
+- Fusionar la cascada en un solo quad alto: mas complejo y sin mejora visible
+  sobre extender la cara al borde del bloque.
+
+**Consecuencia.** `world/fluid_mesher.rs` (cap de la cara lateral + 2 tests).
+**358 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.45.4`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5). Verificacion **visual** en
+GPU pendiente (no hay GPU en el entorno): la geometria se cubre con tests.
+
 ## Plantilla para nuevas entradas
 
 ```

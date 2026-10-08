@@ -131,7 +131,12 @@ pub fn fluid_section(
 
                 // Caras laterales expuestas (no contra agua ni contra solido).
                 let base = oy + yf;
-                let yh = |hl: u8| oy + yf + surface_height(hl);
+                // En una **columna de caida** (agua encima) la cara lateral sube
+                // hasta el borde del bloque (`1.0`), no hasta la superficie
+                // (`0.875`): si no, queda una rendija de 2/16 entre bloques y la
+                // cascada se ve a escalones en vez de continua.
+                let cap = if above_water { 1.0 } else { 0.0 };
+                let yh = |hl: u8| oy + yf + surface_height(hl).max(cap);
                 for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                     let (nx, nz) = (xi + dx, zi + dz);
                     if level(nx, yi, nz) > 0 || query(nx, yi, nz).is_solid() {
@@ -218,5 +223,62 @@ mod tests {
             .find(|y| (y - 0.4375).abs() < 1e-4)
             .expect("falta la superficie de nivel 4");
         assert!(((h8 - h4) - 0.4375).abs() < 1e-4, "diferencia {h8}-{h4}");
+    }
+
+    #[test]
+    fn las_caras_de_agua_no_salen_contra_solido_ni_igual_nivel() {
+        // Contamos quads (4 vertices cada uno): 1 celda aislada = 1 superior + 4
+        // laterales = 5. Un vecino solido o agua de igual nivel quita una lateral.
+        let mut levels: HashMap<(i32, i32, i32), u8> = HashMap::new();
+        levels.insert((0, 0, 0), 8);
+        let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
+        let air = |_x: i32, _y: i32, _z: i32| Block::Air;
+        let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
+        let nquads = |v: &[Vertex]| v.len() / 4;
+
+        let (v, _) = fluid_section(&level, &air, &light, 0, [0.0; 3]);
+        assert_eq!(nquads(&v), 5, "1 celda aislada = 5 caras");
+
+        // Solido en +X: la cara +X no se emite (4 caras).
+        let solid = |x: i32, y: i32, z: i32| {
+            if (x, y, z) == (1, 0, 0) {
+                Block::Stone
+            } else {
+                Block::Air
+            }
+        };
+        let (v, _) = fluid_section(&level, &solid, &light, 0, [0.0; 3]);
+        assert_eq!(nquads(&v), 4, "cara de agua contra solido");
+
+        // Agua de igual nivel en +X: 2 celdas, cada una con 3 laterales (no hay
+        // pared entre agua) + su superior = 8 caras.
+        levels.insert((1, 0, 0), 8);
+        let level2 = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
+        let (v, _) = fluid_section(&level2, &air, &light, 0, [0.0; 3]);
+        assert_eq!(nquads(&v), 8, "cara de agua contra agua de igual nivel");
+    }
+
+    #[test]
+    fn una_cascada_no_deja_rendijas_entre_bloques() {
+        // Columna de caida (0,0,0) y (0,1,0): la cara lateral del bloque de abajo
+        // debe subir hasta y=1.0 (borde del bloque), sin la rendija de 0.875.
+        let mut levels: HashMap<(i32, i32, i32), u8> = HashMap::new();
+        levels.insert((0, 0, 0), 8);
+        levels.insert((0, 1, 0), 8);
+        let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
+        let query = |_x: i32, _y: i32, _z: i32| Block::Air;
+        let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
+        let (v, _) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
+        assert!(
+            !v.iter()
+                .any(|v| (v.position[0] - 1.0).abs() < 1e-4 && (v.position[1] - 0.875).abs() < 1e-4),
+            "rendija de 2/16 en la cara de la cascada"
+        );
+        // Y el borde superior del bloque de abajo llega a y=1.0.
+        assert!(
+            v.iter()
+                .any(|v| (v.position[0] - 1.0).abs() < 1e-4 && (v.position[1] - 1.0).abs() < 1e-4),
+            "la cara de la cascada no llega al borde del bloque"
+        );
     }
 }
