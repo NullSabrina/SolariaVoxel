@@ -4062,6 +4062,50 @@ cambia el mundo).
 `examples/water_probe.rs`, `screenshots/water_probe_fuente.png`. **359 tests; 0
 fallos**; clippy limpio. `Cargo.toml -> 0.45.6`.
 
+## v0.46.0 (MEGA PROMPT 3) - Fase A: reproducir y verificar herramientas
+
+### 2026-10-08 - Linea base de la UI y pipeline de LibreSprite confirmado
+
+**Decision.** Se arranca el MEGA PROMPT 3 (GUI/menus/inventario estilo Minecraft).
+Fase A sin cambios de logica: reproducir, capturar y verificar herramientas.
+
+**Reproducido.**
+- **Esc y cursor (2.1)**: confirmado por lectura. En juego, un Esc solo libera el
+  cursor (`unlock_mouse`); hace falta un **segundo** Esc para la pausa. Cerrar el
+  inventario con Esc deja `inventory_open=false` **sin** recapturar el cursor
+  (`lock_mouse` no se llama) -> hay que hacer click para volver a mirar.
+- **Inventario sin arrastre (2.2)**: `inventory_click` solo cambia de pestana o
+  copia un bloque a la ranura activa; no hay stacks, drag, shift-click ni
+  cantidades (`hotbar: [Block; 9]`).
+- **Botones y fuente (2.3/2.5)**: `build_menu_ui` usa la misma region
+  `gui::SLOT_REGION` para todos los botones (sin hover/pulsado/disabled); la
+  fuente (`render/font.rs`) es 5x7 **solo mayusculas** sin sombra; `UI_SCALE=2.0`
+  fijo.
+
+**Capturas de linea base** (`tools/screenshot.ps1`, ventana real, 1296x759,
+~110-156 fps): `screenshots/ui_baseline_{title,pause,inventory,hud}.png`. En el
+titulo se ve el logo textual sin panoramica y botones planos; en pausa, botones
+del mismo estilo; en el inventario creativo, pestanas + busqueda + rejilla.
+
+**LibreSprite verificado (5.1).** MCP `libresprite_run_script`, **LibreSprite
+1.1-dev / windows**. No hay constructor `Sprite` ni `activeSprite` sin documento,
+pero **`app.open(png)` crea el documento activo**; el flujo que funciona es:
+crear un PNG base -> `app.open("C:/ruta.png")` -> `app.activeImage.putPixel(...)`
+con `app.pixelColor.rgba(r,g,b,a)` -> `app.activeSprite.saveAs("C:/ruta.png", true)`
+(y tambien a `.aseprite`). `saveAs` **exige `asCopy=true`** (si no, abre el
+dialogo "Guardar como" y bloquea). Verificado con un 16x16 (pixeles rojo/azul/
+verde leidos de vuelta).
+
+**Herramienta de captura.** `tools/screenshot.ps1` lanza el exe, espera la
+ventana y la captura; funciona con el binario release y variables `SOLARIA_*`
+(`SOLARIA_SCREEN`, `SOLARIA_DEMO`, `SOLARIA_INVENTORY`).
+
+**Motivo.** Seccion 8, Fase A del prompt.
+
+**Consecuencia.** `screenshots/ui_baseline_*.png`, esta entrada. Sin cambios de
+codigo. **359 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.46.0` (inicio del
+bloque). `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5).
+
 ## Plantilla para nuevas entradas
 
 ```
