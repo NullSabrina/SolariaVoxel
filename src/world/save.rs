@@ -267,6 +267,12 @@ impl ChunkRecord {
     /// ¿El payload no decodifica al tamano esperado? (chunk corrupto). El campo
     /// `fluid` solo se valida si el registro lo trae; vacio es valido.
     pub fn is_corrupt(&self) -> bool {
+        // Rango vertical valido: si `y0 + height` se sale del mundo, `apply_record`
+        // recortaria y **descartaria ediciones en silencio**; mejor rechazarlo.
+        let (y0, h) = (self.y0 as usize, self.height as usize);
+        if h == 0 || y0 > WORLD_HEIGHT || y0 + h > WORLD_HEIGHT {
+            return true;
+        }
         if self.decompressed_blocks().len() != self.raw_len() {
             return true;
         }

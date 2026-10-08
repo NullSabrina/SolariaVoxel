@@ -3734,6 +3734,113 @@ hojas); changelog en `src/lib.rs`.
 cumplen los criterios de aceptacion de la seccion 5 del prompt salvo la
 verificacion visual en GPU (ver arriba).
 
+## v0.45.1-dev (MEGA PROMPT 2) - Fase A: sonda de agua (linea base)
+
+### 2026-10-08 - `examples/water_probe.rs`: el bug 2.1 confirmado con numeros
+
+**Decision.** Se anade `examples/water_probe.rs`: implementa `FluidGrid` en
+memoria y corre el **mismo** `step_cell` + cola que `World::tick_water_with` (pop
+de a una celda, re-encolar los 6 vecinos solo si cambio; presupuesto 16 384
+celdas/tick). No cambia la logica de simulacion: es la **linea base**. Tambien se
+anade el test de **regresion por volumen sobre `World`** real
+(`el_volumen_de_una_fuente_esta_acotado`), marcado `#[ignore]` porque reproduce el
+bug (se activara al arreglar en la Fase B).
+
+**Linea base (`water_probe`).**
+| escenario | celdas | ticks al equilibrio | notas |
+|---|---|---|---|
+| fuente en y=10 sobre suelo | **38 510** | 9 | niveles en +X: **8,8,8,8,8,8,8,8,8,8** (sin decaer) |
+| cascada de 6 (fuente y=6) | **9 218** | 3 | agua **lateral a cada altura** (y1 lat=3612, y2 lat=2520, ...) |
+| lago cerrado (cuenca 5x5) | 9 | 1 | cuenco contenido |
+| retroceso (quitar fuente) | 0 | 1 | se seca (correcto) |
+| dique que se rompe | 128 | 1 | de 98 retenidas a 128 |
+| 2x2 (3 fuentes + 1 flujo) | — | — | las 4 celdas pasan a **fuente** (correcto) |
+
+**Regresion sobre `World` (test ignorado, se ejecuta con `--ignored`).**
+`una fuente genero 6652 celdas de agua` (limite esperado < 1 000).
+
+**Confirmacion de la seccion 2.**
+- **2.1 confirmado**: la regla de caida (`water.rs:187-191`, "agua encima ->
+  `Flow(MAX_LEVEL)`") convierte cada capa horizontal en nivel 8 y alimenta la
+  inferior: una sola fuente inunda 38 510 celdas (y 6 652 en el `World` real). El
+  charco deberia ser un rombo de radio 7 con niveles 8..1.
+- **2.4**: `WATER_PERIOD` sigue a 10 Hz en `app.rs`; la doc historica dice 20 Hz.
+- **2.3**: pendiente de medir (test de carga/guardado se construye en la Fase C).
+
+**Alternativas descartadas.** Usar `World` para el probe (anade generacion de
+terreno y ruido): se usa una rejilla en memoria y se replica el tick real. Test de
+volumen activo en Fase A: fallaria y rompe la suite; se deja `#[ignore]`.
+
+**Consecuencia.** `examples/water_probe.rs` (nuevo), `world/store.rs` (test
+`#[ignore]`). **347 tests; 0 fallos** (el ignorado no cuenta). Clippy limpio.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5). `Cargo.toml` sube a
+`0.45.1` con la auditoria de bugs de la entrada siguiente.
+
+## v0.45.1 - Auditoria de bugs del proyecto (previa a la Fase B de agua)
+
+### 2026-10-08 - Caza de bugs por subsistemas + arreglos
+
+**Decision.** Antes de la Fase B (agua) se audita todo el proyecto con subagentes
+por subsistemas (fisica/jugador, mundo/guardado, render/app) y se arreglan los
+bugs **confirmados leyendo el codigo** (no se actuo sobre sospechas sin verificar).
+
+**Arreglados.**
+- **Luz de cielo invertida** (`store.rs` `recompute_skylight`): la atenuacion
+  vertical de la siembra era al reves (`dy == -1` en vez de `dy == 1`), asi que la
+  luz "trepaba" sin atenuar y los pozos quedaban mas oscuros de lo correcto.
+- **`in_radius` desbordaba `i32`** con coordenadas de chunk muy grandes: ahora en
+  `i64` (`store.rs`).
+- **`box_hits_solid`** contaba la celda que la caja solo **toca** cuando su borde
+  caia en un entero (falsos positivos de colision): epsilon en `max`
+  (`physics.rs`).
+- **Frustum**: el plano cercano usaba `r3 + r2` (convencion OpenGL) cuando wgpu
+  usa NDC z en `[0,1]` (debe ser `r2`); el near real no se probaba (`math/frustum.rs`).
+- **`buffer_capacity`** devolvia 1/2 para tamanos minusculos, no multiplos de la
+  alineacion (4) que exige wgpu (`render/mesh.rs` y `render/model.rs`).
+- **Techo del jugador**: el chequeo usaba `EYE_HEIGHT` (1.62) en vez de la altura
+  real del cuerpo (`PLAYER_HEIGHT` 1.8): el jugador se clavaba en techos de 2
+  bloques (`player/controller.rs`).
+- **`settle`** buscaba el suelo desde el techo del mundo: al cargar una base
+  **subterranea** teletransportaba al jugador a la superficie. Ahora busca **por
+  debajo de la posicion actual** (`player/controller.rs`).
+- **Caida bajo `y=0`**: `landing_surface` devolvia `None` (caida al vacio); ahora
+  posa en el "bedrock" (`y=0`) (`player/controller.rs`).
+- **Auto-repeat del teclado**: mantener Escape/E/F/E5 invertia el estado ~30 veces
+  por segundo; se filtra `event.repeat` (`engine/app.rs`).
+- **Perdida de foco**: no se olvidaban las teclas pulsadas (jugador andando solo
+  tras alt-tab); `Input::clear()` nuevo (`engine/input.rs`, `engine/app.rs`).
+- **Inventario/mesa no pausaban el gameplay**: WASD seguia moviendo y el raycast
+  resaltaba; ahora pausan como en Minecraft (`engine/app.rs`).
+- **`poll_save` solo corria jugando**: un guardado pedido desde la pausa dejaba
+  `save_requested` atascado y bloqueaba los guardados posteriores; ahora corre
+  siempre (`engine/app.rs`).
+- **Mesa de crafteo**: leia `items()` completo (no la lista **filtrada** por
+  categoria/busqueda) → se insertaba un bloque distinto al visible
+  (`engine/app.rs`).
+- **`save_meta` no era atomico** pese a documentarlo (borraba `level.json` antes
+  del rename): rota a `.bak` y `load_meta` recupera el `.bak` (`world/library.rs`).
+- **`ChunkRecord::is_corrupt`** no validaba `y0`/`height`: un registro fuera de
+  rango descartaba ediciones en silencio; ahora lo rechaza (`world/save.rs`).
+
+**Tests anadidos.** `box_hits_solid_no_cuenta_la_celda_que_solo_toca`,
+`la_capacidad_cubre_los_datos_y_es_potencia_de_dos` (+multiplo de 4),
+`clear_olvida_teclas_y_raton`, `settle_respeta_una_base_subterranea`,
+`el_techo_de_dos_bloques_no_deja_clavarse`, `in_radius_no_desborda...`.
+
+**No arreglado (documentado).**
+- **Agua restaurada de un chunk guardado no se despierta** (variante de 2.3): es
+  el alcance de la **Fase C** del Prompt 2; se arregla alli.
+- La rejilla de inventario no se dibuja con la mesa abierta aunque sea clickeable
+  (UX, no logica): pendiente de revision visual.
+- `buoyancy_for` sin usar, auto-step documentado y no cableado, `bob` sin reset:
+  divergencias doc/comportamiento menores, no bugs explotables.
+
+**Consecuencia.** `world/store.rs`, `physics.rs`, `math/frustum.rs`,
+`render/mesh.rs`, `render/model.rs`, `player/controller.rs`, `engine/input.rs`,
+`engine/app.rs`, `world/library.rs`, `world/save.rs`. **352 tests; 0 fallos**
+(+1 ignorado); clippy limpio. `Cargo.toml -> 0.45.1`. `GENERATOR_VERSION`/
+`FORMAT_VERSION` intactos (20/5): no cambia el mundo generado.
+
 ## Plantilla para nuevas entradas
 
 ```

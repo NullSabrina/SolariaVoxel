@@ -150,11 +150,13 @@ impl PlayerController {
                 new_feet = candidate;
             } else {
                 // Subiendo: miramos si la cabeza choca (techo), tambien con la
-                // huella completa.
+                // huella completa. Usamos la **altura real del cuerpo**
+                // (`PLAYER_HEIGHT`), no el ojo: si no, el jugador sube 0.18 de mas
+                // y se clava en techos de 2 bloques.
                 if Self::ceiling_hits(
                     camera.position.x,
                     camera.position.z,
-                    candidate + EYE_HEIGHT,
+                    candidate + PLAYER_HEIGHT,
                     &is_solid,
                 ) {
                     self.vertical_velocity = 0.0;
@@ -271,7 +273,12 @@ impl PlayerController {
     /// esa capa. Si no hay nada solido bajo la huella, `None` (sigue cayendo).
     fn landing_surface(x: f32, z: f32, feet: f32, is_solid: &impl Fn(Vec3) -> bool) -> Option<f32> {
         let by = feet.floor() as i32;
-        if by < 0 || by >= crate::world::WORLD_HEIGHT as i32 {
+        // Por debajo del mundo el suelo es "bedrock" (el mundo trata `y < 0` como
+        // solido): posamos en `y = 0` en vez de dejar caer al vacio.
+        if by < 0 {
+            return Some(0.0);
+        }
+        if by >= crate::world::WORLD_HEIGHT as i32 {
             return None;
         }
         let (ix0, ix1, iz0, iz1) = Self::footprint_columns(x, z);
@@ -304,13 +311,14 @@ impl PlayerController {
     }
 
     /// Superficie mas alta (techo del bloque solido mas alto) bajo la **huella**
-    /// del jugador, buscando de arriba hacia abajo. `None` si no hay terreno.
-    fn top_surface(x: f32, z: f32, is_solid: &impl Fn(Vec3) -> bool) -> Option<f32> {
+    /// del jugador, buscando **de `from_y` hacia abajo**. `None` si no hay terreno.
+    fn top_surface(x: f32, z: f32, from_y: i32, is_solid: &impl Fn(Vec3) -> bool) -> Option<f32> {
         let (ix0, ix1, iz0, iz1) = Self::footprint_columns(x, z);
         let mut best: Option<f32> = None;
+        let start = from_y.min(crate::world::WORLD_HEIGHT as i32 - 1);
         for ix in ix0..=ix1 {
             for iz in iz0..=iz1 {
-                let mut y = crate::world::WORLD_HEIGHT as i32 - 1;
+                let mut y = start;
                 while y >= 0 {
                     if is_solid(Vec3::new(ix as f32 + 0.5, y as f32 + 0.5, iz as f32 + 0.5)) {
                         let top = (y + 1) as f32;
@@ -328,15 +336,16 @@ impl PlayerController {
     /// (evita quedar atrapado bajo tierra o con parte del cuerpo dentro de un
     /// escalon vecino al arrancar).
     ///
-    /// Buscamos de arriba hacia abajo la superficie mas alta que cubre la huella
-    /// del jugador. Mirar solo la columna del centro seria un error: con terreno
-    /// por bloque, el jugador puede aparecer sobre un borde y su caja solaparia
-    /// el bloque del escalon de al lado.
+    /// Busca el suelo **por debajo de la posicion actual** (no el techo del mundo):
+    /// asi una base subterranea reaparece en su propio suelo y no en la superficie.
+    /// Mirar solo la columna del centro seria un error: con terreno por bloque, el
+    /// jugador puede aparecer sobre un borde y su caja solaparia el escalon vecino.
     pub fn settle(&mut self, camera: &mut Camera, is_solid: impl Fn(Vec3) -> bool) {
         let x = camera.position.x;
         let z = camera.position.z;
+        let from_y = (camera.position.y - EYE_HEIGHT).floor() as i32;
 
-        if let Some(surface) = Self::top_surface(x, z, &is_solid) {
+        if let Some(surface) = Self::top_surface(x, z, from_y, &is_solid) {
             camera.position.y = surface + EYE_HEIGHT;
             self.vertical_velocity = 0.0;
             self.on_ground = true;
@@ -492,6 +501,53 @@ mod tests {
         let mut player = PlayerController::new();
         player.settle(&mut camera, |_| false);
         assert!(!player.on_ground);
+    }
+
+    #[test]
+    fn settle_respeta_una_base_subterranea() {
+        // Solido de 0..40 (suelo) y de 50..60 (techo); el jugador en la cueva a
+        // y=45. `settle` no debe subirlo a la superficie (y=60) sino dejarlo en
+        // el suelo de la cueva (y=40).
+        let world = |p: Vec3| p.y < 40.0 || (p.y >= 50.0 && p.y < 60.0);
+        let mut camera = Camera::new(Vec3::new(0.5, 45.0 + EYE_HEIGHT, 0.5));
+        camera.update_view();
+        let mut player = PlayerController::new();
+        player.settle(&mut camera, world);
+        assert!(
+            (camera.position.y - (40.0 + EYE_HEIGHT)).abs() < 0.01,
+            "camara en y={} (esperado {})",
+            camera.position.y,
+            40.0 + EYE_HEIGHT
+        );
+    }
+
+    #[test]
+    fn el_techo_de_dos_bloques_no_deja_clavarse() {
+        // Pasillo con suelo en y<4 y techo solido en y=6 (hueco de 2 bloques). Al
+        // saltar, la cabeza (PLAYER_HEIGHT) no debe meterse en el techo: los pies
+        // no pasan de ~4.2.
+        let corridor = |p: Vec3| p.y < 4.0 || (p.y >= 6.0 && p.y < 7.0);
+        let mut camera = Camera::new(Vec3::new(0.5, 4.0 + EYE_HEIGHT, 0.5));
+        camera.update_view();
+        let mut player = PlayerController::new();
+        player.on_ground = true;
+        let mut max_feet = 0.0f32;
+        for _ in 0..90 {
+            player.update(
+                &mut camera,
+                corridor,
+                0.0,
+                false,
+                true,
+                false,
+                1.0 / 60.0,
+            );
+            max_feet = max_feet.max(camera.position.y - EYE_HEIGHT);
+        }
+        assert!(
+            max_feet <= 4.2 + 0.05,
+            "el jugador se incrusto en el techo: pies max={max_feet}"
+        );
     }
 
     // --- block_overlaps_player -----------------------------------------------

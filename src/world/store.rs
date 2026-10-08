@@ -67,8 +67,10 @@ const WARM_RADIUS: i32 = 4;
 
 /// ¿Esta `pos` dentro del radio `r` (euclideo, en chunks) de `center`?
 fn in_radius(pos: ChunkPos, center: ChunkPos, r: i32) -> bool {
-    let dx = pos.x - center.x;
-    let dz = pos.z - center.z;
+    // En `i64` para que no desborde con coordenadas de chunk muy grandes.
+    let dx = pos.x as i64 - center.x as i64;
+    let dz = pos.z as i64 - center.z as i64;
+    let r = r as i64;
     dx * dx + dz * dz <= r * r
 }
 
@@ -523,7 +525,7 @@ impl World {
                             } else {
                                 self.sky_light_at([bx + lx, ly, bz + lz])
                             };
-                            let cand = if dy == -1 { l } else { l.saturating_sub(1) };
+                            let cand = if dy == 1 { l } else { l.saturating_sub(1) };
                             if l > 0 && cand > best {
                                 best = cand;
                             }
@@ -1447,6 +1449,16 @@ mod tests {
     }
 
     #[test]
+    fn in_radius_no_desborda_con_coordenadas_lejanas() {
+        // A 50 000 chunks, `dx*dx` desbordaria i32 sin el calculo en i64.
+        assert!(!in_radius(ChunkPos::new(50_000, 0), ChunkPos::new(0, 0), 8));
+        assert!(!in_radius(ChunkPos::new(0, 50_000), ChunkPos::new(0, 0), 8));
+        // Dentro del radio (3,4) esta a distancia 5.
+        assert!(in_radius(ChunkPos::new(3, 4), ChunkPos::new(0, 0), 5));
+        assert!(!in_radius(ChunkPos::new(3, 4), ChunkPos::new(0, 0), 4));
+    }
+
+    #[test]
     fn la_luz_de_antorcha_cruza_el_borde_de_chunk() {
         use super::super::block::Block;
         let mut world = World::new(7, 1, vec![]);
@@ -1913,6 +1925,38 @@ mod tests {
             world.water_at([7, 100, 8]).is_water(),
             "el agua deberia acercarse hasta la hoja"
         );
+    }
+
+    #[test]
+    #[ignore = "reproduce el bug 2.1 (una fuente inunda); se activa en la Fase B"]
+    fn el_volumen_de_una_fuente_esta_acotado() {
+        // Fase A/B (2.1): sobre columnas reales, una sola fuente alta no debe
+        // inundar un volumen. Con el modelo actual falla (niveles todos a 8).
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([8.0, 100.0, 8.0]);
+        for x in -8..24 {
+            for z in -8..24 {
+                world.set_block([x, 90, z], Block::Stone);
+                for y in 91..=100 {
+                    world.set_block([x, y, z], Block::Air);
+                }
+            }
+        }
+        world.set_block([8, 100, 8], Block::Water);
+        for _ in 0..200 {
+            world.tick_water(16_384);
+        }
+        let mut n = 0u32;
+        for x in -8..24 {
+            for z in -8..24 {
+                for y in 91..=100 {
+                    if world.get_block([x, y, z]) == Block::Water {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        assert!(n < 1_000, "una fuente genero {n} celdas de agua (bug 2.1)");
     }
 
     #[test]

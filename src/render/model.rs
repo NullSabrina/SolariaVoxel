@@ -91,8 +91,9 @@ impl ModelMesh {
         let (verts, idx) = cuboids_to_mesh(cuboids);
         let vbytes = std::mem::size_of_val(verts.as_slice()) as u64;
         let ibytes = std::mem::size_of_val(idx.as_slice()) as u64;
-        let vcap = vbytes.next_power_of_two().max(1);
-        let icap = ibytes.next_power_of_two().max(1);
+        // Al menos 4 (multiplo de la alineacion que exige wgpu).
+        let vcap = vbytes.next_power_of_two().max(4);
+        let icap = ibytes.next_power_of_two().max(4);
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label}.vertices")),
             size: vcap,

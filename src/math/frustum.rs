@@ -31,7 +31,7 @@ impl Frustum {
             sub(r3, r0), // derecha
             add(r3, r1), // abajo
             sub(r3, r1), // arriba
-            add(r3, r2), // cercano (NDC z >= 0)
+            r2,          // cercano (wgpu usa NDC z en [0,1]: z_clip >= 0)
             sub(r3, r2), // lejano
         ];
         Self { planes }

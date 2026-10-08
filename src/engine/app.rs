@@ -313,8 +313,6 @@ impl App {
                 self.autosave_timer = 0.0;
                 self.save_world();
             }
-            // Recoge los guardados que hayan terminado.
-            self.poll_save();
 
             // Animacion de la mano: balanceo al andar y decaimiento del golpe.
             let moving = self.move_forward_axis() != 0.0 || self.move_right_axis() != 0.0;
@@ -323,6 +321,10 @@ impl App {
             }
             self.swing = (self.swing - frame_dt / 0.28).max(0.0);
         }
+
+        // Recoge los guardados terminados SIEMPRE (tambien si se pidio desde la
+        // pausa): si no, `save_requested` se queda atascado y no se vuelve a guardar.
+        self.poll_save();
 
         // Nombre del bloque sobre la hotbar: aparece al cambiar de ranura y se
         // desvanece (a los ~2 s desaparece).
@@ -340,8 +342,9 @@ impl App {
             }
         }
 
-        // En demo o con un menu abierto la camara y el jugador quedan fijos.
-        if self.demo || !playing {
+        // En demo, con un menu abierto, o con el inventario/mesa abiertos la
+        // camara y el jugador quedan fijos (como en Minecraft: no se anda).
+        if self.demo || !playing || self.inventory_open || self.crafting_open {
             return;
         }
 
@@ -1766,15 +1769,13 @@ impl App {
                 return;
             }
         }
-        // 3. Inventario: pone el bloque en la primera celda libre.
-        for (cell, item) in self
-            .inventory_cells(win_w, win_h)
-            .iter()
-            .zip(registry::BlockRegistry::items().iter())
-        {
-            if inside(cell) {
+        // 3. Inventario: pone el bloque en la primera celda libre. Se usa la
+        // **misma lista filtrada** que se dibuja (categoria + busqueda), no
+        // `items()` completo: si no, se insertaba un bloque distinto al visible.
+        for (cell, item) in self.inventory_slots(win_w, win_h) {
+            if inside(&cell) {
                 if let Some(j) = self.craft_grid.iter().position(|c| c.is_none()) {
-                    self.craft_grid[j] = Some(*item);
+                    self.craft_grid[j] = Some(item);
                     self.refresh_craft_result();
                     println!("[crafteo] {item:?} -> celda {}", j + 1);
                 }
@@ -2097,7 +2098,9 @@ impl ApplicationHandler for App {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     // Guardamos el estado (necesario para el movimiento continuo).
                     self.input.on_key(code, event.state);
-                    let pressed = event.state == ElementState::Pressed;
+                    // `event.repeat` filtra el auto-repeat del SO: si no, mantener
+                    // Escape/F/E invertiria el estado ~30 veces/s.
+                    let pressed = event.state == ElementState::Pressed && !event.repeat;
                     let playing = self.screens.is_playing();
 
                     if code == KeyCode::Escape && pressed {
@@ -2288,12 +2291,14 @@ impl ApplicationHandler for App {
                 self.cursor = (position.x as f32, position.y as f32);
             }
 
-            // Si perdemos el foco (alt-tab), liberamos el cursor para no
-            // dejarlo atrapado.
+            // Si perdemos el foco (alt-tab), liberamos el cursor y **olvidamos las
+            // teclas**: si el SO no entrega los `Released`, el jugador seguiria
+            // andando solo al volver.
             WindowEvent::Focused(false) => {
                 if self.mouse_locked {
                     self.unlock_mouse();
                 }
+                self.input.clear();
             }
 
             WindowEvent::Resized(size) => {

@@ -82,7 +82,9 @@ impl Vertex {
 /// validacion de wgpu).
 #[inline]
 pub fn buffer_capacity(bytes: u64) -> u64 {
-    bytes.next_power_of_two().max(1)
+    // Al menos 4: wgpu exige que el tamano del buffer sea multiplo de
+    // `COPY_BUFFER_ALIGNMENT` (4). `next_power_of_two` de 1 o 2 daria 1/2.
+    bytes.next_power_of_two().max(4)
 }
 
 /// Una malla subida a la GPU.
@@ -219,6 +221,7 @@ mod tests {
                 cap.is_power_of_two(),
                 "capacidad {cap} no es potencia de dos"
             );
+            assert_eq!(cap % 4, 0, "capacidad {cap} no es multiplo de 4 (wgpu)");
         }
     }
 }

@@ -78,9 +78,16 @@ impl Aabb {
 /// jugador (`player::controller`) y las entidades AABB: ambas preguntan al mundo
 /// lo mismo, solo cambia como resuelven el movimiento.
 pub fn box_hits_solid(min: Vec3, max: Vec3, is_solid: impl Fn(i32, i32, i32) -> bool) -> bool {
-    let (ix0, ix1) = (min.x.floor() as i32, max.x.floor() as i32);
-    let (iy0, iy1) = (min.y.floor() as i32, max.y.floor() as i32);
-    let (iz0, iz1) = (min.z.floor() as i32, max.z.floor() as i32);
+    // La caja es `[min, max)` (como `intersects_block`): una cara que cae
+    // **exactamente** en un entero NO solapa la celda de ese entero. El epsilon
+    // evita un falso positivo cuando `max` esta justo en la cara de un bloque.
+    const EPS: f32 = 1e-4;
+    let ix0 = min.x.floor() as i32;
+    let iy0 = min.y.floor() as i32;
+    let iz0 = min.z.floor() as i32;
+    let ix1 = ((max.x - EPS).floor() as i32).max(ix0);
+    let iy1 = ((max.y - EPS).floor() as i32).max(iy0);
+    let iz1 = ((max.z - EPS).floor() as i32).max(iz0);
     for x in ix0..=ix1 {
         for y in iy0..=iy1 {
             for z in iz0..=iz1 {
@@ -412,6 +419,23 @@ mod tests {
         assert!(box_hits_solid(
             Vec3::new(1.5, 0.0, 0.2),
             Vec3::new(2.2, 1.8, 0.8),
+            solid
+        ));
+    }
+
+    #[test]
+    fn box_hits_solid_no_cuenta_la_celda_que_solo_toca() {
+        // El borde superior de la caja cae EXACTAMENTE en x=2: no ocupa la celda 2.
+        let solid = |x: i32, _y: i32, _z: i32| x == 2;
+        assert!(!box_hits_solid(
+            Vec3::new(0.5, 0.0, 0.5),
+            Vec3::new(2.0, 1.0, 1.0),
+            solid
+        ));
+        // Un pelo dentro (2.01) si la ocupa.
+        assert!(box_hits_solid(
+            Vec3::new(0.5, 0.0, 0.5),
+            Vec3::new(2.01, 1.0, 1.0),
             solid
         ));
     }

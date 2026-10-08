@@ -66,6 +66,13 @@ impl Input {
         self.mouse_delta = (0.0, 0.0);
         d
     }
+
+    /// Olvida todas las teclas y el delta del raton. Se usa al perder el foco:
+    /// si el SO no entrega los `Released`, sin esto el jugador sigue andando solo.
+    pub fn clear(&mut self) {
+        self.pressed.clear();
+        self.mouse_delta = (0.0, 0.0);
+    }
 }
 
 /// Convierte dos booleanos (positivo/negativo) en un eje `-1 | 0 | 1`.
@@ -162,6 +169,16 @@ mod tests {
         assert_eq!(input.axis_with(KeyCode::KeyD, KeyCode::KeyA), 1.0);
         input.on_key(KeyCode::KeyD, ElementState::Released);
         assert_eq!(input.axis_with(KeyCode::KeyD, KeyCode::KeyA), 0.0);
+    }
+
+    #[test]
+    fn clear_olvida_teclas_y_raton() {
+        let mut input = Input::default();
+        input.on_key(KeyCode::KeyW, ElementState::Pressed);
+        input.on_mouse_motion(5.0, 5.0);
+        input.clear();
+        assert!(!input.is_pressed(KeyCode::KeyW));
+        assert_eq!(input.take_mouse_delta(), (0.0, 0.0));
     }
 
     #[test]

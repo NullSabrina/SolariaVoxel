@@ -186,21 +186,28 @@ pub fn save_meta(dir: &Path, meta: &WorldMeta) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!("{LEVEL_FILE}.tmp"));
     let final_path = dir.join(LEVEL_FILE);
+    let bak = dir.join(format!("{LEVEL_FILE}.bak"));
     let json = serde_json::to_string_pretty(meta)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(&tmp, json)?;
-    // Windows: `rename` no sobreescribe; borramos el destino primero.
+    // Windows: `rename` no sobreescribe. Rotamos el actual a `.bak` (en vez de
+    // borrarlo): si algo falla entre medias, `load_meta` recupera el `.bak`.
     if final_path.exists() {
-        std::fs::remove_file(&final_path)?;
+        let _ = std::fs::remove_file(&bak);
+        std::fs::rename(&final_path, &bak)?;
     }
     std::fs::rename(&tmp, &final_path)?;
     Ok(())
 }
 
-/// Carga `level.json` de una carpeta (o `None` si falta/corrupto).
+/// Carga `level.json` de una carpeta (o `None` si falta/corrupto). Si el
+/// principal falta o esta corrupto, prueba el `.bak` de la ultima escritura.
 pub fn load_meta(dir: &Path) -> Option<WorldMeta> {
-    let data = std::fs::read_to_string(dir.join(LEVEL_FILE)).ok()?;
-    serde_json::from_str(&data).ok()
+    let read = |p: std::path::PathBuf| -> Option<WorldMeta> {
+        let data = std::fs::read_to_string(p).ok()?;
+        serde_json::from_str(&data).ok()
+    };
+    read(dir.join(LEVEL_FILE)).or_else(|| read(dir.join(format!("{LEVEL_FILE}.bak"))))
 }
 
 /// Lista los mundos de `base`, ordenados por ultima vez jugado (desc).
