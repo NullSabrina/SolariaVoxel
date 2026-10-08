@@ -4175,6 +4175,50 @@ lo carga y comprueba la hotbar por defecto y la posicion intacta).
 `GENERATOR_VERSION` intacto (20). Captura de humo `screenshots/ui_after_hud.png`
 (el juego arranca y dibuja la hotbar con stacks).
 
+## v0.46.3 (MEGA PROMPT 3) - Fase D: inventario con arrastre y tooltips
+
+### 2026-10-08 - `InventoryState` (stacks, arrastre, shift/doble/1-9/Q) + hover/tooltip
+
+**Decision.**
+- **`ui/inventory_state.rs`** (nuevo, logica pura): `InventoryState` con
+  `hotbar[9]` + `main[27]` + `cursor` + `drag`. API `press/drag_enter/release`
+  (izquierda: coger/soltar/combinar/intercambiar; derecha: mitad/uno), reparto por
+  **arrastre** izquierdo (uniforme) y derecho (uno por ranura), **shift-click**
+  (cruza hotbar/inventario), **doble click** (recoge todo el mismo bloque),
+  **1-9** (intercambia con la hotbar) y **Q** (suelta una unidad o el stack).
+  La ventana de doble click vive en el estado (`tick(dt)`), no en el render.
+- **`engine/app.rs`**: la hotbar pasa de campo propio a `inventory: InventoryState`.
+  Se enlazan `press/release` en `MouseInput` y `drag_enter` en `CursorMoved`; el
+  catalogo creativo pone una **copia infinita** en el cursor. Se dibuja el stack
+  del cursor (sigue al raton), el **hover** de la ranura, el **numero** de
+  cantidad y un **tooltip** con el nombre del bloque.
+
+**Motivo.** Secciones 4.3 y 3.2 del prompt.
+
+**Test de propiedades (fuzz determinista).** `invariante_unidades_por_bloque_en_secuencias_aleatorias`
+lanza 2000 operaciones aleatorias (click/arrastre/shift/1-9) y comprueba que el
+total de unidades por bloque (ranuras + cursor) **no cambia** y que ningun stack
+supera 64. **Encontro un bug real**: `quick_move` usaba la cantidad original en
+cada combinacion y **duplicaba** unidades al combinar con varias pilas; corregido
+(combina en una pila y deja el resto).
+
+**Tests.** 8 en `inventory_state.rs`: reparto uniforme, uno-por-ranura, shift,
+doble click, tope 64, 1-9, Q y el fuzz de invariante.
+
+**Alternativas descartadas.**
+- Duplicar el estado de la hotbar (dejarla en `App` y copiarla al `InventoryState`):
+  dos fuentes de verdad. Se mueve el estado al modulo `ui`.
+- Resolver el click en `press` (sin arrastre): no permitiria el reparto por
+  arrastre que pide el prompt; se resuelve en `release` (click si 1 ranura,
+  reparto si varias).
+
+**Consecuencia.** `ui/inventory_state.rs` (nuevo, 8 tests), `ui/mod.rs`,
+`engine/app.rs`. **379 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.46.3`.
+`FORMAT_VERSION` 6 y `GENERATOR_VERSION` 20 intactos. Captura de humo
+`screenshots/ui_after_inventory.png`. **Pendiente** (Fase E/F): arte LibreSprite
+de ranuras/botones, fuente con minusculas, y la rejilla de inventario survival
+(el estado ya la soporta; falta la UI).
+
 ## Plantilla para nuevas entradas
 
 ```

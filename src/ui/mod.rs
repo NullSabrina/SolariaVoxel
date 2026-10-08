@@ -11,11 +11,13 @@
 
 pub mod input_mode;
 pub mod inventory;
+pub mod inventory_state;
 pub mod lang;
 pub mod options;
 pub mod screens;
 
 pub use input_mode::{Effect, InputMode, Mode, Overlay};
+pub use inventory_state::{Button, InventoryState, SlotRef, Zone};
 pub use lang::{Lang, translate};
 pub use options::Options;
 pub use screens::{Screen, ScreenStack};

@@ -31,8 +31,6 @@ use crate::player::PlayerController;
 use crate::render::{Renderer, SkyBasis};
 use crate::scene::{Camera, DayCycle, SkyParams, SkyState};
 use crate::ui::{Effect, InputMode, Mode, Overlay, Screen, ScreenStack};
-use crate::world::registry;
-
 /// Estado global de la aplicacion.
 ///
 /// Los campos que dependen de la plataforma son `Option` porque en winit 0.30
@@ -62,8 +60,8 @@ pub struct App {
     flying: bool,
     /// Bloque apuntado por la camara en el ultimo frame (y su cara).
     selection: Option<crate::world::RayHit>,
-    /// Barra rapida: 9 ranuras con un **stack** cada una (vacio = `None`).
-    hotbar: [Option<crate::world::ItemStack>; 9],
+    /// Inventario y hotbar (stacks, cursor, arrastre). Logica en `ui`.
+    inventory: crate::ui::InventoryState,
     /// Ranura seleccionada de la barra (0..9).
     hotbar_sel: usize,
     /// ¿Esta abierto el inventario? (`E`).
@@ -312,32 +310,25 @@ impl App {
 
     /// Bloque de la ranura `i` de la hotbar (aire si esta vacia).
     fn hotbar_block(&self, i: usize) -> crate::world::Block {
-        self.hotbar
-            .get(i)
-            .copied()
-            .flatten()
-            .map_or(crate::world::Block::Air, |s| s.block)
+        self.inventory.hotbar_block(i)
     }
 
     /// Bloque de la ranura activa de la hotbar.
     fn hotbar_block_sel(&self) -> crate::world::Block {
-        self.hotbar_block(self.hotbar_sel)
+        self.inventory.hotbar_block(self.hotbar_sel)
     }
 
     /// Pone un stack lleno del bloque dado en la ranura activa.
     fn set_hotbar_sel(&mut self, block: crate::world::Block) {
-        self.hotbar[self.hotbar_sel] = Some(crate::world::ItemStack::full(block));
+        self.inventory.set(
+            crate::ui::SlotRef::hotbar(self.hotbar_sel),
+            Some(crate::world::ItemStack::full(block)),
+        );
     }
 
-    /// Restaura la hotbar desde el guardado (`(id, cantidad)`), rellenando hasta
-    /// 9 ranuras. Ids desconocidos o cantidad 0 -> ranura vacia.
+    /// Restaura la hotbar desde el guardado (`(id, cantidad)`).
     fn set_hotbar_from_save(&mut self, saved: &[(u8, u8)]) {
-        self.hotbar = std::array::from_fn(|i| {
-            saved.get(i).and_then(|&(id, count)| {
-                let stack = crate::world::ItemStack::new(crate::world::Block::from_u8(id), count);
-                (!stack.is_empty()).then_some(stack)
-            })
-        });
+        self.inventory.set_hotbar_from_save(saved);
     }
 
     /// Intenta capturar el cursor. Si el SO lo rechaza (ventana sin foco) deja
@@ -379,6 +370,8 @@ impl App {
     /// el giro de camara (por frame) y corre la fisica del jugador a **timestep
     /// fijo** (acumulador).
     fn update(&mut self, frame_dt: f32) {
+        // Reloj del inventario (ventana de doble click).
+        self.inventory.tick(frame_dt);
         // El tiempo del mundo avanza solo si se esta jugando (no en demo/menus,
         // que lo congelan).
         let playing = self.screens.is_playing();
@@ -586,11 +579,7 @@ impl App {
         let p = self.player_pos;
         save.player_pos = [p.x, p.y, p.z];
         // Hotbar como stacks `(id, cantidad)`; ranuras vacias = `(0, 0)`.
-        save.hotbar = self
-            .hotbar
-            .iter()
-            .map(|s| s.map_or((0, 0), |s| (s.block.id(), s.count)))
-            .collect();
+        save.hotbar = self.inventory.hotbar_save();
         let chunks = save.chunks.len();
         let path = active_world_path(&self.world_base, &self.world_slug);
         let requested = match self.save_worker.as_ref() {
@@ -800,14 +789,23 @@ impl App {
             uv: region_uv(gui::HOTBAR),
             layer: -1,
         });
-        for (i, (cell, stack)) in self
-            .hotbar_cells(win_w, win_h)
-            .iter()
-            .zip(self.hotbar.iter())
-            .enumerate()
-        {
+        for (i, cell) in self.hotbar_cells(win_w, win_h).iter().enumerate() {
             let [sx, sy, _, _] = *cell;
+            let stack = self.inventory.get(crate::ui::SlotRef::hotbar(i));
             if i == self.hotbar_sel {
+                quads.push(UiQuad {
+                    rect: [sx, sy, slot, slot],
+                    uv: region_uv(gui::SELECTION),
+                    layer: -1,
+                });
+            }
+            // Hover: la ranura bajo el cursor se resalta.
+            if (self.inventory_open || self.crafting_open)
+                && self.cursor.0 >= sx
+                && self.cursor.0 < sx + slot
+                && self.cursor.1 >= sy
+                && self.cursor.1 < sy + slot
+            {
                 quads.push(UiQuad {
                     rect: [sx, sy, slot, slot],
                     uv: region_uv(gui::SELECTION),
@@ -827,6 +825,16 @@ impl App {
                     uv: [0.0, 0.0, 1.0, 1.0],
                     layer: stack.block.face_tile(Face::PosY) as i32,
                 });
+                if stack.count > 1 {
+                    let txt = stack.count.to_string();
+                    let tw = font::text_width(&txt, UI_SCALE);
+                    quads.extend(font::text_quads(
+                        &txt,
+                        sx + slot - tw - 2.0,
+                        sy + slot - 10.0,
+                        UI_SCALE,
+                    ));
+                }
             }
         }
 
@@ -948,6 +956,51 @@ impl App {
             let tw = font::text_width(name, UI_SCALE);
             let tx = ((win_w - tw) * 0.5).floor();
             let ty = (bar_y - 22.0).floor();
+            quads.push(UiQuad {
+                rect: [
+                    tx - 4.0,
+                    ty - 3.0,
+                    tw + 8.0,
+                    font::GLYPH_H as f32 * UI_SCALE + 6.0,
+                ],
+                uv: region_uv(gui::DIM),
+                layer: -1,
+            });
+            quads.extend(font::text_quads(name, tx, ty, UI_SCALE));
+        }
+
+        // Stack "en el cursor" (inventario/mesa): sigue al raton.
+        if (self.inventory_open || self.crafting_open)
+            && let Some(stack) = self.inventory.cursor()
+        {
+            let s = gui::SLOT as f32 * UI_SCALE;
+            let (mx, my) = self.cursor;
+            let (x, y) = (mx - s * 0.5, my - s * 0.5);
+            quads.push(UiQuad {
+                rect: [x + inset, y + inset, s - 2.0 * inset, s - 2.0 * inset],
+                uv: [0.0, 0.0, 1.0, 1.0],
+                layer: stack.block.face_tile(Face::PosY) as i32,
+            });
+            if stack.count > 1 {
+                let txt = stack.count.to_string();
+                let tw = font::text_width(&txt, UI_SCALE);
+                quads.extend(font::text_quads(
+                    &txt,
+                    x + s - tw - 2.0,
+                    y + s - 10.0,
+                    UI_SCALE,
+                ));
+            }
+        }
+
+        // Tooltip: nombre del bloque de la ranura bajo el cursor.
+        if (self.inventory_open || self.crafting_open)
+            && let Some(name) = self.hovered_block_name(win_w, win_h)
+        {
+            let tw = font::text_width(name, UI_SCALE);
+            let (mx, my) = self.cursor;
+            let tx = (mx + 12.0).min(win_w - tw - 8.0).max(2.0);
+            let ty = my + 12.0;
             quads.push(UiQuad {
                 rect: [
                     tx - 4.0,
@@ -1102,9 +1155,30 @@ impl App {
         quads
     }
 
-    /// Un click en el inventario: cambia de pestana o asigna el bloque pulsado a
-    /// la ranura activa de la hotbar.
-    fn inventory_click(&mut self) {
+    /// Nombre del bloque de la ranura bajo el cursor (hotbar o catalogo), para
+    /// el tooltip. `None` si no hay bloque.
+    fn hovered_block_name(&self, win_w: f32, win_h: f32) -> Option<&'static str> {
+        let (mx, my) = self.cursor;
+        let inside =
+            |r: &[f32; 4]| mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3];
+        for (i, cell) in self.hotbar_cells(win_w, win_h).iter().enumerate() {
+            if inside(cell) {
+                let b = self.inventory.hotbar_block(i);
+                return (b != crate::world::Block::Air)
+                    .then(|| crate::ui::lang::block_name(self.lang, b));
+            }
+        }
+        for (cell, item) in self.inventory_slots(win_w, win_h) {
+            if inside(&cell) {
+                return Some(crate::ui::lang::block_name(self.lang, item));
+            }
+        }
+        None
+    }
+
+    /// Pulsa en el inventario: pestanas, catalogo (copia infinita al cursor) o
+    /// una ranura de la hotbar (click/arrastre).
+    fn inventory_press(&mut self, button: crate::ui::Button, shift: bool) {
         let (win_w, win_h) = self.window_size_f();
         let (mx, my) = self.cursor;
         let inside =
@@ -1119,9 +1193,38 @@ impl App {
         }
         for (cell, item) in self.inventory_slots(win_w, win_h) {
             if inside(&cell) {
-                self.set_hotbar_sel(item);
-                self.hotbar_toast = Some((item, 2.0));
-                println!("[engine] ranura {} = {item:?}", self.hotbar_sel + 1);
+                self.inventory
+                    .set_cursor(Some(crate::world::ItemStack::full(item)));
+                return;
+            }
+        }
+        for (i, cell) in self.hotbar_cells(win_w, win_h).iter().enumerate() {
+            if inside(cell) {
+                self.inventory.press(
+                    Some(crate::ui::SlotRef::hotbar(i)),
+                    button,
+                    shift,
+                );
+                return;
+            }
+        }
+        self.inventory.press(None, button, false);
+    }
+
+    /// Suelta el boton en el inventario: aplica click o reparto.
+    fn inventory_release(&mut self) {
+        self.inventory.release();
+    }
+
+    /// Durante un arrastre, entra en la ranura de la hotbar bajo el cursor.
+    fn inventory_drag_to(&mut self) {
+        let (win_w, win_h) = self.window_size_f();
+        let (mx, my) = self.cursor;
+        for (i, cell) in self.hotbar_cells(win_w, win_h).iter().enumerate() {
+            let [sx, sy, w, h] = *cell;
+            if mx >= sx && mx < sx + w && my >= sy && my < sy + h {
+                self.inventory
+                    .drag_enter(crate::ui::SlotRef::hotbar(i));
                 return;
             }
         }
@@ -2019,13 +2122,9 @@ impl ApplicationHandler for App {
             "[world] presupuesto de fluidos: {} celdas / {:.1} ms por tick",
             self.fluid_budget.cells, self.fluid_budget.ms
         );
-        // Barra rapida por defecto.
         // Barra rapida por defecto: los primeros `HOTBAR_SLOTS` items.
-        self.hotbar = std::array::from_fn(|i| {
-            Some(crate::world::ItemStack::full(
-                registry::BlockRegistry::items()[i],
-            ))
-        });
+        self.inventory
+            .set_hotbar_from_save(&crate::world::save::default_hotbar());
 
         // Demo de interfaz: abrir el inventario, una busqueda y el nombre del
         // bloque sobre la hotbar (para capturas sin interaccion).
@@ -2283,54 +2382,66 @@ impl ApplicationHandler for App {
             }
 
             // Botones del raton.
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button,
-                ..
-            } => {
+            WindowEvent::MouseInput { state, button, .. } => {
                 if !self.screens.is_playing() {
                     // En menus, el clic izquierdo activa el boton bajo el cursor.
-                    if button == MouseButton::Left {
+                    if state == ElementState::Pressed && button == MouseButton::Left {
                         self.menu_click();
                     }
-                } else {
-                    match button {
-                        // Click izquierdo: con mesa abierta va a la mesa; en el
-                        // inventario elige bloque; capturado, rompe; si no, captura.
-                        MouseButton::Left => {
-                            if self.crafting_open {
-                                self.crafting_click();
-                            } else if self.inventory_open {
-                                self.inventory_click();
-                            } else if self.mouse_locked {
-                                self.break_block();
-                            } else {
-                                self.want_capture = true;
-                                self.try_capture();
-                            }
+                    return;
+                }
+                // Inventario: press/release (click y arrastre de stacks).
+                if self.inventory_open {
+                    let our = match button {
+                        MouseButton::Left => Some(crate::ui::Button::Left),
+                        MouseButton::Right => Some(crate::ui::Button::Right),
+                        _ => None,
+                    };
+                    if let Some(b) = our {
+                        let shift = self.input.is_pressed(KeyCode::ShiftLeft)
+                            || self.input.is_pressed(KeyCode::ShiftRight);
+                        match state {
+                            ElementState::Pressed => self.inventory_press(b, shift),
+                            ElementState::Released => self.inventory_release(),
                         }
-                        // Click derecho: sobre una mesa la abre; si no, coloca.
-                        MouseButton::Right
-                            if self.mouse_locked && !self.inventory_open && !self.crafting_open =>
-                        {
-                            let aimed_table = self
-                                .selection
-                                .zip(self.renderer.as_ref())
-                                .map(|(hit, r)| {
-                                    r.block_at(hit.block) == crate::world::Block::CraftingTable
-                                })
-                                .unwrap_or(false);
-                            if aimed_table {
-                                self.crafting_open = true;
-                                self.inventory_open = false;
-                                self.unlock_mouse();
-                                println!("[crafteo] mesa abierta (E o Escape para cerrar)");
-                            } else {
-                                self.place_block();
-                            }
-                        }
-                        _ => {}
                     }
+                    return;
+                }
+                if state != ElementState::Pressed {
+                    return;
+                }
+                match button {
+                    // Click izquierdo: con mesa abierta va a la mesa; capturado,
+                    // rompe; si no, captura el cursor.
+                    MouseButton::Left => {
+                        if self.crafting_open {
+                            self.crafting_click();
+                        } else if self.mouse_locked {
+                            self.break_block();
+                        } else {
+                            self.want_capture = true;
+                            self.try_capture();
+                        }
+                    }
+                    // Click derecho: sobre una mesa la abre; si no, coloca.
+                    MouseButton::Right if self.mouse_locked => {
+                        let aimed_table = self
+                            .selection
+                            .zip(self.renderer.as_ref())
+                            .map(|(hit, r)| {
+                                r.block_at(hit.block) == crate::world::Block::CraftingTable
+                            })
+                            .unwrap_or(false);
+                        if aimed_table {
+                            self.crafting_open = true;
+                            self.inventory_open = false;
+                            self.unlock_mouse();
+                            println!("[crafteo] mesa abierta (E o Escape para cerrar)");
+                        } else {
+                            self.place_block();
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -2369,6 +2480,10 @@ impl ApplicationHandler for App {
             // Posicion del cursor (para el inventario).
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x as f32, position.y as f32);
+                // Arrastre de stacks: registra la ranura bajo el cursor.
+                if self.inventory_open {
+                    self.inventory_drag_to();
+                }
             }
 
             // Si perdemos el foco (alt-tab), liberamos el cursor y **olvidamos las
