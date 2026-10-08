@@ -4299,6 +4299,39 @@ navegacion por teclado). Usa el arte de la Fase E.
 `Cargo.toml -> 0.46.5`. `FORMAT_VERSION` 6 / `GENERATOR_VERSION` 20 intactos.
 Captura `screenshots/ui_after_menu.png` (titulo con boton enfocado/resaltado).
 
+## v0.46.6 (MEGA PROMPT 3) - Fase G: animacion y ritmo
+
+### 2026-10-08 - Rebote de hotbar y opcion "reducir movimiento"
+
+**Decision.**
+- **Rebote de la ranura seleccionada** (seccion 3.5): al cambiar de ranura (teclas
+  1-9 o rueda) se arma `hotbar_bounce = 1.0` y decae con el **tiempo de frame**
+  (`frame_dt / 0.15`) en `update`. El icono de la ranura activa se desplaza con un
+  rebote sinusoidal amortiguado (`4 * b * sin(b*PI)` px). El temporizador vive en
+  el estado de la app, no en el render.
+- **"Reducir movimiento"** (accesibilidad, seccion 3.6): nuevo `reduce_motion` en
+  `Options` (persistido en `options.json`, `#[serde(default)]`), con una fila en
+  el menu de Opciones. Con el activo, el rebote se apaga (bounce = 0).
+
+**Motivo.** Secciones 3.6 (ritmo/duraciones) y 3.5 (rebote) del prompt.
+
+**Pendiente dentro del bloque (honesto).**
+- **Fade de transiciones** (apertura/cierre de inventario/pausa, cambio de
+  pantalla) y **fundido del toast**, y **texto amarillo en hover** y **sombra de
+  fuente**: todos necesitan **`tint` por quad** (seccion 4.6), que hoy no existe en
+  `UiQuad` (31 constructores + `ui.wgsl` + vertice de UI). Es la pieza que habilita
+  esas animaciones; se hara en una entrada propia.
+- El **toast** ya temporiza (1.5 s) pero sin fundido (misma razon: falta `tint`).
+
+**Alternativas descartadas.**
+- Simular el fade sin `tint` (encoger el rect): se ve como un "pop", no un fundido;
+  se prefiere dejarlo pendiente y hacerlo bien con `tint`.
+
+**Consecuencia.** `ui/options.rs` (`reduce_motion`), `engine/app.rs`
+(`hotbar_bounce`, decaimiento en `update`, rebote en el dibujo, fila de opciones).
+**380 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.46.6`. `FORMAT_VERSION`
+6 / `GENERATOR_VERSION` 20 intactos.
+
 ## Plantilla para nuevas entradas
 
 ```

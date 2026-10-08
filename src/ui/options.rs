@@ -47,6 +47,9 @@ pub struct Options {
     pub autosave_secs: f32,
     /// Mostrar el overlay F3 al arrancar.
     pub show_f3: bool,
+    /// Reduce las animaciones de la interfaz (accesibilidad).
+    #[serde(default)]
+    pub reduce_motion: bool,
     #[serde(default)]
     pub bindings: Vec<Binding>,
 }
@@ -85,6 +88,7 @@ impl Default for Options {
             lang: "es".to_string(),
             autosave_secs: 300.0,
             show_f3: false,
+            reduce_motion: false,
             bindings: DEFAULT_BINDINGS
                 .iter()
                 .map(|(a, k)| Binding {

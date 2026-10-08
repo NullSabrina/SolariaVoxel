@@ -66,6 +66,8 @@ pub struct App {
     menu_focus: usize,
     /// Boton de menu pulsado con el raton (estado "pulsado").
     menu_pressed: Option<usize>,
+    /// Rebote de la ranura seleccionada de la hotbar (1.0 -> 0.0 en ~150 ms).
+    hotbar_bounce: f32,
     /// Ranura seleccionada de la barra (0..9).
     hotbar_sel: usize,
     /// ¿Esta abierto el inventario? (`E`).
@@ -376,6 +378,13 @@ impl App {
     fn update(&mut self, frame_dt: f32) {
         // Reloj del inventario (ventana de doble click).
         self.inventory.tick(frame_dt);
+        // Rebote de la hotbar: decae con el tiempo de frame (o se apaga con
+        // "reducir movimiento").
+        if self.options.reduce_motion {
+            self.hotbar_bounce = 0.0;
+        } else {
+            self.hotbar_bounce = (self.hotbar_bounce - frame_dt / 0.15).max(0.0);
+        }
         // El tiempo del mundo avanza solo si se esta jugando (no en demo/menus,
         // que lo congelan).
         let playing = self.screens.is_playing();
@@ -816,13 +825,19 @@ impl App {
                     layer: -1,
                 });
             }
+            // Rebote de la ranura seleccionada (animacion breve, ~150 ms).
+            let bounce = if i == self.hotbar_sel {
+                4.0 * self.hotbar_bounce * (self.hotbar_bounce * std::f32::consts::PI).sin()
+            } else {
+                0.0
+            };
             if let Some(stack) = stack
                 && !stack.is_empty()
             {
                 quads.push(UiQuad {
                     rect: [
                         sx + inset,
-                        sy + inset,
+                        sy + inset - bounce,
                         slot - 2.0 * inset,
                         slot - 2.0 * inset,
                     ],
@@ -835,7 +850,7 @@ impl App {
                     quads.extend(font::text_quads(
                         &txt,
                         sx + slot - tw - 2.0,
-                        sy + slot - 10.0,
+                        sy + slot - 10.0 - bounce,
                         UI_SCALE,
                     ));
                 }
@@ -1452,6 +1467,10 @@ impl App {
                     format!("Idioma: {}", o.lang),
                     format!("Autoguardado: {:.0} s", o.autosave_secs),
                     format!("F3 al iniciar: {}", if o.show_f3 { "sí" } else { "no" }),
+                    format!(
+                        "Reducir movimiento: {}",
+                        if o.reduce_motion { "sí" } else { "no" }
+                    ),
                     "Hecho".into(),
                 ]
             }
@@ -1685,7 +1704,8 @@ impl App {
                 }
             }
             7 => self.options.show_f3 = !self.options.show_f3,
-            8 => {
+            8 => self.options.reduce_motion = !self.options.reduce_motion,
+            9 => {
                 // "Hecho": vuelve a la pantalla anterior.
                 self.menu_back();
                 return;
@@ -2422,6 +2442,7 @@ impl ApplicationHandler for App {
                                     }
                                 } else if let Some(slot) = digit_slot(code) {
                                     self.hotbar_sel = slot;
+                                    self.hotbar_bounce = 1.0;
                                     self.hotbar_toast = Some((self.hotbar_block(slot), 2.0));
                                     println!(
                                         "[engine] ranura {} ({:?})",
@@ -2517,8 +2538,10 @@ impl ApplicationHandler for App {
                     };
                     if step > 0.0 {
                         self.hotbar_sel = (self.hotbar_sel + 8) % 9;
+                        self.hotbar_bounce = 1.0;
                     } else if step < 0.0 {
                         self.hotbar_sel = (self.hotbar_sel + 1) % 9;
+                        self.hotbar_bounce = 1.0;
                     }
                     self.hotbar_toast = Some((self.hotbar_block_sel(), 2.0));
                 } else {
