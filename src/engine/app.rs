@@ -62,6 +62,10 @@ pub struct App {
     selection: Option<crate::world::RayHit>,
     /// Inventario y hotbar (stacks, cursor, arrastre). Logica en `ui`.
     inventory: crate::ui::InventoryState,
+    /// Foco de teclado en los menus (indice de boton visible).
+    menu_focus: usize,
+    /// Boton de menu pulsado con el raton (estado "pulsado").
+    menu_pressed: Option<usize>,
     /// Ranura seleccionada de la barra (0..9).
     hotbar_sel: usize,
     /// ¿Esta abierto el inventario? (`E`).
@@ -1496,6 +1500,36 @@ impl App {
             .collect()
     }
 
+    /// Navegacion por teclado en menus con botones: flechas mueven el foco
+    /// (visible), Enter/Espacio activan el boton enfocado.
+    fn menu_nav_key(&mut self, code: KeyCode) {
+        let n = self.menu_labels().len();
+        if n == 0 {
+            return;
+        }
+        self.menu_focus = self.menu_focus.min(n - 1);
+        match code {
+            KeyCode::ArrowUp => self.menu_focus = self.menu_focus.saturating_sub(1),
+            KeyCode::ArrowDown => {
+                if self.menu_focus + 1 < n {
+                    self.menu_focus += 1;
+                }
+            }
+            KeyCode::Enter | KeyCode::Space => self.menu_action(self.menu_focus),
+            _ => {}
+        }
+    }
+
+    /// Indice del boton de menu bajo el cursor, si lo hay.
+    fn menu_button_at(&self) -> Option<usize> {
+        let (win_w, win_h) = self.window_size_f();
+        let (mx, my) = self.cursor;
+        let labels = self.menu_labels();
+        self.menu_button_rects(win_w, win_h, labels.len())
+            .iter()
+            .position(|r| mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3])
+    }
+
     /// Ejecuta la accion del boton `i` de la pantalla actual.
     fn menu_action(&mut self, i: usize) {
         if let Some(slug) = self.confirm_delete.clone() {
@@ -1784,12 +1818,9 @@ impl App {
                 KeyCode::Enter => self.menu_action(0),
                 _ => {}
             },
-            Screen::Title | Screen::Pause => {
-                if code == KeyCode::Enter {
-                    self.menu_action(0);
-                }
+            Screen::Title | Screen::Pause | Screen::Options => {
+                self.menu_nav_key(code);
             }
-            Screen::Options => {}
             Screen::Controls => {
                 // Si hay una accion esperando tecla, la captura y reasigna.
                 if let Some(action) = self.rebinding.clone()
@@ -1800,6 +1831,8 @@ impl App {
                     }
                     self.save_options();
                     self.rebinding = None;
+                } else {
+                    self.menu_nav_key(code);
                 }
             }
             Screen::Playing => {}
@@ -1907,17 +1940,38 @@ impl App {
             }
         }
 
-        // Botones.
+        // Botones con estado (normal/hover/pulsado) + foco de teclado.
         let labels = self.menu_labels();
-        for (label, rect) in labels
+        let n = labels.len();
+        let focus = self.menu_focus.min(n.saturating_sub(1));
+        let (mx, my) = self.cursor;
+        for (i, (label, rect)) in labels
             .iter()
-            .zip(self.menu_button_rects(win_w, win_h, labels.len()))
+            .zip(self.menu_button_rects(win_w, win_h, n))
+            .enumerate()
         {
+            let hover =
+                mx >= rect[0] && mx < rect[0] + rect[2] && my >= rect[1] && my < rect[1] + rect[3];
+            let region = if self.menu_pressed == Some(i) {
+                gui::BUTTON_PRESSED
+            } else if hover || i == focus {
+                gui::BUTTON_HOVER
+            } else {
+                gui::BUTTON
+            };
             quads.push(UiQuad {
                 rect,
-                uv: region_uv(gui::SLOT_REGION),
+                uv: region_uv(region),
                 layer: -1,
             });
+            if i == focus {
+                // Marco de foco (1 px por dentro).
+                let border = region_uv(gui::SELECTION);
+                quads.push(UiQuad { rect: [rect[0], rect[1], rect[2], 1.0], uv: border, layer: -1 });
+                quads.push(UiQuad { rect: [rect[0], rect[1] + rect[3] - 1.0, rect[2], 1.0], uv: border, layer: -1 });
+                quads.push(UiQuad { rect: [rect[0], rect[1], 1.0, rect[3]], uv: border, layer: -1 });
+                quads.push(UiQuad { rect: [rect[0] + rect[2] - 1.0, rect[1], 1.0, rect[3]], uv: border, layer: -1 });
+            }
             let lw = font::text_width(label, UI_SCALE);
             quads.extend(font::text_quads(
                 label,
@@ -2384,9 +2438,15 @@ impl ApplicationHandler for App {
             // Botones del raton.
             WindowEvent::MouseInput { state, button, .. } => {
                 if !self.screens.is_playing() {
-                    // En menus, el clic izquierdo activa el boton bajo el cursor.
-                    if state == ElementState::Pressed && button == MouseButton::Left {
-                        self.menu_click();
+                    // En menus, el clic izquierdo activa el boton bajo el cursor;
+                    // se marca "pulsado" mientras el boton esta hundido.
+                    match state {
+                        ElementState::Pressed if button == MouseButton::Left => {
+                            self.menu_pressed = self.menu_button_at();
+                            self.menu_click();
+                        }
+                        ElementState::Released => self.menu_pressed = None,
+                        _ => {}
                     }
                     return;
                 }

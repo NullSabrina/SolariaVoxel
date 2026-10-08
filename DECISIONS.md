@@ -4263,6 +4263,42 @@ el servidor MCP `libresprite_run_script`.
 `FORMAT_VERSION` 6 / `GENERATOR_VERSION` 20 intactos. Captura
 `screenshots/ui_after_gui_art.png` (el juego carga el arte nuevo).
 
+## v0.46.5 (MEGA PROMPT 3) - Fase F: menus con estados de boton y teclado
+
+### 2026-10-08 - Botones normal/hover/pulsado, foco y navegacion por flechas
+
+**Decision.**
+- **Estados de boton**: `build_menu_ui` elige la region segun el estado
+  (`gui::BUTTON` normal, `BUTTON_HOVER` bajo el cursor o enfocado,
+  `BUTTON_PRESSED` mientras el boton esta hundido). Se dibuja un **marco de foco**
+  (1 px) en el boton enfocado. Antes todos los botones usaban `SLOT_REGION`.
+- **Navegacion por teclado**: nuevos campos `menu_focus`/`menu_pressed`;
+  `menu_nav_key` mueve el foco con **flechas arriba/abajo** y activa con
+  **Enter/Espacio** (`menu_action(foco)`) en Title/Pause/Options/Controls.
+  `menu_button_at` da el boton bajo el cursor para el estado "pulsado".
+
+**Motivo.** Secciones 3.3 y 2.3 del prompt (botones con estados y foco visible,
+navegacion por teclado). Usa el arte de la Fase E.
+
+**Pendiente dentro del bloque (honesto).**
+- **Escala de GUI** (`Auto`/1x-4x, seccion 4.5): hoy `UI_SCALE = 2.0` es una
+  constante usada en todo el layout; hacerla dinamica toca decenas de sitios y el
+  `options.json`. Se aplaza a una entrada propia.
+- **Panoramica de titulo** (arte LibreSprite) y **carga del manifiesto
+  `gui.json`** en runtime (hoy las regiones son constantes).
+- **Fuente con minusculas + sombra** (necesita `tint` por quad).
+
+**Alternativas descartadas.**
+- Texto amarillo en hover (como Minecraft): la fuente no tiene `tint` por quad
+  (seccion 4.6); se usa el cambio de fondo del boton + marco de foco.
+- Navegacion por flechas tambien en el selector de mundos: alli las flechas ya
+  recorren la **lista**; los botones se activan con raton/Enter.
+
+**Consecuencia.** `engine/app.rs` (estados de boton + `menu_focus`/`menu_pressed` +
+`menu_nav_key`/`menu_button_at`). **380 tests; 0 fallos**; clippy limpio.
+`Cargo.toml -> 0.46.5`. `FORMAT_VERSION` 6 / `GENERATOR_VERSION` 20 intactos.
+Captura `screenshots/ui_after_menu.png` (titulo con boton enfocado/resaltado).
+
 ## Plantilla para nuevas entradas
 
 ```
