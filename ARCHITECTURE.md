@@ -185,6 +185,20 @@ una migracion**; hay tests que lo verifican.
   blending alfa y sin escritura de z (`ScenePipeline::water_pipeline`). Los oceanos
   se generan rellenando de agua el aire bajo el **nivel del mar** (`SEA_LEVEL`),
   con playas de arena en las columnas a ras de agua.
+- **Modelo de agua (fuente -> distancia, `world/water.rs`)**: nivel 8 = fuente
+  (inagotable); el flujo vale `8 - distancia` (alcance 7). Una celda es *falling*
+  (nivel 8) si la de arriba tiene agua (cadena vertical bajo fuente/caida); una
+  celda a nivel 8 **solo** se reparte en horizontal al tocar suelo (asi una cascada
+  no ensancha a cada altura). 2+ fuentes ortogonales hacen fuente la celda del 2x2;
+  al quitar la fuente el agua **retrocede** y se seca. El estado vive en un **nibble
+  de flujo** por celda (la fuente es `Block::Water` con flujo 0). El tick corre a
+  **10 Hz** con presupuesto de celdas/ms (`FluidBudget`, 16 384 / 6 ms). El agua
+  **en equilibrio** (oceano/lago quieto) se salta -> coste 0.
+- **Carga del agua**: al cargar una columna se despierta su pista de worldgen, sus
+  flujos restaurados de disco (nibble > 0) y el agua no en equilibrio de la **cara
+  compartida** de los vecinos (un flujo que cruzaba a un chunk no cargado no se
+  pierde). El agua de worldgen es **fuente** (estable, como Minecraft): no se
+  drena; solo se simula lo que no esta en equilibrio.
 - **El raycast** golpea `is_solid || is_visible` (se puede apuntar la antorcha).
 - **Luz**: `u8` por celda (0..15) para cielo y para bloque, por separado. En el
   vertice van normalizadas a 0..1 (`sky`, `block`); el `day_factor` (0..1) las

@@ -11,6 +11,7 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
+use std::io::BufWriter;
 
 use solaria_voxel::world::water::{
     DirtyQueue, Fluid, FluidGrid, MAX_LEVEL, neighborhood, step_cell,
@@ -155,7 +156,45 @@ fn escenario_fuente_sobre_suelo() {
         per_y.push_str(&format!(" y{y}:{}", g.at_height(y)));
     }
     println!("  celdas por altura:{per_y}");
+    write_levels_png("screenshots/water_probe_fuente.png", &g, 1, 16);
     println!();
+}
+
+/// "Captura" data-driven (sin GPU): mapa cenital de niveles en la capa `y`,
+/// en escala de grises (0 = sin agua, 255 = nivel 8). Muestra el charco y su
+/// decaimiento.
+fn write_levels_png(path: &str, g: &ProbeGrid, y: i32, half: i32) {
+    let n = (2 * half + 1) as u32;
+    let mut img = vec![0u8; (n * n * 4) as usize];
+    for pz in -half..=half {
+        for px in -half..=half {
+            let v = (g.level_at([px, y, pz]) as f32 / MAX_LEVEL as f32 * 255.0) as u8;
+            let i = (((pz + half) as u32 * n + (px + half) as u32) * 4) as usize;
+            img[i] = v;
+            img[i + 1] = v;
+            img[i + 2] = v;
+            img[i + 3] = 255;
+        }
+    }
+    std::fs::create_dir_all("screenshots").ok();
+    let file = match std::fs::File::create(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("  no se pudo crear {path}: {e}");
+            return;
+        }
+    };
+    let mut enc = png::Encoder::new(BufWriter::new(file), n, n);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    match enc.write_header() {
+        Ok(mut w) => {
+            if let Err(e) = w.write_image_data(&img) {
+                eprintln!("  PNG data: {e}");
+            }
+        }
+        Err(e) => eprintln!("  PNG header: {e}"),
+    }
 }
 
 /// 2.1: cascada de 6 bloques. El bug esperado: agua lateral a cada altura.

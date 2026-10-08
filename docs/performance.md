@@ -79,6 +79,9 @@ por tick), asi que el tick se abarata mucho:
 
 El tick sube a 20 Hz (Minecraft usa 0.25 s por paso) para que el flujo sea agil.
 
+> **Supersedido (v0.21.1):** el tick bajo a **10 Hz** (`WATER_PERIOD = 0.1`), que
+> es el valor vigente. Ver `DECISIONS.md` (v0.21.1).
+
 ### FASE 7 — decoracion por reglas
 
 El `terrain_generate_column` queda practicamente igual (~6.1 ms/columna): la

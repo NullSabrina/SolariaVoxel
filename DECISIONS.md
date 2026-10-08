@@ -4013,6 +4013,55 @@ inconsistente respecto a la superior. Ahora el brillo es coherente.
 (sin GPU), asi el cambio de shader queda **validado**; la comprobacion visual en
 GPU sigue pendiente.
 
+## v0.45.6 (MEGA PROMPT 2) - Fase F: documentacion, capturas y cierre
+
+### 2026-10-08 - Cierre del Prompt 2 (agua)
+
+**Decision.** Se cierra el MEGA PROMPT 2. Documentacion al dia:
+- `ARCHITECTURE.md`: seccion de agua reescrita con el **modelo real** (fuente ->
+  distancia, *falling* como cadena vertical, reparto horizontal solo al tocar
+  suelo, 2x2, retroceso, nibble de flujo, tick a **10 Hz** con `FluidBudget`,
+  equilibrio a coste 0, y como se **despierta** el agua al cargar).
+- `docs/performance.md`: nota de **supersedido** (el tick subio a 20 Hz en v0.21.0
+  pero v0.21.1 lo bajo a **10 Hz**, valor vigente).
+- `examples/water_probe.rs`: exporta `screenshots/water_probe_fuente.png` (mapa
+  cenital de niveles en escala de grises). "Captura" data-driven, ya que el
+  entorno **no tiene GPU** para renderizar el juego.
+
+**Tabla antes/despues (`water_probe`, 16 384 celdas/tick).**
+| escenario | antes (Fase A) | despues |
+|---|---|---|
+| fuente y=10: celdas | 38 510 | **122** |
+| fuente y=10: niveles en y=1 (d=0..) | 8,8,8,8,8,8,8,8,8,8 | **8,7,6,5,4,3,2,1,0,0** |
+| cascada de 6: celdas | 9 218 | **118** |
+| cascada de 6: lateral en y=2..6 | 2520..112 | **0** |
+| regresion `World` (1 fuente) | 6 652 | **< 1 000** |
+
+**Lo que no se pudo verificar (honesto).**
+- **Visual en GPU**: no hay GPU en el entorno. La captura es un PNG de niveles; no
+  se renderizo una escena real. Los shaders se **validan** con naga en `cargo test`
+  (`los_shaders_wgsl_compilan`), pero no se ve el resultado.
+- El orden **dentro** de una seccion de agua (pase de dos capas) no se implemento
+  (el orden por seccion ya existe); no verificable aqui.
+
+**Riesgos y deuda tecnica.**
+- El escaneo de la cara compartida al cargar una columna es O(4 x 16 x altura);
+  medido despreciable frente a la generacion (`warm_streaming` 291.5 ms), pero
+  conviene vigilarlo si el perfil cambia.
+- "Lago generado drenable" queda fuera de alcance (worldgen es fuente, estable).
+
+**Criterios de aceptacion (§6).** Cumplidos: bug 2.1 acotado con cifras; cero
+hojas borradas por agua (Fase E del Prompt 1); mundo guardado con agua en movimiento
+se reanuda (despertar al cargar); flujo en borde de chunk no se pierde; agua en
+reposo a coste 0 (`water_in_equilibrium`); tick unificado a 10 Hz en codigo,
+`ARCHITECTURE.md` y `DECISIONS.md`; cascadas sin rendijas; `FORMAT_VERSION` intacto
+(5) y `GENERATOR_VERSION` intacto (20) (el agua generada sigue siendo fuente, no
+cambia el mundo).
+
+**Consecuencia.** `ARCHITECTURE.md`, `docs/performance.md`,
+`examples/water_probe.rs`, `screenshots/water_probe_fuente.png`. **359 tests; 0
+fallos**; clippy limpio. `Cargo.toml -> 0.45.6`.
+
 ## Plantilla para nuevas entradas
 
 ```
