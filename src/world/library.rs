@@ -462,6 +462,25 @@ mod tests {
     }
 
     #[test]
+    fn un_mundo_nuevo_conserva_semilla_y_generador() {
+        // Contrato del que depende el arreglo de "no puedo entrar en un mundo
+        // nuevo": un mundo recien creado solo tiene `level.json`, y la entrada al
+        // mundo usa la semilla/generador de esos metadatos.
+        let base = temp_base("seedgen");
+        let w = create_world_kind(&base, "Con semilla", 123_456, 10, "larion").unwrap();
+        let meta = load_meta(&w.dir(&base)).unwrap();
+        assert_eq!(meta.seed, 123_456);
+        assert_eq!(meta.generator_kind, "larion");
+        assert_eq!(
+            crate::world::GeneratorKind::from_name(&meta.generator_kind),
+            crate::world::GeneratorKind::Larion
+        );
+        // Aun no hay `world.vf`: es justo el caso que antes rechazaba la entrada.
+        assert!(!w.dir(&base).join(WORLD_FILE).exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn importa_el_world_vf_antiguo_una_sola_vez() {
         let base = temp_base("import");
         std::fs::write(base.join(WORLD_FILE), b"antiguo").unwrap();

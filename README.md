@@ -8,28 +8,30 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.44.4` — Sol y luna como cubos texturizados
+## Estado actual: `v0.47.0` — Generador Larion (terreno a escala monumental)
 
-- **Sol y luna = cubos 3D con texturas** (`v0.44.4`): vuelven a ser **cubos**
-  (intersección rayo-caja, sombreado por cara) pero con **superficies por cara**
-  nuevas (no discos 2D): sol amarillo moteado emisivo (`assets/sun.png`) y luna gris
-  con **cráteres** (`assets/moon.png`) + **fase** aplicada en el shader. Texturas
-  reproducibles con `cargo run --example gen_celestial`. Fallback procedural.
-- **Decoración sin flotantes** (`v0.44.3`, C5) y **preview del grafo** (C6).
-- **Grafo de densidad** (`v0.44.0`–`v0.44.2`, C1–C4): `GeneratorKind` en
-  `level.json` (coexistencia), densidad 3D en retícula 4×4×4 + interpolación,
-  clima (temperatura/lluvia) como canales del grafo. Mundos nuevos con
-  `SOLARIA_GENERATOR=graph`.
-- **Fix**: la luz de bloque no propaga a columnas no cargadas.
-- **Fuente con tildes** (`v0.43.3`), **Opciones/Controles** (`v0.43.1`/`v0.43.2`),
-  **mundos múltiples y pantallas** (`v0.42.0`), **UI creativa** (`v0.41.0`),
-  **distancia de vista** (`v0.33.0`) y **cielo/atmosfera** (`v0.30`–`v0.31.1`).
-- **Pendiente honesto**: ríos/acuífero en el camino graph; toolkit nine-slice;
-  `sky_physical` opcional.
+- **Generador Larion** (`v0.47.0`, MEGA PROMPT 4): tercer camino de generación
+  (`GeneratorKind::Larion`, en `world/worldgen/larion/`) con **continentalidad +
+  domain warping horizontal**, **erosión** que decide la forma del relieve,
+  crestas multifractales, **densidad 3D en banda** (voladizos), clima en **bandas**
+  latitudinales y **biomas multi-paramétricos** con mezcla. Sobre un área
+  continental de ~20 000 bloques: rango de altura `p99−p01 = 176..192`, cumbres
+  hasta ~300, 7 biomas (ninguno > 38 %) y ~1,44× el coste por columna del legacy.
+  Mundos nuevos con `SOLARIA_GENERATOR=larion`. `Legacy16` y `Graph` **no cambian**.
+- **Fix de mundos nuevos** (`v0.47.0`): crear un mundo y entrar en él ya funciona
+  (antes, sin `world.vf`, la entrada se rechazaba y siempre se caía en la semilla
+  13371). El campo **Semilla** se puede pulsar/`TAB` para escribir un número o un
+  texto.
+- **Menús con estados de botón y teclado** (`v0.46.5`), **inventario con
+  arrastre/tooltips** (`v0.46.3`), **arte de GUI en LibreSprite** (`v0.46.4`),
+  **rebote de hotbar / reducir movimiento** (`v0.46.6`).
+- **Sol y luna como cubos texturizados** (`v0.44.4`), **grafo de densidad**
+  (`v0.44.0`), **worldgen por etapas** (`v0.17`–`v0.25`).
+- **Pendiente honesto**: validación visual en GPU de Larion; ríos/acuífero del
+  camino `graph`.
 
-`GENERATOR_VERSION = 17` · `FORMAT_VERSION = 5`.
-
-`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+Versiones: `GENERATOR_VERSION = 21` · `FORMAT_VERSION = 6` ·
+`LARION_CONFIG_VERSION = 1`.
 
 - **Overlay F3** (`v0.27.0`): pantalla de diagnostico en pantalla (dos columnas)
   con una **fuente bitmap 5x7** propia.
@@ -102,7 +104,7 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_SEARCH` | Texto de busqueda inicial del inventario (abre el inventario). |
 | `SOLARIA_TOAST` | Muestra el nombre del bloque de esa ranura sobre la hotbar. |
 | `SOLARIA_HOME` | Directorio base de los mundos (`saves/` cuelga de aqui). |
-| `SOLARIA_GENERATOR` | Generador de mundos **nuevos**: `legacy16` (def.) o `graph`. |
+| `SOLARIA_GENERATOR` | Generador de mundos **nuevos**: `legacy16` (def.), `graph` o `larion`. |
 | `SOLARIA_SCREEN` | Arranca en una pantalla: `title`, `worlds`, `create`, `pause`, `options`, `controls`. |
 | `SOLARIA_FLUID_BUDGET_CELLS` | Celdas de fluido simuladas por tick. |
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
@@ -123,10 +125,12 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-336 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
-fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color, distancia de
-vista, interfaz creativa, grafo de densidad, libreria de mundos, pantallas y
-opciones). Lint:
+429 tests de unidad e integracion (+1 benchmark ignorado por defecto:
+`cargo test --release -- --ignored el_coste_por_columna`), cubriendo
+determinismo, persistencia, meshing, luz, fluidos estilo Minecraft, raycast,
+worldgen por etapas, **generador Larion** (continuidad entre chunks, cobertura de
+biomas, cumbres, coste), cuevas, cielo/color, distancia de vista, interfaz,
+libreria de mundos, pantallas y opciones. Lint:
 
 ```bash
 cargo fmt
@@ -163,6 +167,14 @@ Preview del **grafo de densidad** (altura + corte de densidad, offline):
 
 ```bash
 cargo run --release --example graph_preview -- 13371 384 4
+```
+
+Preview del **generador Larion** (altura/bioma/erosion/continental/pendiente/rio
+y corte vertical de densidad, offline):
+
+```bash
+cargo run --release --example larion_preview -- 13371 512 40 height
+cargo run --release --example larion_preview -- 13371 512 6 density
 ```
 
 Regenerar las **texturas del cubo** del sol/luna (`assets/sun.png`, `assets/moon.png`):
@@ -229,7 +241,8 @@ src/
     ├── atlas.rs        Atlas de texturas (carga assets/atlas.png; fallback).
     ├── terrain.rs      Generacion: geografia, clima/biomas, superficie, cuevas.
     ├── worldgen/       Motor de worldgen por etapas (config, math, cells, biomes,
-    │                   decoration, graph: grafo de densidad DAG).
+    │                   decoration, trees) + graph (DAG) + larion (pipeline
+    │                   multiescala: noise, spline, erosion, density, biome, rios).
     ├── caves.rs        Cuevas 3D (spaghetti/cheese/pillar) con densidad por Y.
     ├── mesher.rs       Meshing naive con face culling (referencia).
     ├── greedy.rs       Greedy meshing (fusiona caras; separa el agua).
@@ -244,7 +257,7 @@ src/
     ├── bench.rs        Benchmarks reproducibles (solo tests).
     ├── save.rs         Versionado + guardado/carga del mundo (bincode + LZ4).
     ├── library.rs      Mundos multiples: saves/<slug>/ + level.json + importar.
-    ├── generator.rs    GeneratorKind (coexistencia legacy/graph).
+    ├── generator.rs    GeneratorKind (coexistencia legacy16/graph/larion).
     └── store.rs        World: columnas en memoria + streaming + luz.
 ```
 

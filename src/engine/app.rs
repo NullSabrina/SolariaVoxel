@@ -1374,8 +1374,30 @@ impl App {
                 (save.header.seed, restored, save.header, save.player_pos, save.hotbar)
             }
             Err(e) => {
-                eprintln!("[world] no se pudo cargar '{slug}': {e}");
-                return;
+                // Un mundo **recien creado** solo tiene `level.json` (aun no hay
+                // `world.vf`). Antes esto rechazaba la entrada y hacia imposible
+                // jugar un mundo nuevo; ahora se arranca con la **semilla y el
+                // generador de sus metadatos**.
+                let dir = crate::world::library::saves_dir(&base).join(&slug);
+                match crate::world::library::load_meta(&dir) {
+                    Some(meta) => {
+                        println!(
+                            "[world] '{}' sin world.vf ({e}); se inicia con semilla {}",
+                            slug, meta.seed
+                        );
+                        (
+                            meta.seed,
+                            Vec::new(),
+                            crate::world::WorldHeader::new(meta.seed, now_unix()),
+                            crate::world::save::DEFAULT_PLAYER_POS,
+                            crate::world::save::default_hotbar(),
+                        )
+                    }
+                    None => {
+                        eprintln!("[world] no se pudo cargar '{slug}': {e}");
+                        return;
+                    }
+                }
             }
         };
         let player_pos =
@@ -1781,6 +1803,20 @@ impl App {
     fn menu_click(&mut self) {
         let (win_w, win_h) = self.window_size_f();
         let (mx, my) = self.cursor;
+        // Campos de texto de "Crear/renombrar": un clic enfoca Nombre o Semilla.
+        if self.screens.top() == Screen::CreateWorld {
+            let fx = ((win_w - 360.0) * 0.5).floor();
+            let box_x = fx + 90.0;
+            for (field, fy) in [(0usize, 96.0f32), (1usize, 114.0f32)] {
+                if field == 1 && self.rename_target.is_some() {
+                    continue;
+                }
+                if mx >= box_x && mx < box_x + 260.0 && my >= fy - 2.0 && my < fy + 14.0 {
+                    self.create_focus = field;
+                    return;
+                }
+            }
+        }
         let labels = self.menu_labels();
         for (i, r) in self
             .menu_button_rects(win_w, win_h, labels.len())
@@ -1958,6 +1994,14 @@ impl App {
                 quads.extend(font::text_quads(&value, box_x + 3.0, fy, UI_SCALE));
                 fy += 18.0;
             }
+            if self.rename_target.is_none() {
+                quads.extend(font::text_quads(
+                    "TAB o clic: cambiar campo. Semilla = numero o texto.",
+                    fx,
+                    fy + 2.0,
+                    UI_SCALE,
+                ));
+            }
         }
 
         // Botones con estado (normal/hover/pulsado) + foco de teclado.
@@ -2132,8 +2176,13 @@ impl ApplicationHandler for App {
                 (save.header.seed, restored, save.header, save.player_pos, save.hotbar)
             }
             Err(e) => {
-                println!("[world] sin mundo previo ({e}); se crea uno nuevo (semilla 13371)");
-                let seed = 13_371;
+                // Mundo sin `world.vf` (recien creado): usar la semilla de sus
+                // metadatos, no una fija. Antes toda partida caia en 13371.
+                let meta = crate::world::library::load_meta(
+                    &crate::world::library::saves_dir(&base).join(&self.world_slug),
+                );
+                let seed = meta.as_ref().map(|m| m.seed).unwrap_or(13_371);
+                println!("[world] sin mundo previo ({e}); se inicia la semilla {seed}");
                 (
                     seed,
                     Vec::new(),
