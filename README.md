@@ -8,23 +8,23 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.34.0` — Grafo de densidad (worldgen, C1)
+## Estado actual: `v0.35.0` — Sol y luna texturizados (arte de LibreSprite)
 
-- **`world::worldgen::graph`** (`v0.34.0`, Parte C): modelo de datos **DAG**
-  data-driven (`Node`: const, ruido fBm 2D/3D, add/mul/min/max, clamp, abs,
-  spline, gradiente Y, domain warp, cache 2D), con `validate()` (refs, ciclos,
-  finitos) y `compile()` (orden topologico) + evaluador determinista. Es la base
-  de la generacion "definida como datos" del Prompt 1 Parte C. **No** esta
-  integrado aun en `terrain.rs` (C2) ni serializado (RON/JSON); el juego sigue
-  usando el generador actual.
+- **Astros con textura** (`v0.35.0`): el sol y la luna son **discos texturizados**
+  orientados a la camara (billboard con giro propio) que usan arte hecho en
+  **LibreSprite**: `assets/sun.png` (cara del sol) y `assets/moon_phases.png`
+  (tira de 8 fases). Se mezclan por alpha (fuera del disco se ve el cielo) y el
+  shader tiene **fallback procedural** si faltan. Fuentes `.aseprite` en
+  `assets/src/`. *(Antes eran cubos con fase analitica; se cambio a disco
+  texturizado porque el cubo mostraba el disco en cada cara visible.)*
+- **Grafo de densidad** (`v0.34.0`, Parte C / C1): `world::worldgen::graph`
+  (`Node` DAG, `validate`, `compile`, evaluador). No integrado aun en `terrain.rs`.
 - **UI creativa** (`v0.41.0`): modulo `ui` sin GPU (i18n es/en, inventario con
   categorias y busqueda sin tildes), nombre del bloque sobre la hotbar.
 - **Distancia de vista y niebla** (`v0.33.0`): radios separados
-  (`world::ViewSettings`), carga circular y niebla al horizonte. Ver
-  [`docs/performance.md`](./docs/performance.md).
-- **Cielo y atmosfera** (`v0.30`–`v0.31.1`): gradiente por fases (OKLab), sol y
-  luna como **cubos 3D** con fases lunares, estrellas, halo (Henyey-Greenstein),
-  Cinturon de Venus y hora azul.
+  (`world::ViewSettings`), carga circular y niebla al horizonte.
+- **Cielo y atmosfera** (`v0.30`–`v0.31.1`): gradiente por fases (OKLab),
+  estrellas, halo (Henyey-Greenstein), Cinturon de Venus y hora azul.
 - **Pendiente honesto**: integracion del grafo en el terreno + clima (C2–C4),
   pantallas/menus y guardado multi-mundo del Prompt 2, y `sky_physical` opcional.
 - **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte

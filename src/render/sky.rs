@@ -60,11 +60,137 @@ pub struct SkyPipeline {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    _sun_texture: wgpu::Texture,
+    _moon_texture: wgpu::Texture,
+    _sampler: wgpu::Sampler,
+}
+
+/// Lado de la textura del sol, en pixels.
+const SUN_TEX: u32 = 16;
+/// Lado de un frame de la luna (la tira tiene 8 frames).
+const MOON_FRAME: u32 = 16;
+
+/// Rutas de los assets pintados en LibreSprite.
+mod assets {
+    pub const SUN_PATH: &str = "assets/sun.png";
+    pub const MOON_PATH: &str = "assets/moon_phases.png";
+}
+
+/// Carga un PNG de `path` (RGBA8) o usa el generador procedural `fallback`.
+fn load_or(path: &str, w: u32, h: u32, fallback: fn() -> Vec<u8>) -> Vec<u8> {
+    match crate::world::atlas::load_png_rgba(path, w, h) {
+        Some(p) => {
+            println!("[sky] cargado {path} ({w}x{h})");
+            p
+        }
+        None => {
+            println!("[sky] sin {path}; uso textura procedural del cielo");
+            fallback()
+        }
+    }
+}
+
+/// Crea una textura sRGB RGBA8 y sube sus pixels.
+fn create_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width * 4),
+            rows_per_image: Some(height),
+        },
+        size,
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
+}
+
+/// Fallback procedural: disco solar radial (sin `assets/sun.png`).
+fn sun_pixels() -> Vec<u8> {
+    let mut px = vec![0u8; (SUN_TEX * SUN_TEX * 4) as usize];
+    let c = 7.5f32;
+    for y in 0..SUN_TEX {
+        for x in 0..SUN_TEX {
+            let d = ((x as f32 + 0.5 - c).powi(2) + (y as f32 + 0.5 - c).powi(2)).sqrt();
+            if d > 7.6 {
+                continue;
+            }
+            let (r, g, b) = if d <= 3.0 {
+                (255, 248, 220)
+            } else if d <= 5.2 {
+                (255, 214, 90)
+            } else {
+                (255, 150, 54)
+            };
+            let i = ((y * SUN_TEX + x) * 4) as usize;
+            px[i..i + 4].copy_from_slice(&[r, g, b, 255]);
+        }
+    }
+    px
+}
+
+/// Fallback procedural: tira de 8 fases (sin `assets/moon_phases.png`).
+fn moon_pixels() -> Vec<u8> {
+    let (w, h) = (MOON_FRAME * 8, MOON_FRAME);
+    let mut px = vec![0u8; (w * h * 4) as usize];
+    for f in 0..8u32 {
+        let phase = f as f32 / 8.0;
+        let xph = (std::f32::consts::TAU * phase).cos();
+        for y in 0..h {
+            for x in 0..MOON_FRAME {
+                let u = (x as f32 + 0.5 - 7.5) / 7.6;
+                let v = (y as f32 + 0.5 - 7.5) / 7.6;
+                let r = (u * u + v * v).sqrt();
+                if r > 1.0 {
+                    continue;
+                }
+                let srf = (1.0 - v * v).max(0.0).sqrt();
+                let lit = if phase <= 0.5 {
+                    u > xph * srf
+                } else {
+                    u < -xph * srf
+                };
+                let (r8, g8, b8) = if lit { (230, 230, 220) } else { (18, 18, 26) };
+                let i = ((y * w + f * MOON_FRAME + x) * 4) as usize;
+                px[i..i + 4].copy_from_slice(&[r8, g8, b8, 255]);
+            }
+        }
+    }
+    px
 }
 
 impl SkyPipeline {
     pub fn new(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
         depth_format: wgpu::TextureFormat,
     ) -> Self {
@@ -75,18 +201,73 @@ impl SkyPipeline {
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sky.bind_group.layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(
-                        std::mem::size_of::<SkyUniforms>() as u64
-                    ),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(
+                            std::mem::size_of::<SkyUniforms>() as u64
+                        ),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        // Texturas pintadas en LibreSprite (con fallback procedural si faltan).
+        let (sun_texture, sun_view) = create_texture(
+            device,
+            queue,
+            "sky.sun",
+            SUN_TEX,
+            SUN_TEX,
+            &load_or(assets::SUN_PATH, SUN_TEX, SUN_TEX, sun_pixels),
+        );
+        let (moon_texture, moon_view) = create_texture(
+            device,
+            queue,
+            "sky.moon",
+            MOON_FRAME * 8,
+            MOON_FRAME,
+            &load_or(assets::MOON_PATH, MOON_FRAME * 8, MOON_FRAME, moon_pixels),
+        );
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("sky.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
         });
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -99,10 +280,24 @@ impl SkyPipeline {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sky.bind_group"),
             layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&sun_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&moon_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -154,6 +349,9 @@ impl SkyPipeline {
             pipeline,
             uniform_buffer,
             bind_group,
+            _sun_texture: sun_texture,
+            _moon_texture: moon_texture,
+            _sampler: sampler,
         }
     }
 
@@ -208,5 +406,14 @@ mod tests {
     fn el_uniform_del_cielo_mide_160_bytes() {
         // sky.wgsl asume este layout exacto (vec3 alineados a 16).
         assert_eq!(std::mem::size_of::<SkyUniforms>(), 160);
+    }
+
+    #[test]
+    fn los_fallbacks_procedurales_tienen_el_tamano_esperado() {
+        assert_eq!(sun_pixels().len(), (SUN_TEX * SUN_TEX * 4) as usize);
+        assert_eq!(
+            moon_pixels().len(),
+            (MOON_FRAME * 8 * MOON_FRAME * 4) as usize
+        );
     }
 }

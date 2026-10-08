@@ -368,8 +368,8 @@ impl Renderer {
         );
         // Modelo de la mano (cubos de color) y su pipeline.
         let model = ModelPipeline::new(&device, config.format, Self::DEPTH_FORMAT);
-        // Pase de cielo (gradiente cenit <-> horizonte).
-        let sky = SkyPipeline::new(&device, config.format, Self::DEPTH_FORMAT);
+        // Pase de cielo (gradiente cenit <-> horizonte + astros texturizados).
+        let sky = SkyPipeline::new(&device, &queue, config.format, Self::DEPTH_FORMAT);
         let hand_arm = ModelMesh::new(&device, &queue, "hand.arm", &player::first_person_arm());
         let hand_item = ModelMesh::new(
             &device,

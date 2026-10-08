@@ -3135,6 +3135,35 @@ herramientas). El juego sigue usando el generador actual; **no** cambia el mundo
 307 tests; clippy limpio. Sin cambio visual (logica pura). `GENERATOR_VERSION`/
 `FORMAT_VERSION` intactos (16/5).
 
+## v0.35.0 - Sol y luna texturizados (arte de LibreSprite)
+
+### 2026-10-07 - Astros como discos texturizados (billboard) en vez de cubos
+
+**Decision.** El sol y la luna pasan a ser **discos texturizados** orientados a la
+camara (billboard con giro propio `self_spin`), con arte dibujado en **LibreSprite**
+y guardado en `assets/sun.png` (16x16) y `assets/moon_phases.png` (tira de 8 fases,
+128x16); fuentes editables en `assets/src/*.aseprite`. El shader los mezcla por
+**alpha** (fuera del disco se ve el cielo). Si faltan los PNG, `render/sky.rs`
+genera un **fallback procedural** (disco solar radial / tira de fases).
+
+**Motivo.** El usuario pidio usar Libresprite y no improvisar arte por codigo. Al
+integrar la textura en el cubo (ray-caja) aparecia el disco **en cada cara
+visible** ("dos soles"/"dos lunas"); un billboard de una sola cara lo resuelve y
+ademas admite la textura de fases tal cual.
+
+**Alternativas descartadas.** Mantener el cubo con fase analitica (ya no usa el
+arte). Cubo fino (placa) orientado: mismo problema de orientacion por cara y mas
+codigo. Empaquetar sol+luna en un `texture_2d_array`: innecesario para dos texturas.
+
+**Nota de proceso.** En LibreSprite, `saveAs(path)` **sin** `asCopy=true` abre el
+dialogo "Guardar como" (bloquea la automatizacion); con `asCopy=true` guarda en
+silencio. Documentado para futuros scripts de arte.
+
+**Consecuencia.** `render/sky.wgsl` (billboard texturizado), `render/sky.rs`
+(texturas + sampler + fallback + bind group de 4 entradas), assets y `assets/README.md`.
+307 tests (+1 de tamano de fallbacks); clippy limpio. Capturas
+`v0.35.0_{sun,moon}_texture.png`. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

@@ -86,3 +86,10 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.40.1_toast.png` | Nombre del bloque ("PIEDRA") sobre la hotbar al cambiar de ranura. |
 | `v0.41.0_inventory.png` | Inventario creativo con pestanas por categoria. |
 | `v0.41.0_search.png` | Busqueda "tierra" (insensible a mayusculas/tildes). |
+
+## Astros texturizados (`v0.35`)
+
+| Captura | Que muestra |
+| ------- | ----------- |
+| `v0.35.0_sun_texture.png` | Sol como disco texturizado (arte de LibreSprite) + halo HG. |
+| `v0.35.0_moon_texture.png` | Luna texturizada con fase (tira de 8) sobre el campo de estrellas. |
