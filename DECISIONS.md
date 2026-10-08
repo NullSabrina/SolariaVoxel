@@ -3285,6 +3285,46 @@ nuevo); `ui/lang.rs` (`Atrás`); `engine/app.rs` (etiquetas con acento). 327 tes
 clippy limpio. Capturas `v0.43.3_{options,controls}_acentos.png`.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.44.0 - Grafo de densidad integrado (Parte C, C2/C3)
+
+### 2026-10-07 - `GeneratorKind` en level.json + grafo como canal de altura
+
+**Decision.**
+- `world::generator::GeneratorKind { Legacy16, Graph }`. El tipo se guarda en los
+  **metadatos** (`level.json`, campo `generator_kind`), **no** en el binario: los
+  mundos existentes (sin el campo) siguen siendo `Legacy16` **sin migrar**, y no
+  se toca `FORMAT_VERSION`/`GENERATOR_VERSION`.
+- `TerrainGenerator::with_kind` compila el **grafo por defecto** (`default_height_graph`,
+  spline de continentalidad + detalle) y `generate_column` **despacha**: `Legacy16`
+  usa el cuerpo historico (`generate_column_legacy`); `Graph` usa
+  `generate_column_graph`, que toma la **altura** del grafo y comparte
+  bioma/materiales/agua/decoracion del pipeline comun. El grafo se serializa a
+  **JSON** (`Graph::to_json`/`from_json`) para edicion/preview.
+- Mundos nuevos: `SOLARIA_GENERATOR=graph` (en `create_world_kind`). El selector de
+  mundos muestra el generador de cada uno.
+
+**Motivo.** La guia pide coexistencia "sin reescribir": se reutiliza todo el
+pipeline (bioma/clima/decoracion/cuevas legacy) y el grafo sustituye solo el
+relieve. Determinista y `Send + Sync` (test 1 hilo vs N hilos).
+
+**Alternativas descartadas.** `GeneratorKind` en el binario (obligaria a bump de
+`FORMAT_VERSION` + espejo posicional + migrador: mas riesgo sin ganancia, ya que
+`level.json` ya guarda metadatos). Reescribir cuevas/rios con el grafo de golpe
+(mayor riesgo). **Nota**: en el camino `Graph` aun **no** hay cuevas/rios ni
+retícula 3D gruesa; se documentan como pendientes (C2/C4).
+
+**Fix importante.** La propagacion de **luz de bloque** entraba en columnas **no
+cargadas** (donde `put_block_light` no escribe y `block_light_at` da 0), reencolando
+sin fin y creciendo sin cota (4 GB / stack overrun al editar cerca del borde de
+carga). Ahora el BFS **salta lo no cargado**.
+
+**Consecuencia.** `world/generator.rs`, `world/worldgen/graph.rs` (serde + JSON +
+`default_height_graph` + fix del ruido 2D), `world/terrain.rs` (dispatch +
+`generate_column_graph`), `world/store.rs` (`with_kind` + fix de luz),
+`render/renderer.rs` y `engine/app.rs` (kind desde `level.json`/env). 333 tests;
+clippy limpio. Captura `v0.44.0_graph.png`. `GENERATOR_VERSION`/`FORMAT_VERSION`
+intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

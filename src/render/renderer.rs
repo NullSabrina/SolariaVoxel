@@ -33,8 +33,8 @@ use crate::scene::player;
 use crate::scene::{DayCycle, SkyParams, SkyState};
 use crate::world::mesh_snapshot::section_snapshot;
 use crate::world::{
-    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, FluidBudget, FluidDirty, RayHit, SECTION_COUNT,
-    StreamChange, ViewSettings, World, raycast,
+    Block, CHUNK_SIZE, ChunkPos, ChunkRecord, FluidBudget, FluidDirty, GeneratorKind, RayHit,
+    SECTION_COUNT, StreamChange, ViewSettings, World, raycast,
 };
 
 /// Reutiliza la malla `slot` con la nueva geometria (o la crea si falta). Los
@@ -313,6 +313,7 @@ impl Renderer {
         seed: u32,
         restored: Vec<(ChunkPos, ChunkRecord)>,
         view: ViewSettings,
+        kind: GeneratorKind,
     ) -> Result<Self, RendererError> {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
@@ -402,7 +403,7 @@ impl Renderer {
             view.fog.name()
         );
         let restored_count = restored.len();
-        let world = World::with_view(seed, view, restored);
+        let world = World::with_kind(seed, view, kind, restored);
         if restored_count > 0 {
             println!("[world] {restored_count} chunks restaurados de disco");
         }

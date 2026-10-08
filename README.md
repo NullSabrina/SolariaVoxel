@@ -8,30 +8,25 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.43.3` — Fuente con tildes + Opciones y Controles
+## Estado actual: `v0.44.0` — Worldgen con grafo de densidad (Parte C, integrado)
 
-- **Fuente con tildes** (`v0.43.3`): la fuente bitmap 5x7 gana un bloque **Latin-1
-  útil** (`á é í ó ú ü ñ`, `¿ ¡ ° · …`); el texto de la UI ya muestra acentos
-  (`SIMULACIÓN`, `ATRÁS`).
-- **Opciones** (`v0.43.1`): menú **Opciones** (desde título y pausa) con distancia
-  de render/simulación, niebla, FOV, sensibilidad, idioma, autoguardado y F3 al
-  iniciar. Se guardan en `options.json` (global, atómico) y se **aplican en vivo**;
-  la distancia reconstruye el mundo.
-- **Controles** (`v0.43.2`): pantalla para **reasignar teclas** (adelante/atrás/
-  izquierda/derecha/saltar/volar/inventario) clicando una fila y pulsando la tecla;
-  los conflictos se **intercambian** (sin duplicados silenciosos) y hay
-  **Restablecer**. Las teclas reasignadas se aplican al movimiento real.
-- **Librería de mundos** (`v0.42.0`): `saves/<slug>/` con `level.json` legible,
-  escritura atómica, slug saneado/único, renombrar/duplicar/eliminar e importación
-  del `world.vf` antiguo. Semilla de texto con hash FNV-1a estable.
-- **Pantallas** (`v0.42.0`, pila en `ui::screens`): título, selector de mundos,
-  crear mundo y pausa. `Esc` **ya no cierra el juego**; la X sigue guardando.
-- **Astros texturizados** (`v0.35.0`, arte de LibreSprite), **grafo de densidad**
-  (`v0.34.0`, C1), **UI creativa** (`v0.41.0`), **distancia de vista** (`v0.33.0`)
-  y **cielo/atmosfera** (`v0.30`–`v0.31.1`, sol/luna, estrellas, halo, Cinturón de
-  Venus, hora azul), con mano y personaje (`v0.28`/`v0.29`, F5 tercera persona).
-- **Pendiente honesto**: toolkit de widgets nine-slice; integración del grafo en el
-  terreno + clima (C2–C4); `sky_physical` opcional.
+- **Grafo de densidad integrado** (`v0.44.0`): `GeneratorKind::{Legacy16, Graph}`
+  conviven. El tipo vive en los **metadatos** del mundo (`level.json`,
+  `generator_kind`), así que los mundos existentes siguen siendo `Legacy16` **sin
+  migrar** el binario. El camino `Graph` usa el **grafo de densidad** para la
+  **altura** (data-driven, JSON round-trip) y comparte bioma/materiales/agua/
+  decoración con el pipeline común. Mundos nuevos: `SOLARIA_GENERATOR=graph`.
+  *(Pendiente: retícula 3D gruesa + interpolación, cuevas y clima como canales del
+  grafo.)*
+- **Fix**: la propagación de **luz de bloque** ya no entra en columnas no cargadas
+  (antes podía crecer sin cota al editar cerca del borde de carga).
+- **Fuente con tildes** (`v0.43.3`): Latin-1 útil (`á é í ó ú ü ñ`, `¿ ¡ ° · …`).
+- **Opciones/Controles** (`v0.43.1`/`v0.43.2`), **mundos múltiples y pantallas**
+  (`v0.42.0`), **astros texturizados** (`v0.35.0`, LibreSprite), **UI creativa**
+  (`v0.41.0`), **distancia de vista** (`v0.33.0`) y **cielo/atmosfera**
+  (`v0.30`–`v0.31.1`).
+- **Pendiente honesto**: retícula 3D + clima en el grafo (C2/C4), cuevas en el
+  camino graph; toolkit nine-slice; `sky_physical` opcional.
 
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
@@ -106,6 +101,7 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_SEARCH` | Texto de busqueda inicial del inventario (abre el inventario). |
 | `SOLARIA_TOAST` | Muestra el nombre del bloque de esa ranura sobre la hotbar. |
 | `SOLARIA_HOME` | Directorio base de los mundos (`saves/` cuelga de aqui). |
+| `SOLARIA_GENERATOR` | Generador de mundos **nuevos**: `legacy16` (def.) o `graph`. |
 | `SOLARIA_SCREEN` | Arranca en una pantalla: `title`, `worlds`, `create`, `pause`, `options`, `controls`. |
 | `SOLARIA_FLUID_BUDGET_CELLS` | Celdas de fluido simuladas por tick. |
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
@@ -126,7 +122,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-327 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+333 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color, distancia de
 vista, interfaz creativa, grafo de densidad, libreria de mundos, pantallas y
 opciones). Lint:
@@ -235,6 +231,7 @@ src/
     ├── bench.rs        Benchmarks reproducibles (solo tests).
     ├── save.rs         Versionado + guardado/carga del mundo (bincode + LZ4).
     ├── library.rs      Mundos multiples: saves/<slug>/ + level.json + importar.
+    ├── generator.rs    GeneratorKind (coexistencia legacy/graph).
     └── store.rs        World: columnas en memoria + streaming + luz.
 ```
 

@@ -14,12 +14,14 @@
 //! compilador y el evaluador. La integracion en `terrain.rs` (C2), el formato
 //! en disco (RON/JSON), `GeneratorKind` y el clima (C4) quedan como pendientes.
 
+use serde::{Deserialize, Serialize};
+
 /// Identificador de nodo dentro de un [`Graph`] (indice en su arena).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u32);
 
 /// Tipo de ruido fractal base.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum NoiseKind {
     /// Ruido 2D (ignora `y`); ideal para continentes/clima (una vez por columna).
     Value2D,
@@ -28,7 +30,7 @@ pub enum NoiseKind {
 }
 
 /// Un nodo del grafo.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Node {
     /// Constante.
     Const(f32),
@@ -101,7 +103,7 @@ impl std::fmt::Display for GraphError {
 impl std::error::Error for GraphError {}
 
 /// Arena de nodos. Los ids son indices; se anaden con [`Graph::push`].
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Graph {
     nodes: Vec<Node>,
 }
@@ -132,6 +134,16 @@ impl Graph {
         let id = NodeId(self.nodes.len() as u32);
         self.nodes.push(node);
         id
+    }
+
+    /// Serializa el grafo a **JSON** (para `assets/worldgen/*.json` o debug).
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string_pretty(self).map_err(|e| e.to_string())
+    }
+
+    /// Carga un grafo desde **JSON**.
+    pub fn from_json(s: &str) -> Result<Graph, String> {
+        serde_json::from_str(s).map_err(|e| e.to_string())
     }
 
     /// Entradas de un nodo (sus dependencias directas).
@@ -427,11 +439,17 @@ fn fbm(
     let mut sum = 0.0f32;
     let mut norm = 0.0f32;
     for o in 0..octaves {
-        let (sy, sz) = match kind {
-            NoiseKind::Value2D => (0.0, 0.0),
-            NoiseKind::Value3D => (y * freq, z * freq),
+        // 2D: el ruido varia en (x, z) ignorando y. 3D: en (x, y, z).
+        let (gy, gz) = match kind {
+            NoiseKind::Value2D => (0.0, z),
+            NoiseKind::Value3D => (y, z),
         };
-        let n = value_noise(salt.wrapping_add(o as u64 * 0x9E37_79B9), x * freq, sy, sz);
+        let n = value_noise(
+            salt.wrapping_add(o as u64 * 0x9E37_79B9),
+            x * freq,
+            gy * freq,
+            gz * freq,
+        );
         sum += n * amp;
         norm += amp;
         freq *= lacunarity;
@@ -439,6 +457,51 @@ fn fbm(
     }
     // n en [0,1) -> fBm en [-1, 1).
     (sum / norm) * 2.0 - 1.0
+}
+
+/// Grafo por defecto que produce la **altura** del terreno (8..200): una spline
+/// de continentalidad (ruido 2D de baja frecuencia) mas detalle de alta
+/// frecuencia, sumado a un nivel base. Determinista por `seed`.
+pub fn default_height_graph(seed: u64) -> Graph {
+    let mut g = Graph::new();
+    let cont = g.push(Node::Noise {
+        kind: NoiseKind::Value2D,
+        salt: seed,
+        frequency: 0.0022,
+        octaves: 4,
+        persistence: 0.5,
+        lacunarity: 2.0,
+    });
+    let spline = g.push(Node::Spline {
+        input: cont,
+        points: vec![
+            (-1.0, -26.0),
+            (-0.3, -8.0),
+            (0.0, 2.0),
+            (0.35, 18.0),
+            (1.0, 46.0),
+        ],
+    });
+    let detail = g.push(Node::Noise {
+        kind: NoiseKind::Value2D,
+        salt: seed ^ 0x9E37_79B9_7F4A_7C15,
+        frequency: 0.03,
+        octaves: 3,
+        persistence: 0.5,
+        lacunarity: 2.0,
+    });
+    let detail_amp = g.push(Node::Const(9.0));
+    let detail_scaled = g.push(Node::Mul(detail, detail_amp));
+    let relief = g.push(Node::Add(spline, detail_scaled));
+    let base = g.push(Node::Const(64.0));
+    let height = g.push(Node::Add(relief, base));
+    // Raiz (ultimo nodo): altura recortada al rango del mundo.
+    g.push(Node::Clamp {
+        input: height,
+        lo: 8.0,
+        hi: 200.0,
+    });
+    g
 }
 
 #[cfg(test)]
@@ -570,9 +633,38 @@ mod tests {
         let a = prog.eval(&g, 1.3, 2.7, 3.1);
         let b = prog.eval(&g, 5.3, 2.7, 3.1);
         assert!((a - b).abs() > 1e-4, "el ruido no varia con la posicion");
-        // n2 no es la raiz; comprobamos su valor directamente por el buffer.
         let mut buf = vec![0.0; g.len()];
         prog.eval_into(&g, 1.3, 2.7, 3.1, &mut buf);
         assert!((buf[n1.0 as usize] - buf[n2.0 as usize]).abs() > 1e-6);
+    }
+
+    #[test]
+    fn el_grafo_por_defecto_da_alturas_validas() {
+        let g = default_height_graph(13_371);
+        g.validate().unwrap();
+        let prog = g.compile().unwrap();
+        let (mut min, mut max) = (f32::INFINITY, f32::NEG_INFINITY);
+        for i in 0..300 {
+            let x = i as f32 * 13.0;
+            let z = (i as f32 * 7.0) % 300.0;
+            let h = prog.eval(&g, x, 0.0, z);
+            assert!((8.0..=200.0).contains(&h), "altura fuera de rango: {h}");
+            min = min.min(h);
+            max = max.max(h);
+        }
+        assert!(max - min > 5.0, "el grafo deberia variar la altura");
+    }
+
+    #[test]
+    fn el_grafo_va_y_vuelve_por_json() {
+        let g = default_height_graph(7);
+        let json = g.to_json().unwrap();
+        let back = Graph::from_json(&json).unwrap();
+        assert_eq!(back.len(), g.len());
+        let p1 = g.compile().unwrap();
+        let p2 = back.compile().unwrap();
+        for x in [0.0, 100.0, -50.0] {
+            assert_eq!(p1.eval(&g, x, 0.0, x), p2.eval(&back, x, 0.0, x));
+        }
     }
 }

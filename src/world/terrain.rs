@@ -24,7 +24,9 @@ use noise::{NoiseFn, Perlin};
 use super::block::Block;
 use super::caves::{Carve, CaveContext, CaveSystem};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
+use super::generator::GeneratorKind;
 use super::worldgen::decoration::{DecorationKind, Decorator};
+use super::worldgen::graph::{Graph, Program, default_height_graph};
 use super::worldgen::{WorldGen, biomes};
 
 /// Altura media del terreno, en bloques (nivel del mar).
@@ -84,14 +86,30 @@ pub struct TerrainGenerator {
     /// (`AtomicU32`) en vez de `Cell` para que el generador sea `Send + Sync` y
     /// pueda compartirse entre workers de generacion.
     noise_calls: AtomicU32,
+    /// Tipo de generador (coexistencia legacy/graph).
+    kind: GeneratorKind,
+    /// Grafo de densidad + programa compilado (solo si `kind == Graph`).
+    graph: Option<(Graph, Program)>,
 }
 
 impl TerrainGenerator {
-    /// Crea un generador para una semilla. Cada capa usa una semilla derivada
-    /// distinta para que los ruidos no correlacionen (si compartieran semilla,
-    /// el clima seguiria al relieve).
+    /// Crea un generador para una semilla con el generador **legacy** (por
+    /// etapas). Es el camino de los mundos existentes.
     pub fn new(seed: u32) -> Self {
+        Self::with_kind(seed, GeneratorKind::Legacy16)
+    }
+
+    /// Crea un generador del tipo pedido. El camino `Graph` compila el **grafo de
+    /// densidad por defecto** (data-driven) que produce la altura del terreno.
+    pub fn with_kind(seed: u32, kind: GeneratorKind) -> Self {
         let mix = |k: u32| seed.wrapping_mul(0x9E37_79B9).wrapping_add(k);
+        let graph = (kind == GeneratorKind::Graph).then(|| {
+            let g = default_height_graph(seed as u64);
+            let prog = g
+                .compile()
+                .expect("el grafo de densidad por defecto debe ser valido");
+            (g, prog)
+        });
         Self {
             worldgen: WorldGen::new(seed),
             surface_detail: Perlin::new(mix(6)),
@@ -101,7 +119,14 @@ impl TerrainGenerator {
             decorator: Decorator::new(seed),
             seed,
             noise_calls: AtomicU32::new(0),
+            kind,
+            graph,
         }
+    }
+
+    /// Tipo de generador.
+    pub fn kind(&self) -> GeneratorKind {
+        self.kind
     }
 
     /// La semilla con la que se creo.
@@ -240,6 +265,73 @@ impl TerrainGenerator {
     /// la pendiente de cada celda salga de vecinos **ya calculados**, sin volver a
     /// llamar a `height()` por candidato de decoracion (FASE 7).
     pub fn generate_column(&self, world_x: i32, world_z: i32) -> Column {
+        match self.kind {
+            GeneratorKind::Legacy16 => self.generate_column_legacy(world_x, world_z),
+            GeneratorKind::Graph => self.generate_column_graph(world_x, world_z),
+        }
+    }
+
+    /// Altura segun el **grafo de densidad** (o `height()` si no hay grafo).
+    fn graph_height(&self, world_x: i32, world_z: i32) -> usize {
+        let Some((graph, prog)) = &self.graph else {
+            return self.height(world_x, world_z);
+        };
+        let h = prog.eval(graph, world_x as f32, 0.0, world_z as f32);
+        (h.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize
+    }
+
+    /// Genera una columna con el **grafo de densidad** para la altura; el bioma,
+    /// los materiales, el agua (nivel del mar) y la decoracion siguen el pipeline
+    /// comun. Determinista y `Send + Sync`.
+    fn generate_column_graph(&self, world_x: i32, world_z: i32) -> Column {
+        let mut column = Column::empty();
+        let mut tree_candidates: Vec<(usize, usize, usize)> = Vec::new();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let wx = world_x + x as i32;
+                let wz = world_z + z as i32;
+                let geo = self.worldgen.sample(wx as f64, wz as f64);
+                let biome = geo.biome;
+                let height = self.graph_height(wx, wz);
+                let variant = self.surface_variant(wx, wz);
+                let coastal = height <= (SEA_LEVEL as usize) + 1;
+                for y in 0..height {
+                    let block = if coastal {
+                        coastal_block(y, height, variant)
+                    } else {
+                        surface_block(y, height, biome, variant, false)
+                    };
+                    column.set(x, y, z, block);
+                }
+                if height < SEA_LEVEL as usize {
+                    for y in height..SEA_LEVEL as usize {
+                        column.set(x, y, z, Block::Water);
+                    }
+                    column.push_water_surface(x, z, SEA_LEVEL as usize - 1);
+                }
+                if !coastal && (2..=13).contains(&x) && (2..=13).contains(&z) {
+                    match self.decorator.decide(wx, wz, &geo, height as i32, 0) {
+                        Some(DecorationKind::Tree) => tree_candidates.push((x, z, height)),
+                        Some(DecorationKind::Boulder)
+                            if column.get(x, height.saturating_sub(1), z).is_solid() =>
+                        {
+                            place_boulder(&mut column, x, height, z, variant);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for (x, z, ground) in tree_candidates {
+            if headroom_clear(&column, x, ground, z) {
+                place_tree(&mut column, x, ground, z);
+            }
+        }
+        column
+    }
+
+    /// Generador **legacy** (por etapas): el cuerpo historico.
+    fn generate_column_legacy(&self, world_x: i32, world_z: i32) -> Column {
         let mut column = Column::empty();
         // Candidatos a arboles (pasada 1); se plantan en la pasada 2, cuando la
         // columna ya esta completa.
@@ -1005,5 +1097,83 @@ mod tests {
             }
         }
         assert!(lava > 0, "deberia haber pozas de lava en 64x64");
+    }
+
+    /// Hash FNV-1a de los ids de bloque de una columna.
+    fn hash_column(column: &Column) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for y in 0..WORLD_HEIGHT {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    h ^= column.get(x, y, z).id() as u64;
+                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+        }
+        h
+    }
+
+    #[test]
+    fn el_generador_graph_produce_columna_solida_y_determinista() {
+        let g = TerrainGenerator::with_kind(13_371, GeneratorKind::Graph);
+        assert_eq!(g.kind(), GeneratorKind::Graph);
+        let a = g.generate_column(0, 0);
+        let b = g.generate_column(0, 0);
+        assert_eq!(hash_column(&a), hash_column(&b), "graph no determinista");
+        // Hay terreno solido en algun `y`.
+        let solid = (0..WORLD_HEIGHT as i32).any(|y| a.get(8, y as usize, 8).is_solid());
+        assert!(solid, "la columna graph no tiene bloque solido");
+    }
+
+    #[test]
+    fn graph_y_legacy_dan_terrenos_distintos() {
+        let legacy = TerrainGenerator::with_kind(7, GeneratorKind::Legacy16);
+        let graph = TerrainGenerator::with_kind(7, GeneratorKind::Graph);
+        assert_ne!(
+            hash_column(&legacy.generate_column(0, 0)),
+            hash_column(&graph.generate_column(0, 0)),
+            "graph y legacy deberian diferir"
+        );
+        // El legacy no cambia al anadir el camino graph.
+        let legacy2 = TerrainGenerator::new(7);
+        assert_eq!(
+            hash_column(&legacy.generate_column(4, -4)),
+            hash_column(&legacy2.generate_column(4, -4))
+        );
+    }
+
+    #[test]
+    fn el_graph_es_determinista_secuencial_vs_paralelo() {
+        use crate::world::streaming::TerrainScheduler;
+        use std::sync::Arc;
+        let positions: Vec<super::super::save::ChunkPos> = {
+            let mut v = Vec::new();
+            for z in -2..=2 {
+                for x in -2..=2 {
+                    v.push(super::super::save::ChunkPos::new(x, z));
+                }
+            }
+            v
+        };
+        let seq = TerrainGenerator::with_kind(42, GeneratorKind::Graph);
+        let sequential: Vec<u64> = positions
+            .iter()
+            .map(|p| {
+                hash_column(&seq.generate_column(p.x * CHUNK_SIZE as i32, p.z * CHUNK_SIZE as i32))
+            })
+            .collect();
+
+        let shared = Arc::new(TerrainGenerator::with_kind(42, GeneratorKind::Graph));
+        let mut sched = TerrainScheduler::new(shared, 4);
+        for (i, &p) in positions.iter().enumerate() {
+            assert!(sched.request(i as u64, p));
+        }
+        sched.join();
+        let mut parallel = vec![0u64; positions.len()];
+        while let Some(res) = sched.try_recv() {
+            let idx = positions.iter().position(|p| *p == res.pos).unwrap();
+            parallel[idx] = hash_column(&res.column);
+        }
+        assert_eq!(sequential, parallel, "graph difiere 1 hilo vs N hilos");
     }
 }

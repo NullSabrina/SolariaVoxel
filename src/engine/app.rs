@@ -172,6 +172,13 @@ fn active_world_path(base: &std::path::Path, slug: &str) -> std::path::PathBuf {
         .join(crate::world::library::WORLD_FILE)
 }
 
+/// Tipo de generador para mundos **nuevos** (`SOLARIA_GENERATOR=graph`), o legacy.
+fn generator_kind_from_env() -> crate::world::GeneratorKind {
+    std::env::var("SOLARIA_GENERATOR")
+        .map(|s| crate::world::GeneratorKind::from_name(&s))
+        .unwrap_or_default()
+}
+
 /// Segundos desde el epoch de UNIX (para la fecha del header).
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
@@ -1164,11 +1171,17 @@ impl App {
         let Some(window) = self.window.clone() else {
             return;
         };
+        // Tipo de generador del mundo que se va a cargar (de sus metadatos).
+        let kind =
+            crate::world::library::load_meta(&crate::world::library::saves_dir(&base).join(&slug))
+                .map(|m| crate::world::GeneratorKind::from_name(&m.generator_kind))
+                .unwrap_or_default();
         match Renderer::new(
             window,
             seed,
             restored,
             self.options.view_settings().with_env_overrides(),
+            kind,
         ) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
@@ -1497,7 +1510,13 @@ impl App {
             return;
         }
         let seed = crate::world::seed_from_text(&self.create_seed);
-        match crate::world::library::create_world(&self.world_base, &name, seed, now_unix()) {
+        match crate::world::library::create_world_kind(
+            &self.world_base,
+            &name,
+            seed,
+            now_unix(),
+            generator_kind_from_env().name(),
+        ) {
             Ok(entry) => {
                 self.reload_worlds();
                 self.enter_world(entry.slug);
@@ -1642,7 +1661,10 @@ impl App {
                     layer: -1,
                 });
                 let tag = if w.corrupt { " (corrupto)" } else { "" };
-                let line = format!("{}{}  semilla {}", w.meta.display_name, tag, w.meta.seed);
+                let line = format!(
+                    "{}{}  semilla {}  [{}]",
+                    w.meta.display_name, tag, w.meta.seed, w.meta.generator_kind
+                );
                 quads.extend(font::text_quads(&line, list_x + 4.0, ly + 4.0, UI_SCALE));
                 ly += 20.0;
             }
@@ -1796,7 +1818,13 @@ impl ApplicationHandler for App {
         let _ = crate::world::library::import_legacy(&base, now);
         let mut worlds = crate::world::library::list_worlds(&base);
         if worlds.is_empty() {
-            match crate::world::library::create_world(&base, "Mundo nuevo", 13_371, now) {
+            match crate::world::library::create_world_kind(
+                &base,
+                "Mundo nuevo",
+                13_371,
+                now,
+                generator_kind_from_env().name(),
+            ) {
                 Ok(w) => worlds.push(w),
                 Err(e) => eprintln!("[world] no se pudo crear el mundo inicial: {e}"),
             }
@@ -1854,11 +1882,18 @@ impl ApplicationHandler for App {
                 player_pos
             };
 
+        // Tipo de generador del mundo activo (de sus metadatos `level.json`).
+        let kind = self
+            .worlds
+            .first()
+            .map(|w| crate::world::GeneratorKind::from_name(&w.meta.generator_kind))
+            .unwrap_or_default();
         match Renderer::new(
             window.clone(),
             seed,
             restored,
             self.options.view_settings().with_env_overrides(),
+            kind,
         ) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {

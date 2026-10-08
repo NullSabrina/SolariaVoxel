@@ -240,8 +240,19 @@ pub fn list_worlds(base: &Path) -> Vec<WorldEntry> {
     out
 }
 
-/// Crea un mundo nuevo y devuelve su entrada.
+/// Crea un mundo nuevo (generador legacy) y devuelve su entrada.
 pub fn create_world(base: &Path, name: &str, seed: u32, now: u64) -> std::io::Result<WorldEntry> {
+    create_world_kind(base, name, seed, now, "legacy16")
+}
+
+/// Crea un mundo nuevo con el **tipo de generador** pedido (`legacy16`/`graph`).
+pub fn create_world_kind(
+    base: &Path,
+    name: &str,
+    seed: u32,
+    now: u64,
+    generator: &str,
+) -> std::io::Result<WorldEntry> {
     let taken: Vec<String> = list_worlds(base).into_iter().map(|w| w.slug).collect();
     let slug = unique_slug(&slugify(name), &taken);
     let meta = WorldMeta {
@@ -251,7 +262,7 @@ pub fn create_world(base: &Path, name: &str, seed: u32, now: u64) -> std::io::Re
         created_at: now,
         last_played: now,
         engine_version: env!("CARGO_PKG_VERSION").to_string(),
-        generator_kind: default_generator(),
+        generator_kind: generator.to_string(),
     };
     save_meta(&saves_dir(base).join(&slug), &meta)?;
     Ok(WorldEntry {

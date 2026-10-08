@@ -107,3 +107,4 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.43.2_controls.png` | Pantalla de Controles (reasignar teclas, con intercambio de conflictos). |
 | `v0.43.3_options_acentos.png` | Fuente con tildes: 'SIMULACION' con acento. |
 | `v0.43.3_controls_acentos.png` | Fuente con tildes: 'ATRAS' con acento. |
+| `v0.44.0_graph.png` | Mundo con el generador **graph** (altura del grafo de densidad). |

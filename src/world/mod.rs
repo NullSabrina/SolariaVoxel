@@ -17,6 +17,7 @@ pub mod block;
 pub mod caves;
 pub mod chunk;
 pub mod fluid_mesher;
+pub mod generator;
 pub mod greedy;
 pub mod library;
 pub mod memory;
@@ -35,6 +36,7 @@ pub mod worldgen;
 
 pub use block::{Block, Face};
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};
+pub use generator::GeneratorKind;
 pub use library::{WorldEntry, WorldMeta, seed_from_text};
 pub use memory::WorldMemory;
 pub use mesher::{SectionMesh, mesh_column, mesh_section};

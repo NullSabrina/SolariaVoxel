@@ -83,14 +83,30 @@ impl World {
         )
     }
 
-    /// Crea un mundo con ajustes de vista completos (la app usa este).
+    /// Crea un mundo con ajustes de vista completos y el generador **legacy**.
     pub fn with_view(
         seed: u32,
         view: ViewSettings,
         restored: Vec<(ChunkPos, ChunkRecord)>,
     ) -> Self {
+        Self::with_kind(
+            seed,
+            view,
+            super::generator::GeneratorKind::Legacy16,
+            restored,
+        )
+    }
+
+    /// Crea un mundo con ajustes de vista completos y el **tipo de generador**
+    /// pedido (coexistencia legacy/graph). La app usa este.
+    pub fn with_kind(
+        seed: u32,
+        view: ViewSettings,
+        kind: super::generator::GeneratorKind,
+        restored: Vec<(ChunkPos, ChunkRecord)>,
+    ) -> Self {
         let mut world = Self {
-            generator: Arc::new(TerrainGenerator::new(seed)),
+            generator: Arc::new(TerrainGenerator::with_kind(seed, kind)),
             columns: HashMap::new(),
             modified: HashMap::new(),
             dirty: HashSet::new(),
@@ -325,6 +341,13 @@ impl World {
             for d in NEIGHBORS6 {
                 let n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
                 if n[1] < 0 || n[1] >= WORLD_HEIGHT as i32 {
+                    continue;
+                }
+                // No propagar a columnas **no cargadas**: `put_block_light` no
+                // escribe ahi y `block_light_at` devuelve 0, asi que la celda se
+                // reencolaria sin fin (crecimiento sin cota del BFS). El render no
+                // dibuja esas columnas, asi que no aporta luz.
+                if !self.is_column_loaded(n) {
                     continue;
                 }
                 if self.get_block(n).is_solid() {
