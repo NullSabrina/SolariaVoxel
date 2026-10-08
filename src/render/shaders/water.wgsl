@@ -72,15 +72,17 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // La normal se obtiene de las derivadas de la posicion en pantalla: la
     // superficie interpolada ya es una rampa, y dpdx/dpdy dan su inclinacion
-    // real por pixel (sin necesitar normales por vertice).
+    // real por pixel (sin necesitar normales por vertice). La orientamos **hacia
+    // la camara**: el producto vectorial puede salir al reves segun el lado, y
+    // asi la cara superior y las laterales dan el mismo brillo especular.
+    let view_dir = normalize(uniforms.camera_pos - input.world_pos);
     var normal = normalize(cross(dpdx(input.world_pos), dpdy(input.world_pos)));
-    if (normal.y < 0.0) {
+    if (dot(normal, view_dir) < 0.0) {
         normal = -normal;
     }
 
     // Blinn-Phong: especular con la direccion real del sol + la de la camara.
     let light_dir = normalize(uniforms.sun_dir + vec3<f32>(0.0, 0.15, 0.0));
-    let view_dir = normalize(uniforms.camera_pos - input.world_pos);
     let half_vec = normalize(light_dir + view_dir);
     let spec = pow(max(dot(normal, half_vec), 0.0), 48.0);
 

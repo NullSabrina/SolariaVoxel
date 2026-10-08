@@ -28,3 +28,24 @@ mod ui;
 pub use renderer::{CharacterView, FrameStats, HandView, Renderer, RendererError};
 pub use sky::SkyBasis;
 pub use ui::{UiQuad, region_uv};
+
+#[cfg(test)]
+mod shader_tests {
+    /// Compila (parsea) todos los shaders WGSL del motor sin GPU: naga valida
+    /// sintaxis y tipos, asi un error de shader se caza en `cargo test` y no al
+    /// arrancar la ventana.
+    #[test]
+    fn los_shaders_wgsl_compilan() {
+        for (name, src) in [
+            ("scene", include_str!("scene.wgsl")),
+            ("water", include_str!("shaders/water.wgsl")),
+            ("sky", include_str!("sky.wgsl")),
+            ("model", include_str!("model.wgsl")),
+            ("ui", include_str!("ui.wgsl")),
+            ("highlight", include_str!("highlight.wgsl")),
+        ] {
+            let parsed = wgpu::naga::front::wgsl::parse_str(src);
+            assert!(parsed.is_ok(), "shader {name} no compila: {:?}", parsed.err());
+        }
+    }
+}

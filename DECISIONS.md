@@ -3976,6 +3976,43 @@ no requiere cambio.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5). Verificacion **visual** en
 GPU pendiente (no hay GPU en el entorno): la geometria se cubre con tests.
 
+## v0.45.5 (MEGA PROMPT 2) - Fase E: render del agua
+
+### 2026-10-08 - Normal del agua orientada a la camara; orden y niebla confirmados
+
+**Decision.** En `water.wgsl` la **normal** (por derivadas de pantalla) se orienta
+**hacia la camara** (`if dot(normal, view_dir) < 0 { normal = -normal }`) en vez de
+forzar `normal.y >= 0`. El producto vectorial de `dpdx`/`dpdy` puede salir al reves
+segun el lado de la cara, asi que las caras **laterales** tenian un especular
+inconsistente respecto a la superior. Ahora el brillo es coherente.
+
+**Confirmado (sin cambios).**
+- **Orden de translucidez (2.8):** el renderer **ya** ordena las secciones de agua
+  **de lejos a cerca** (`sort_water_back_to_front` por distancia a la camara)
+  antes de dibujarlas; el prompt partia de "sin ordenar". Queda como refinamiento
+  menor el orden **dentro** de una seccion (pase de dos capas fondo/frente), no
+  verificable sin GPU.
+- **Niebla:** el bloque de niebla de `water.wgsl` es **identico** al de
+  `scene.wgsl` (mismo horizonte direccional) -> sin costura.
+- **Alfa:** el tile de agua es `175/255`, y el shader da
+  `alpha = 0.686*0.85 + 0.15 ≈ 0.73` (translucido). No "lava" el fondo: a 0.73 el
+  agua conserva su color; de noche se oscurece con `shade` (0.30..1.0) igual que
+  la escena. No se cambia (valor calibrado, no verificable sin GPU).
+
+**Motivo.** Seccion 2.8 del Prompt 2 (normal/niebla/orden).
+
+**Alternativas descartadas.**
+- Anadir una **normal por vertice** al `Vertex` (layout nuevo en greedy, modelo,
+  etc.): mas invasivo; las derivadas con orientacion a camara bastan.
+- Pase de dos capas del agua: mas coste y sin poder medirlo/verlo aqui; se aplaza.
+
+**Consecuencia.** `render/shaders/water.wgsl` (normal), `render/mod.rs` (test).
+**359 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.45.5`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5). Se anade
+`los_shaders_wgsl_compilan`: parsea los 6 WGSL con `wgpu::naga` en `cargo test`
+(sin GPU), asi el cambio de shader queda **validado**; la comprobacion visual en
+GPU sigue pendiente.
+
 ## Plantilla para nuevas entradas
 
 ```
