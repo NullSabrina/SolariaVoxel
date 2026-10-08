@@ -30,7 +30,7 @@ use crate::math::Vec3;
 use crate::player::PlayerController;
 use crate::render::{Renderer, SkyBasis};
 use crate::scene::{Camera, DayCycle, SkyParams, SkyState};
-use crate::ui::{Screen, ScreenStack};
+use crate::ui::{Effect, InputMode, Mode, Overlay, Screen, ScreenStack};
 use crate::world::registry;
 
 /// Estado global de la aplicacion.
@@ -52,6 +52,12 @@ pub struct App {
     input: Input,
     /// ¿Tenemos el cursor capturado (pointer lock)?
     mouse_locked: bool,
+    /// Maquina de estados del **modo de input** (Esc/cursor). Logica pura en
+    /// `ui::input_mode`; aqui solo se aplican sus efectos.
+    input_mode: InputMode,
+    /// Captura de cursor **pedida** pero aun no aceptada por el SO (se reintenta
+    /// al enfocar la ventana o al hacer click). El estado logico es `mouse_locked`.
+    want_capture: bool,
     /// Modo vuelo (F): sin gravedad, para explorar.
     flying: bool,
     /// Bloque apuntado por la camara en el ultimo frame (y su cara).
@@ -286,6 +292,57 @@ impl App {
             window.set_cursor_visible(true);
         }
         self.mouse_locked = false;
+    }
+
+    /// Modo de input derivado del estado real (pantallas y flags). No se guarda
+    /// aparte: la maquina de estados se sincroniza con esto antes de decidir.
+    fn current_mode(&self) -> Mode {
+        if self.inventory_open {
+            Mode::Overlay(Overlay::Inventory)
+        } else if self.crafting_open {
+            Mode::Overlay(Overlay::Crafting)
+        } else {
+            match self.screens.top() {
+                Screen::Playing => Mode::Playing,
+                Screen::Pause => Mode::Overlay(Overlay::Pause),
+                _ => Mode::Menu,
+            }
+        }
+    }
+
+    /// Intenta capturar el cursor. Si el SO lo rechaza (ventana sin foco) deja
+    /// `want_capture` puesto para reintentar; `mouse_locked` refleja lo aceptado.
+    fn try_capture(&mut self) {
+        if self.demo {
+            return;
+        }
+        self.lock_mouse();
+        self.want_capture = !self.mouse_locked;
+    }
+
+    /// Aplica los efectos que devuelve la maquina de estados de input (`ui`).
+    fn apply_input_effects(&mut self, effects: Vec<Effect>) {
+        for effect in effects {
+            match effect {
+                Effect::CaptureCursor => {
+                    self.want_capture = true;
+                    self.try_capture();
+                }
+                Effect::ReleaseCursor => {
+                    self.want_capture = false;
+                    self.unlock_mouse();
+                }
+                Effect::OpenPause => self.screens.push(Screen::Pause),
+                Effect::ClosePause => {
+                    self.rebinding = None;
+                    self.screens.pop();
+                }
+                Effect::OpenInventory => self.inventory_open = true,
+                Effect::CloseInventory => self.inventory_open = false,
+                Effect::CloseCrafting => self.close_crafting(),
+                Effect::MenuBack => self.menu_back(),
+            }
+        }
     }
 
     /// Un frame: avanza el tiempo del mundo (dia, agua a 10 Hz, autosave), aplica
@@ -1091,12 +1148,6 @@ impl App {
 
     // --- Pantallas / menus ---------------------------------------------------
 
-    /// Abre el menu de pausa (congela la simulacion; libera el raton).
-    fn open_pause(&mut self) {
-        self.screens.push(Screen::Pause);
-        self.unlock_mouse();
-    }
-
     /// Vuelve atras desde un menu (Esc). `Title` es la base.
     fn menu_back(&mut self) {
         match self.screens.top() {
@@ -1105,7 +1156,7 @@ impl App {
                 self.screens.pop();
                 // Al cerrar la pausa (y no quedar menus) se recaptura el raton.
                 if self.screens.is_playing() && !self.demo {
-                    self.lock_mouse();
+                    self.try_capture();
                 }
             }
             Screen::WorldSelect | Screen::CreateWorld => {
@@ -1121,7 +1172,7 @@ impl App {
     fn resume_play(&mut self) {
         self.screens = ScreenStack::with_playing();
         if !self.demo {
-            self.lock_mouse();
+            self.try_capture();
         }
     }
 
@@ -2104,17 +2155,12 @@ impl ApplicationHandler for App {
                     let playing = self.screens.is_playing();
 
                     if code == KeyCode::Escape && pressed {
-                        if self.crafting_open {
-                            self.close_crafting();
-                        } else if self.inventory_open {
-                            self.inventory_open = false;
-                        } else if !playing {
-                            self.menu_back();
-                        } else if self.mouse_locked {
-                            self.unlock_mouse();
-                        } else {
-                            self.open_pause();
-                        }
+                        // Un solo Esc por capa: la maquina de estados decide
+                        // (abre pausa y libera cursor, o cierra el overlay y
+                        // recaptura). Ver `ui::input_mode`.
+                        self.input_mode.set(self.current_mode());
+                        let effects = self.input_mode.on_escape();
+                        self.apply_input_effects(effects);
                     } else if !playing {
                         // En menus: el teclado escribe en campos o activa botones.
                         if pressed {
@@ -2122,26 +2168,12 @@ impl ApplicationHandler for App {
                         }
                     } else if pressed {
                         match code {
-                            // E (o la tecla asignada a "inventario"): cierra la
-                            // mesa; si no, abre/cierra el inventario.
+                            // E (o la tecla asignada a "inventario"): abre/cierra
+                            // el inventario o la mesa; cierra recapturando cursor.
                             c if c == self.binding_code("inventory", KeyCode::KeyE) => {
-                                if self.crafting_open {
-                                    self.close_crafting();
-                                    println!("[crafteo] mesa cerrada");
-                                } else {
-                                    self.inventory_open = !self.inventory_open;
-                                    if self.inventory_open {
-                                        self.unlock_mouse();
-                                    }
-                                    println!(
-                                        "[engine] inventario {}",
-                                        if self.inventory_open {
-                                            "abierto"
-                                        } else {
-                                            "cerrado"
-                                        }
-                                    );
-                                }
+                                self.input_mode.set(self.current_mode());
+                                let effects = self.input_mode.on_inventory_key();
+                                self.apply_input_effects(effects);
                             }
                             // F (o la tecla asignada a "volar"): alterna modo vuelo.
                             c if c == self.binding_code("fly", KeyCode::KeyF) => {
@@ -2226,7 +2258,8 @@ impl ApplicationHandler for App {
                             } else if self.mouse_locked {
                                 self.break_block();
                             } else {
-                                self.lock_mouse();
+                                self.want_capture = true;
+                                self.try_capture();
                             }
                         }
                         // Click derecho: sobre una mesa la abre; si no, coloca.
@@ -2299,6 +2332,14 @@ impl ApplicationHandler for App {
                     self.unlock_mouse();
                 }
                 self.input.clear();
+            }
+
+            // Al recuperar el foco, si quedaba una captura pedida (el SO la
+            // rechazo por falta de foco) la reintentamos.
+            WindowEvent::Focused(true) => {
+                if self.want_capture {
+                    self.try_capture();
+                }
             }
 
             WindowEvent::Resized(size) => {

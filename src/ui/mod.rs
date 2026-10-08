@@ -9,11 +9,13 @@
 //!
 //! Regla: nada de `wgpu` aqui, y `render` no toma decisiones de interfaz.
 
+pub mod input_mode;
 pub mod inventory;
 pub mod lang;
 pub mod options;
 pub mod screens;
 
+pub use input_mode::{Effect, InputMode, Mode, Overlay};
 pub use lang::{Lang, translate};
 pub use options::Options;
 pub use screens::{Screen, ScreenStack};

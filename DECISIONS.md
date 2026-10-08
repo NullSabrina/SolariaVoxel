@@ -4106,6 +4106,38 @@ ventana y la captura; funciona con el binario release y variables `SOLARIA_*`
 codigo. **359 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.46.0` (inicio del
 bloque). `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5).
 
+## v0.46.1 (MEGA PROMPT 3) - Fase B: maquina de estados de input (Esc/cursor)
+
+### 2026-10-08 - Un solo Esc; cerrar overlay recaptura el cursor
+
+**Decision.**
+- **Nuevo `ui/input_mode.rs`** (logica pura, sin GPU ni winit): `enum Mode {
+  Playing, Overlay(Inventory|Crafting|Pause), Menu }`, `enum Effect`, y
+  `InputMode::{on_escape, on_inventory_key}` que devuelven los efectos a aplicar.
+  Tabla 3.1 del prompt implementada y **testeada** (8 tests).
+- **`engine/app.rs`**: `input_mode` + `want_capture`; `current_mode()` deriva el
+  modo del estado real (pantallas/flags); `apply_input_effects()` aplica los
+  efectos; `try_capture()` intenta capturar y, si el SO lo rechaza (ventana sin
+  foco), deja `want_capture` para **reintentar** al recuperar foco
+  (`Focused(true)`) o al hacer click. Se retira `open_pause` (sin uso).
+- **Corregido 2.1**: Esc en juego abre la pausa y libera el cursor en **un solo
+  paso** (antes: 1.er Esc liberaba, 2.º abria). Cerrar inventario, mesa o pausa
+  con Esc/E **recaptura el cursor sin click** (antes el inventario no lo hacia).
+
+**Motivo.** Secciones 2.1 y 3.1 del prompt.
+
+**Alternativas descartadas.**
+- Derivar `inventory_open`/`crafting_open` de `Mode` (fuente unica): tocaria
+  decenas de sitios de `app.rs`; se prefiere `current_mode()` (sin duplicar
+  estado, ya que el modo se recalcula en cada transicion).
+- Reintentar la captura con un temporizador: el evento `Focused(true)` + click ya
+  cubren los casos reales de Windows.
+
+**Consecuencia.** `ui/input_mode.rs` (nuevo, 8 tests), `ui/mod.rs`, `engine/app.rs`.
+**367 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.46.1`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5). Verificacion **manual** del
+flujo Esc/cursor en Windows pendiente (la logica esta cubierta por tests).
+
 ## Plantilla para nuevas entradas
 
 ```
