@@ -8,8 +8,11 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.43.2` — Opciones y Controles (menús + mundos)
+## Estado actual: `v0.43.3` — Fuente con tildes + Opciones y Controles
 
+- **Fuente con tildes** (`v0.43.3`): la fuente bitmap 5x7 gana un bloque **Latin-1
+  útil** (`á é í ó ú ü ñ`, `¿ ¡ ° · …`); el texto de la UI ya muestra acentos
+  (`SIMULACIÓN`, `ATRÁS`).
 - **Opciones** (`v0.43.1`): menú **Opciones** (desde título y pausa) con distancia
   de render/simulación, niebla, FOV, sensibilidad, idioma, autoguardado y F3 al
   iniciar. Se guardan en `options.json` (global, atómico) y se **aplican en vivo**;
@@ -27,9 +30,8 @@ versionado del mundo y la generacion procedural.
   (`v0.34.0`, C1), **UI creativa** (`v0.41.0`), **distancia de vista** (`v0.33.0`)
   y **cielo/atmosfera** (`v0.30`–`v0.31.1`, sol/luna, estrellas, halo, Cinturón de
   Venus, hora azul), con mano y personaje (`v0.28`/`v0.29`, F5 tercera persona).
-- **Pendiente honesto**: toolkit de widgets nine-slice y fuente con tildes en el
-  render; integración del grafo en el terreno + clima (C2–C4); `sky_physical`
-  opcional.
+- **Pendiente honesto**: toolkit de widgets nine-slice; integración del grafo en el
+  terreno + clima (C2–C4); `sky_physical` opcional.
 
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
@@ -124,7 +126,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-326 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+327 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color, distancia de
 vista, interfaz creativa, grafo de densidad, libreria de mundos, pantallas y
 opciones). Lint:

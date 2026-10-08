@@ -1230,13 +1230,13 @@ impl App {
                 let o = &self.options;
                 vec![
                     format!("Distancia: {} chunks", o.render_radius),
-                    format!("Simulacion: {} chunks", o.sim_radius),
+                    format!("Simulación: {} chunks", o.sim_radius),
                     format!("Niebla: {}", o.fog),
                     format!("FOV: {:.0}", o.fov_deg),
                     format!("Sensibilidad: {:.2}", o.mouse_sensitivity),
                     format!("Idioma: {}", o.lang),
                     format!("Autoguardado: {:.0} s", o.autosave_secs),
-                    format!("F3 al iniciar: {}", if o.show_f3 { "si" } else { "no" }),
+                    format!("F3 al iniciar: {}", if o.show_f3 { "sí" } else { "no" }),
                     "Hecho".into(),
                 ]
             }

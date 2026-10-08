@@ -1,12 +1,14 @@
-//! Fuente **bitmap 5x7** para el overlay de diagnostico (F3).
+//! Fuente **bitmap 5x7** para el overlay de diagnostico (F3) y la interfaz.
 //!
 //! No hay rasterizador de fuentes: definimos los glifos a mano como rejillas de
 //! `5x7` (`#` = encendido) y los empaquetamos en un atlas de una sola textura
 //! (blanco sobre transparente). Cada caracter del texto es **un quad** que
 //! muestrea su celda del atlas (la forma la da el alfa).
 //!
-//! El texto se dibuja en MAYUSCULAS (los glifos son de una sola caja), como los
-//! rotulos de un HUD; el overlay convierte con `to_ascii_uppercase`.
+//! Cubre ASCII imprimible mas un bloque de **Latin-1 util** (`á é í ó ú ü ñ` en
+//! mayusculas, `¿ ¡ ° · …`). El texto se dibuja en MAYUSCULAS (los glifos son de
+//! una sola caja): las minusculas ASCII y las vocales acentuadas se normalizan a
+//! su forma en mayuscula.
 
 use crate::render::UiQuad;
 
@@ -22,21 +24,10 @@ pub const CELL_H: u32 = 8;
 pub const COLS: u32 = 16;
 /// Primer codigo representado (espacio).
 const FIRST: u32 = 32;
-/// Numero de glifos representados (ASCII 32..=126).
+/// Numero de glifos ASCII (32..=126).
 const COUNT: u32 = 95;
-/// Filas del atlas.
-const ROWS: u32 = COUNT.div_ceil(COLS);
-/// Ancho del atlas de fuente.
-pub const FONT_W: u32 = COLS * CELL_W;
-/// Alto del atlas de fuente.
-pub const FONT_H: u32 = ROWS * CELL_H;
 
-/// Capa de UI que samples la textura de fuente (las demas: `-1` interfaz,
-/// `>= 0` tile del atlas de bloques).
-pub const FONT_LAYER: i32 = -2;
-
-/// Glifos `5x7` (7 filas de 5, separadas por `/`). Solo mayusculas, digitos y
-/// simbolos; el resto se dibuja como un hueco.
+/// Glifos ASCII `5x7` (7 filas de 5, separadas por `/`).
 const FONT: &[(char, &str)] = &[
     (' ', "...../...../...../...../...../...../....."),
     ('A', ".###./#...#/#...#/#####/#...#/#...#/#...#"),
@@ -97,10 +88,74 @@ const FONT: &[(char, &str)] = &[
     ('*', "...../#.#.#/.###./#####/.###./#.#.#/....."),
 ];
 
-/// Patron de un caracter (`7` filas de `5`), o `None` si no hay glifo.
+/// Glifos **Latin-1 util** (vocales acentuadas en mayuscula + signos), 5x7.
+const EXTRA: &[(char, &str)] = &[
+    ('Á', "..#../.###./#...#/#...#/#####/#...#/#...#"),
+    ('É', "..#../#####/#..../####./#..../#..../#####"),
+    ('Í', "..#../#####/..#../..#../..#../..#../#####"),
+    ('Ó', "..#../.###./#...#/#...#/#...#/#...#/.###."),
+    ('Ú', "..#../#...#/#...#/#...#/#...#/#...#/.###."),
+    ('Ü', "#.#../#...#/#...#/#...#/#...#/#...#/.###."),
+    ('Ñ', ".#.#./#...#/##..#/#.#.#/#..##/#...#/#...#"),
+    ('¿', "..#../...../..#../.#.../#..../#...#/.###."),
+    ('¡', "..#../...../..#../..#../..#../..#../..#.."),
+    ('°', ".##../#..#./.##../...../...../...../....."),
+    ('·', "...../...../...../..#../...../...../....."),
+    ('…', "...../...../...../...../...../...../#.#.#"),
+];
+
+/// Numero de glifos extra.
+const EXTRA_COUNT: u32 = EXTRA.len() as u32;
+/// Total de glifos del atlas.
+const TOTAL: u32 = COUNT + EXTRA_COUNT;
+/// Filas del atlas.
+const ROWS: u32 = TOTAL.div_ceil(COLS);
+/// Ancho del atlas de fuente.
+pub const FONT_W: u32 = COLS * CELL_W;
+/// Alto del atlas de fuente.
+pub const FONT_H: u32 = ROWS * CELL_H;
+
+/// Capa de UI que samples la textura de fuente (las demas: `-1` interfaz,
+/// `>= 0` tile del atlas de bloques).
+pub const FONT_LAYER: i32 = -2;
+
+/// Normaliza un caracter a la forma que tiene glifo: ASCII en mayuscula y las
+/// vocales acentuadas minusculas a su mayuscula.
+fn normalize(ch: char) -> char {
+    match ch {
+        'á' | 'à' | 'ä' | 'â' | 'ã' => 'Á',
+        'é' | 'è' | 'ë' | 'ê' => 'É',
+        'í' | 'ì' | 'ï' | 'î' => 'Í',
+        'ó' | 'ò' | 'ö' | 'ô' | 'õ' => 'Ó',
+        'ú' | 'ù' | 'û' => 'Ú',
+        'ü' => 'Ü',
+        'ñ' => 'Ñ',
+        'ç' => 'C',
+        c if c.is_ascii() => c.to_ascii_uppercase(),
+        c => c,
+    }
+}
+
+/// Patron del caracter normalizado, o `None` si no hay glifo.
 fn pattern(ch: char) -> Option<&'static str> {
-    let up = ch.to_ascii_uppercase();
-    FONT.iter().find(|(c, _)| *c == up).map(|(_, p)| *p)
+    let n = normalize(ch);
+    FONT.iter()
+        .find(|(c, _)| *c == n)
+        .or_else(|| EXTRA.iter().find(|(c, _)| *c == n))
+        .map(|(_, p)| *p)
+}
+
+/// Indice de celda del caracter (ASCII por codigo, extra por posicion).
+fn glyph_index(ch: char) -> Option<u32> {
+    let n = normalize(ch);
+    let code = n as u32;
+    if (FIRST..FIRST + COUNT).contains(&code) && FONT.iter().any(|(c, _)| *c == n) {
+        return Some(code - FIRST);
+    }
+    EXTRA
+        .iter()
+        .position(|(c, _)| *c == n)
+        .map(|i| COUNT + i as u32)
 }
 
 /// Imagen RGBA del atlas de fuente: glifos **blancos** sobre transparente.
@@ -109,32 +164,37 @@ pub fn build_pixels() -> Vec<u8> {
     for ch in (FIRST..FIRST + COUNT).filter_map(char::from_u32) {
         let Some(pat) = pattern(ch) else { continue };
         let idx = ch as u32 - FIRST;
-        let (col, row) = (idx % COLS, idx / COLS);
-        for (ly, line) in pat.split('/').enumerate() {
-            for (lx, c) in line.chars().enumerate() {
-                if c != '#' {
-                    continue;
-                }
-                let x = col * CELL_W + lx as u32;
-                let y = row * CELL_H + ly as u32;
-                if x >= FONT_W || y >= FONT_H {
-                    continue;
-                }
-                let i = ((y * FONT_W + x) * 4) as usize;
-                px[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
-            }
-        }
+        blit(&mut px, idx, pat);
+    }
+    for (i, (ch, pat)) in EXTRA.iter().enumerate() {
+        let _ = ch;
+        blit(&mut px, COUNT + i as u32, pat);
     }
     px
 }
 
+/// Pinta el patron `pat` en la celda `idx` del atlas.
+fn blit(px: &mut [u8], idx: u32, pat: &str) {
+    let (col, row) = (idx % COLS, idx / COLS);
+    for (ly, line) in pat.split('/').enumerate() {
+        for (lx, c) in line.chars().enumerate() {
+            if c != '#' {
+                continue;
+            }
+            let x = col * CELL_W + lx as u32;
+            let y = row * CELL_H + ly as u32;
+            if x >= FONT_W || y >= FONT_H {
+                continue;
+            }
+            let i = ((y * FONT_W + x) * 4) as usize;
+            px[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+        }
+    }
+}
+
 /// UV normalizada del glifo `ch`, o `None` si no se dibuja.
 pub fn glyph_uv(ch: char) -> Option<[f32; 4]> {
-    pattern(ch)?;
-    let idx = (ch.to_ascii_uppercase() as u32).wrapping_sub(FIRST);
-    if idx >= COUNT {
-        return None;
-    }
+    let idx = glyph_index(ch)?;
     let (col, row) = (idx % COLS, idx / COLS);
     let (x, y) = (col * CELL_W, row * CELL_H);
     Some([
@@ -190,6 +250,16 @@ mod tests {
             assert!(glyph_uv(ch).is_some(), "falta glifo para {ch}");
         }
         assert!(glyph_uv('a').is_some(), "deberia aceptar minusculas");
+    }
+
+    #[test]
+    fn hay_glifo_para_acentos_y_signos() {
+        for ch in "áéíóúüñÁÉÍÓÚÜÑ¿¡°·…".chars() {
+            assert!(glyph_uv(ch).is_some(), "falta glifo para {ch}");
+        }
+        // La minuscula acentuada comparte celda con su mayuscula.
+        assert_eq!(glyph_uv('á'), glyph_uv('Á'));
+        assert_eq!(glyph_uv('ñ'), glyph_uv('Ñ'));
     }
 
     #[test]

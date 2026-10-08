@@ -63,7 +63,7 @@ const ES: &[(&str, &str)] = &[
     ("ui.search", "Buscar"),
     ("ui.inventory", "Inventario creativo"),
     ("act.forward", "Adelante"),
-    ("act.back", "Atras"),
+    ("act.back", "Atrás"),
     ("act.left", "Izquierda"),
     ("act.right", "Derecha"),
     ("act.jump", "Saltar"),

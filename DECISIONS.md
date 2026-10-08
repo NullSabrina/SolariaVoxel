@@ -3262,6 +3262,29 @@ bootstrap de "abrir controles"; falta el toolkit nine-slice y la fuente con tild
 326 tests; clippy limpio. Captura `v0.43.2_controls.png`. `GENERATOR_VERSION`/
 `FORMAT_VERSION` intactos (16/5).
 
+## v0.43.3 - Fuente con tildes (Latin-1 util)
+
+### 2026-10-07 - Glifos acentuados y signos en la fuente bitmap
+
+**Decision.** La fuente 5x7 (`render/font.rs`) anade un bloque **`EXTRA`** de
+glifos `5x7` para vocales acentuadas en mayuscula (`Á É Í Ó Ú Ü Ñ`) y signos
+(`¿ ¡ ° · …`). El atlas pasa a `COUNT + EXTRA.len()` celdas; `normalize()` lleva
+minusculas ASCII y vocales acentuadas minusculas a su forma con glifo, y
+`glyph_index()` resuelve ASCII por codigo y el bloque extra por posicion. El texto
+de la UI ya usa acentos reales (`Simulación`, `Atrás`).
+
+**Motivo.** El Prompt 2 pide que "el texto visible soporte ñ, tildes, ¿ y ¡". Sin
+rasterizador, se dibujan los glifos a mano como el resto.
+
+**Alternativas descartadas.** Subir el alto a 5x9 (cambiaria el layout del F3 y la
+separacion): se comprimen los glifos acentuados a 7 filas (tilde + letra de 6).
+Anadir una crate de fuentes (rasterizado TTF): fuera de alcance y del estilo.
+
+**Consecuencia.** `render/font.rs` (`EXTRA`, `normalize`, `glyph_index`, 1 test
+nuevo); `ui/lang.rs` (`Atrás`); `engine/app.rs` (etiquetas con acento). 327 tests;
+clippy limpio. Capturas `v0.43.3_{options,controls}_acentos.png`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```
