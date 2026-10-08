@@ -208,6 +208,10 @@ capturas: el render, el pipeline y la integracion de eventos.
 - **Cielo y atmosfera** (paleta, orbita solar/lunar, fases, estrellas, clima
   celeste) -> `scene` (estado puro, testeable sin GPU); su **pase** de dibujo ->
   `render` (`render/sky.rs` + `sky.wgsl`). Conversion de color -> `math/color.rs`.
+- **Mundos en disco** (crear/listar/renombrar/duplicar/eliminar, `level.json`,
+  importar el `world.vf` antiguo) -> `world::library`. **Flujo de pantallas**
+  (titulo/seleccion/crear/pausa) -> `ui::screens` (logica pura) + `engine::app`
+  (orquestacion) + `render` (dibujo).
 - Interfaz 2D (HUD, hotbar, inventario, mesa, overlay F3) -> `render`
   (`render::ui` + `render::gui` + `render::font`); el **estado/logica** de UI
   (idioma, categorias, busqueda, reglas del inventario) -> `ui` (sin GPU,

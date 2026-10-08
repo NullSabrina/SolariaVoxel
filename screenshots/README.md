@@ -93,3 +93,12 @@ ejecutable en modo demo (ver `README.md`).
 | ------- | ----------- |
 | `v0.35.0_sun_texture.png` | Sol como disco texturizado (arte de LibreSprite) + halo HG. |
 | `v0.35.0_moon_texture.png` | Luna texturizada con fase (tira de 8) sobre el campo de estrellas. |
+
+## Mundos multiples y pantallas (`v0.42`)
+
+| Captura | Que muestra |
+| ------- | ----------- |
+| `v0.42.0_title.png` | Pantalla de titulo (logo + botones). |
+| `v0.42.0_worlds.png` | Selector de mundos (lista + acciones). |
+| `v0.42.0_create.png` | Crear mundo (nombre + semilla). |
+| `v0.42.0_pause.png` | Menu de pausa (Esc). |

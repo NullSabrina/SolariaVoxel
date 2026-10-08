@@ -30,6 +30,7 @@ use crate::math::Vec3;
 use crate::player::PlayerController;
 use crate::render::{Renderer, SkyBasis};
 use crate::scene::{Camera, DayCycle, SkyParams, SkyState};
+use crate::ui::{Screen, ScreenStack};
 use crate::world::registry;
 
 /// Estado global de la aplicacion.
@@ -130,15 +131,39 @@ pub struct App {
     inv_scroll: i32,
     /// Nombre del bloque sobre la hotbar: `(bloque, segundos restantes)`.
     hotbar_toast: Option<(crate::world::Block, f32)>,
+    /// Pila de pantallas (titulo, selector de mundos, jugar, pausa...).
+    screens: crate::ui::ScreenStack,
+    /// Directorio base de los mundos (`saves/` cuelga de aqui).
+    world_base: std::path::PathBuf,
+    /// Slug del mundo activo (su carpeta).
+    world_slug: String,
+    /// Mundos en disco (cache para el selector).
+    worlds: Vec<crate::world::WorldEntry>,
+    /// Texto del campo "nombre" al crear mundo.
+    create_name: String,
+    /// Texto del campo "semilla" al crear mundo.
+    create_seed: String,
+    /// Mundo pendiente de confirmar para eliminar.
+    confirm_delete: Option<String>,
+    /// Indice seleccionado en el selector de mundos.
+    world_sel: usize,
+    /// Campo enfocado en "crear mundo" (0 = nombre, 1 = semilla).
+    create_focus: usize,
+    /// Slug del mundo que se esta renombrando (si `Some`, "Crear" renombra).
+    rename_target: Option<String>,
+    /// Peticion de salida (se atiende tras procesar el evento).
+    exit_requested: bool,
 }
 
 /// Distancia y altura de la camara en tercera persona.
 const TP_DISTANCE: f32 = 3.6;
 const TP_HEIGHT: f32 = 0.35;
 
-/// Ruta del archivo de mundo por defecto (junto al ejecutable de trabajo).
-fn world_path() -> std::path::PathBuf {
-    std::path::PathBuf::from("world.vf")
+/// Ruta del `world.vf` del mundo en `base/<slug>/`.
+fn active_world_path(base: &std::path::Path, slug: &str) -> std::path::PathBuf {
+    crate::world::library::saves_dir(base)
+        .join(slug)
+        .join(crate::world::library::WORLD_FILE)
 }
 
 /// Segundos desde el epoch de UNIX (para la fecha del header).
@@ -258,8 +283,10 @@ impl App {
     /// el giro de camara (por frame) y corre la fisica del jugador a **timestep
     /// fijo** (acumulador).
     fn update(&mut self, frame_dt: f32) {
-        // El tiempo del mundo avanza siempre (salvo en demo, que lo congela).
-        if !self.demo {
+        // El tiempo del mundo avanza solo si se esta jugando (no en demo/menus,
+        // que lo congelan).
+        let playing = self.screens.is_playing();
+        if !self.demo && playing {
             self.day_cycle.advance(frame_dt);
 
             // Tick de agua a 10 Hz, independiente del framerate.
@@ -298,15 +325,14 @@ impl App {
         // El giro es **por frame**: el delta del raton es de este frame, no de un
         // paso de simulacion. Se consume una sola vez.
         let (dx, dy) = self.input.take_mouse_delta();
-        if self.mouse_locked && (dx != 0.0 || dy != 0.0) {
+        if self.mouse_locked && playing && (dx != 0.0 || dy != 0.0) {
             if let Some(camera) = self.camera.as_mut() {
                 camera.add_look(dx, dy);
             }
         }
 
-        // En demo la camara queda fija: no aplicamos la fisica, para que la vista
-        // de la captura no se desplace antes de la foto.
-        if self.demo {
+        // En demo o con un menu abierto la camara y el jugador quedan fijos.
+        if self.demo || !playing {
             return;
         }
 
@@ -434,8 +460,9 @@ impl App {
         let p = self.player_pos;
         save.player_pos = [p.x, p.y, p.z];
         let chunks = save.chunks.len();
+        let path = active_world_path(&self.world_base, &self.world_slug);
         let requested = match self.save_worker.as_ref() {
-            Some(worker) => worker.request(save, world_path()),
+            Some(worker) => worker.request(save, path),
             None => false,
         };
         if requested {
@@ -614,6 +641,10 @@ impl App {
     fn build_ui(&self, win_w: f32, win_h: f32) -> Vec<crate::render::UiQuad> {
         use crate::render::{UiQuad, font, gui, region_uv};
         use crate::world::Face;
+        // En menus solo se dibuja el propio menu (sin HUD).
+        if !self.screens.is_playing() {
+            return self.build_menu_ui(win_w, win_h);
+        }
         let mut quads: Vec<UiQuad> = Vec::new();
         let slot = gui::SLOT as f32 * UI_SCALE;
         let inset = 3.0 * UI_SCALE;
@@ -1019,6 +1050,461 @@ impl App {
         self.craft_result = None;
     }
 
+    // --- Pantallas / menus ---------------------------------------------------
+
+    /// Abre el menu de pausa (congela la simulacion; libera el raton).
+    fn open_pause(&mut self) {
+        self.screens.push(Screen::Pause);
+        self.unlock_mouse();
+    }
+
+    /// Vuelve atras desde un menu (Esc). `Title` es la base.
+    fn menu_back(&mut self) {
+        match self.screens.top() {
+            Screen::Pause => {
+                self.screens.pop();
+                if !self.demo {
+                    self.lock_mouse();
+                }
+            }
+            Screen::WorldSelect | Screen::CreateWorld => {
+                self.rename_target = None;
+                self.confirm_delete = None;
+                self.screens.replace(Screen::Title);
+            }
+            Screen::Title | Screen::Playing => {}
+        }
+    }
+
+    /// Vuelve a jugar (cierra menus) y recaptura el raton.
+    fn resume_play(&mut self) {
+        self.screens = ScreenStack::with_playing();
+        if !self.demo {
+            self.lock_mouse();
+        }
+    }
+
+    /// Refresca la lista de mundos desde disco.
+    fn reload_worlds(&mut self) {
+        self.worlds = crate::world::library::list_worlds(&self.world_base);
+        if self.world_sel >= self.worlds.len() {
+            self.world_sel = self.worlds.len().saturating_sub(1);
+        }
+    }
+
+    /// Carga y juega el mundo `slug` (reconstruye el renderer).
+    fn enter_world(&mut self, slug: String) {
+        // Si ya es el mundo activo, solo cierra los menus.
+        if slug == self.world_slug && self.renderer.is_some() {
+            self.resume_play();
+            return;
+        }
+        // Guarda el mundo actual en segundo plano (con su ruta) antes de cambiar;
+        // el worker seguira vivo y escribira el mundo anterior mientras cargamos.
+        if self.renderer.is_some() {
+            self.save_world();
+        }
+        let base = self.world_base.clone();
+        let path = active_world_path(&base, &slug);
+        let (seed, restored, header, player_pos) = match crate::world::load_and_migrate(&path) {
+            Ok(save) => {
+                let restored = save
+                    .chunks
+                    .iter()
+                    .map(|(pos, rec)| (*pos, rec.clone()))
+                    .collect();
+                (save.header.seed, restored, save.header, save.player_pos)
+            }
+            Err(e) => {
+                eprintln!("[world] no se pudo cargar '{slug}': {e}");
+                return;
+            }
+        };
+        let player_pos =
+            if player_pos[1] < 0.0 || player_pos[1] >= crate::world::WORLD_HEIGHT as f32 {
+                crate::world::save::DEFAULT_PLAYER_POS
+            } else {
+                player_pos
+            };
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        match Renderer::new(window, seed, restored) {
+            Ok(renderer) => self.renderer = Some(renderer),
+            Err(e) => {
+                eprintln!("[world] no se pudo crear el renderer: {e}");
+                return;
+            }
+        }
+        self.seed = seed;
+        self.world_header = header;
+        self.world_slug = slug;
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.warm_streaming(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
+        }
+        let mut camera = Camera::new(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
+        camera.pitch_deg = -12.0;
+        if let Some(window) = self.window.as_ref() {
+            let s = window.inner_size();
+            camera.update_projection(s.width as f32 / s.height.max(1) as f32);
+        }
+        camera.update_view();
+        if let Some(renderer) = self.renderer.as_ref() {
+            let is_solid = |p: Vec3| renderer.is_solid_loaded_at(p);
+            self.player.settle(&mut camera, is_solid);
+        }
+        self.player_pos = camera.position;
+        self.prev_player_pos = camera.position;
+        self.camera = Some(camera);
+        self.world_saved = false;
+        self.autosave_timer = 0.0;
+        self.resume_play();
+        println!("[world] jugando '{}'", self.world_slug);
+    }
+
+    /// Etiquetas de los botones de la pantalla actual.
+    fn menu_labels(&self) -> Vec<String> {
+        if self.confirm_delete.is_some() {
+            return vec!["Si, eliminar".into(), "Cancelar".into()];
+        }
+        match self.screens.top() {
+            Screen::Title => vec!["Un jugador".into(), "Salir".into()],
+            Screen::WorldSelect => vec![
+                "Jugar".into(),
+                "Crear mundo".into(),
+                "Renombrar".into(),
+                "Duplicar".into(),
+                "Eliminar".into(),
+                "Volver".into(),
+            ],
+            Screen::CreateWorld => {
+                if self.rename_target.is_some() {
+                    vec!["Renombrar".into(), "Volver".into()]
+                } else {
+                    vec!["Crear".into(), "Volver".into()]
+                }
+            }
+            Screen::Pause => vec![
+                "Volver al juego".into(),
+                "Guardar mundo ahora".into(),
+                "Guardar y salir al titulo".into(),
+            ],
+            Screen::Playing => Vec::new(),
+        }
+    }
+
+    /// Rectangulos de los botones (240x22, apilados y centrados).
+    fn menu_button_rects(&self, win_w: f32, win_h: f32, n: usize) -> Vec<[f32; 4]> {
+        let w = 240.0;
+        let h = 22.0;
+        let gap = 6.0;
+        let total = n as f32 * h + (n as f32 - 1.0).max(0.0) * gap;
+        let x = ((win_w - w) * 0.5).floor();
+        let y0 = ((win_h - total) * 0.5).floor();
+        (0..n)
+            .map(|i| [x, y0 + i as f32 * (h + gap), w, h])
+            .collect()
+    }
+
+    /// Ejecuta la accion del boton `i` de la pantalla actual.
+    fn menu_action(&mut self, i: usize) {
+        if let Some(slug) = self.confirm_delete.clone() {
+            if i == 0 {
+                let _ = crate::world::library::delete_world(&self.world_base, &slug);
+            }
+            self.confirm_delete = None;
+            self.reload_worlds();
+            return;
+        }
+        match self.screens.top() {
+            Screen::Title => match i {
+                0 => {
+                    self.reload_worlds();
+                    self.screens.replace(Screen::WorldSelect);
+                }
+                1 => self.exit_requested = true,
+                _ => {}
+            },
+            Screen::WorldSelect => {
+                let sel = self.worlds.get(self.world_sel).cloned();
+                match i {
+                    0 => {
+                        if let Some(w) = sel {
+                            self.enter_world(w.slug);
+                        }
+                    }
+                    1 => {
+                        self.rename_target = None;
+                        self.create_name = "Mundo nuevo".into();
+                        self.create_seed = String::new();
+                        self.create_focus = 0;
+                        self.screens.replace(Screen::CreateWorld);
+                    }
+                    2 => {
+                        if let Some(w) = sel {
+                            self.rename_target = Some(w.slug);
+                            self.create_name = w.meta.display_name;
+                            self.create_focus = 0;
+                            self.screens.replace(Screen::CreateWorld);
+                        }
+                    }
+                    3 => {
+                        if let Some(w) = sel {
+                            let _ = crate::world::library::duplicate_world(
+                                &self.world_base,
+                                &w.slug,
+                                now_unix(),
+                            );
+                            self.reload_worlds();
+                        }
+                    }
+                    4 => {
+                        if let Some(w) = sel {
+                            self.confirm_delete = Some(w.slug);
+                        }
+                    }
+                    5 => self.screens.replace(Screen::Title),
+                    _ => {}
+                }
+            }
+            Screen::CreateWorld => match i {
+                0 => self.submit_create_or_rename(),
+                1 => {
+                    self.rename_target = None;
+                    self.screens.replace(Screen::WorldSelect);
+                }
+                _ => {}
+            },
+            Screen::Pause => match i {
+                0 => self.resume_play(),
+                1 => self.save_world(),
+                2 => {
+                    self.save_world();
+                    self.screens.to_title();
+                }
+                _ => {}
+            },
+            Screen::Playing => {}
+        }
+    }
+
+    /// Crea un mundo nuevo o renombra el seleccionado, segun `rename_target`.
+    fn submit_create_or_rename(&mut self) {
+        let name = if self.create_name.trim().is_empty() {
+            "Mundo nuevo".to_string()
+        } else {
+            self.create_name.trim().to_string()
+        };
+        if let Some(slug) = self.rename_target.take() {
+            if let Err(e) = crate::world::library::rename_world(&self.world_base, &slug, &name) {
+                eprintln!("[world] no se pudo renombrar: {e}");
+            }
+            self.reload_worlds();
+            self.screens.replace(Screen::WorldSelect);
+            return;
+        }
+        let seed = crate::world::seed_from_text(&self.create_seed);
+        match crate::world::library::create_world(&self.world_base, &name, seed, now_unix()) {
+            Ok(entry) => {
+                self.reload_worlds();
+                self.enter_world(entry.slug);
+            }
+            Err(e) => eprintln!("[world] no se pudo crear el mundo: {e}"),
+        }
+    }
+
+    /// Clic en un menu: activa el boton bajo el cursor.
+    fn menu_click(&mut self) {
+        let (win_w, win_h) = self.window_size_f();
+        let (mx, my) = self.cursor;
+        let labels = self.menu_labels();
+        for (i, r) in self
+            .menu_button_rects(win_w, win_h, labels.len())
+            .iter()
+            .enumerate()
+        {
+            if mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3] {
+                self.menu_action(i);
+                return;
+            }
+        }
+    }
+
+    /// Tecla en un menu: escribe en campos o activa botones.
+    fn menu_key(&mut self, code: KeyCode, text: Option<&str>) {
+        match self.screens.top() {
+            Screen::CreateWorld => match code {
+                KeyCode::Tab => self.create_focus = 1 - self.create_focus.min(1),
+                KeyCode::Backspace => {
+                    if self.create_focus == 0 {
+                        self.create_name.pop();
+                    } else {
+                        self.create_seed.pop();
+                    }
+                }
+                KeyCode::Enter => self.menu_action(0),
+                _ => {
+                    if let Some(t) = text {
+                        for ch in t.chars() {
+                            if !(ch.is_alphanumeric() || ch == ' ' || ch == '_' || ch == '-') {
+                                continue;
+                            }
+                            let field = if self.create_focus == 0 {
+                                &mut self.create_name
+                            } else {
+                                &mut self.create_seed
+                            };
+                            let max = if self.create_focus == 0 { 32 } else { 12 };
+                            if field.chars().count() < max {
+                                field.push(ch);
+                            }
+                        }
+                    }
+                }
+            },
+            Screen::WorldSelect => match code {
+                KeyCode::ArrowUp => {
+                    self.world_sel = self.world_sel.saturating_sub(1);
+                }
+                KeyCode::ArrowDown => {
+                    if self.world_sel + 1 < self.worlds.len() {
+                        self.world_sel += 1;
+                    }
+                }
+                KeyCode::Enter => self.menu_action(0),
+                _ => {}
+            },
+            Screen::Title | Screen::Pause => {
+                if code == KeyCode::Enter {
+                    self.menu_action(0);
+                }
+            }
+            Screen::Playing => {}
+        }
+    }
+
+    /// Quads del **menu/titulo** (fondo, logo, botones, listas) y su leyenda.
+    fn build_menu_ui(&self, win_w: f32, win_h: f32) -> Vec<crate::render::UiQuad> {
+        use crate::render::{UiQuad, font, gui, region_uv};
+        let top = self.screens.top();
+        if top == Screen::Playing {
+            return Vec::new();
+        }
+        let mut quads: Vec<UiQuad> = Vec::new();
+        // Atenua el mundo detras.
+        quads.push(UiQuad {
+            rect: [0.0, 0.0, win_w, win_h],
+            uv: region_uv(gui::DIM),
+            layer: -1,
+        });
+
+        // Titulo grande (logo textual) arriba.
+        let title = match top {
+            Screen::Title => "SOLARIA VOXEL".to_string(),
+            Screen::WorldSelect => "SELECCIONAR MUNDO".to_string(),
+            Screen::CreateWorld => {
+                if self.rename_target.is_some() {
+                    "RENOMBRAR MUNDO".to_string()
+                } else {
+                    "CREAR MUNDO".to_string()
+                }
+            }
+            Screen::Pause => "PAUSA".to_string(),
+            Screen::Playing => String::new(),
+        };
+        let scale = UI_SCALE * 2.0;
+        let tw = font::text_width(&title, scale);
+        quads.extend(font::text_quads(
+            &title,
+            ((win_w - tw) * 0.5).floor(),
+            40.0,
+            scale,
+        ));
+
+        // Lista de mundos (selector).
+        if top == Screen::WorldSelect {
+            let list_x = ((win_w - 360.0) * 0.5).floor();
+            let mut ly = 96.0;
+            for (i, w) in self.worlds.iter().take(6).enumerate() {
+                let selected = i == self.world_sel;
+                let color = if selected { gui::SELECTION } else { gui::DIM };
+                quads.push(UiQuad {
+                    rect: [list_x, ly, 360.0, 18.0],
+                    uv: region_uv(color),
+                    layer: -1,
+                });
+                let tag = if w.corrupt { " (corrupto)" } else { "" };
+                let line = format!("{}{}  semilla {}", w.meta.display_name, tag, w.meta.seed);
+                quads.extend(font::text_quads(&line, list_x + 4.0, ly + 4.0, UI_SCALE));
+                ly += 20.0;
+            }
+            if self.worlds.is_empty() {
+                quads.extend(font::text_quads(
+                    "No hay mundos. Crea uno.",
+                    list_x + 4.0,
+                    ly,
+                    UI_SCALE,
+                ));
+            }
+        }
+
+        // Campos de texto (crear/renombrar).
+        if top == Screen::CreateWorld {
+            let fx = ((win_w - 360.0) * 0.5).floor();
+            let mut fy = 96.0;
+            for field in 0..2 {
+                let focused = field == self.create_focus;
+                if field == 0 {
+                    quads.extend(font::text_quads("Nombre:", fx, fy, UI_SCALE));
+                } else if self.rename_target.is_none() {
+                    quads.extend(font::text_quads("Semilla:", fx, fy, UI_SCALE));
+                } else {
+                    // Renombrar no usa semilla; deja hueco.
+                    fy += 18.0;
+                    continue;
+                }
+                let value = if field == 0 {
+                    self.create_name.clone()
+                } else {
+                    self.create_seed.clone()
+                };
+                let box_x = fx + 90.0;
+                quads.push(UiQuad {
+                    rect: [box_x, fy - 2.0, 260.0, 16.0],
+                    uv: region_uv(if focused { gui::SELECTION } else { gui::DIM }),
+                    layer: -1,
+                });
+                quads.extend(font::text_quads(&value, box_x + 3.0, fy, UI_SCALE));
+                fy += 18.0;
+            }
+        }
+
+        // Botones.
+        let labels = self.menu_labels();
+        for (label, rect) in labels
+            .iter()
+            .zip(self.menu_button_rects(win_w, win_h, labels.len()))
+        {
+            quads.push(UiQuad {
+                rect,
+                uv: region_uv(gui::SLOT_REGION),
+                layer: -1,
+            });
+            let lw = font::text_width(label, UI_SCALE);
+            quads.extend(font::text_quads(
+                label,
+                rect[0] + (rect[2] - lw) * 0.5,
+                rect[1] + 4.0,
+                UI_SCALE,
+            ));
+        }
+
+        // Version del motor abajo a la izquierda.
+        let v = concat!("v", env!("CARGO_PKG_VERSION"));
+        quads.extend(font::text_quads(v, 6.0, win_h - 14.0, UI_SCALE));
+        quads
+    }
+
     /// Un click con la mesa abierta: resultado, rejilla, inventario u hotbar.
     ///
     /// Sin "mano": el click en el inventario pone el bloque en la primera celda
@@ -1095,8 +1581,26 @@ impl ApplicationHandler for App {
             }
         };
 
+        // Libreria de mundos: base (`saves/`), importar el `world.vf` antiguo y
+        // elegir el mundo mas reciente. Si no hay ninguno, se crea uno.
+        let base = crate::world::library::base_dir_from_env();
+        let now = now_unix();
+        let _ = crate::world::library::import_legacy(&base, now);
+        let mut worlds = crate::world::library::list_worlds(&base);
+        if worlds.is_empty() {
+            match crate::world::library::create_world(&base, "Mundo nuevo", 13_371, now) {
+                Ok(w) => worlds.push(w),
+                Err(e) => eprintln!("[world] no se pudo crear el mundo inicial: {e}"),
+            }
+        }
+        self.world_base = base.clone();
+        self.worlds = worlds;
+        if let Some(first) = self.worlds.first() {
+            self.world_slug = first.slug.clone();
+        }
+        let path = active_world_path(&base, &self.world_slug);
+
         // Cargamos el mundo de disco si existe (semilla + chunks editados + pos).
-        let path = world_path();
         let (seed, restored, header, player_pos) = match crate::world::load_and_migrate(&path) {
             Ok(save) => {
                 let restored: Vec<_> = save
@@ -1270,6 +1774,34 @@ impl ApplicationHandler for App {
             self.day_cycle.day_count = day;
         }
 
+        // Pantallas: en demo se juega directo; si no, se empieza en el titulo.
+        self.screens = if self.demo {
+            ScreenStack::with_playing()
+        } else {
+            ScreenStack::with_title()
+        };
+        if let Ok(scr) = std::env::var("SOLARIA_SCREEN") {
+            self.screens = match scr.as_str() {
+                "title" => ScreenStack::with_title(),
+                "worlds" => {
+                    let mut s = ScreenStack::with_title();
+                    s.replace(Screen::WorldSelect);
+                    s
+                }
+                "create" => {
+                    let mut s = ScreenStack::with_title();
+                    s.replace(Screen::CreateWorld);
+                    s
+                }
+                "pause" => {
+                    let mut s = ScreenStack::with_playing();
+                    s.push(Screen::Pause);
+                    s
+                }
+                _ => self.screens.clone(),
+            };
+        }
+
         self.last_frame = Some(Instant::now());
         // Hilo de guardado en segundo plano.
         self.save_worker = Some(super::save_worker::SaveWorker::spawn());
@@ -1297,97 +1829,104 @@ impl ApplicationHandler for App {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     // Guardamos el estado (necesario para el movimiento continuo).
                     self.input.on_key(code, event.state);
+                    let pressed = event.state == ElementState::Pressed;
+                    let playing = self.screens.is_playing();
 
-                    match code {
-                        // Escape: cierra mesa; si no, cierra el inventario; si no,
-                        // libera el raton; si ya esta libre, sale.
-                        KeyCode::Escape if event.state == ElementState::Pressed => {
-                            if self.crafting_open {
-                                self.close_crafting();
-                            } else if self.inventory_open {
-                                self.inventory_open = false;
-                            } else if self.mouse_locked {
-                                self.unlock_mouse();
-                            } else {
-                                self.finalize_save();
-                                event_loop.exit();
-                            }
+                    if code == KeyCode::Escape && pressed {
+                        if self.crafting_open {
+                            self.close_crafting();
+                        } else if self.inventory_open {
+                            self.inventory_open = false;
+                        } else if !playing {
+                            self.menu_back();
+                        } else if self.mouse_locked {
+                            self.unlock_mouse();
+                        } else {
+                            self.open_pause();
                         }
-                        // E: cierra la mesa si esta abierta; si no, abre/cierra el
-                        // inventario (libera el raton al abrir).
-                        KeyCode::KeyE if event.state == ElementState::Pressed => {
-                            if self.crafting_open {
-                                self.close_crafting();
-                                println!("[crafteo] mesa cerrada");
-                                return;
-                            }
-                            self.inventory_open = !self.inventory_open;
-                            if self.inventory_open {
-                                self.unlock_mouse();
-                            }
-                            println!(
-                                "[engine] inventario {}",
-                                if self.inventory_open {
-                                    "abierto"
+                    } else if !playing {
+                        // En menus: el teclado escribe en campos o activa botones.
+                        if pressed {
+                            self.menu_key(code, event.text.as_deref());
+                        }
+                    } else if pressed {
+                        match code {
+                            // E: cierra la mesa; si no, abre/cierra el inventario.
+                            KeyCode::KeyE => {
+                                if self.crafting_open {
+                                    self.close_crafting();
+                                    println!("[crafteo] mesa cerrada");
                                 } else {
-                                    "cerrado"
-                                }
-                            );
-                        }
-                        // F: alterna modo vuelo.
-                        KeyCode::KeyF if event.state == ElementState::Pressed => {
-                            self.flying = !self.flying;
-                            println!(
-                                "[engine] modo vuelo: {}",
-                                if self.flying { "ON" } else { "OFF" }
-                            );
-                        }
-                        // F3: overlay de diagnostico (metricas de frame).
-                        KeyCode::F3 if event.state == ElementState::Pressed => {
-                            self.show_stats = !self.show_stats;
-                            println!(
-                                "[engine] overlay F3: {}",
-                                if self.show_stats { "ON" } else { "OFF" }
-                            );
-                        }
-                        // F5: primera/tercera persona (ver el personaje).
-                        KeyCode::F5 if event.state == ElementState::Pressed => {
-                            self.third_person = !self.third_person;
-                            println!(
-                                "[engine] camara: {}",
-                                if self.third_person {
-                                    "tercera persona"
-                                } else {
-                                    "primera persona"
-                                }
-                            );
-                        }
-                        // Con el inventario abierto, las teclas escriben en la
-                        // busqueda; si no, `1`-`9` seleccionan la ranura.
-                        _ if event.state == ElementState::Pressed => {
-                            if self.inventory_open {
-                                if code == KeyCode::Backspace {
-                                    self.inv_search.pop();
-                                    self.inv_scroll = 0;
-                                    return;
-                                }
-                                if let Some(text) = event.text.as_deref() {
-                                    for ch in text.chars() {
-                                        if (ch.is_alphanumeric() || ch == ' ')
-                                            && self.inv_search.chars().count() < 24
-                                        {
-                                            self.inv_search.push(ch);
-                                        }
+                                    self.inventory_open = !self.inventory_open;
+                                    if self.inventory_open {
+                                        self.unlock_mouse();
                                     }
-                                    self.inv_scroll = 0;
+                                    println!(
+                                        "[engine] inventario {}",
+                                        if self.inventory_open {
+                                            "abierto"
+                                        } else {
+                                            "cerrado"
+                                        }
+                                    );
                                 }
-                            } else if let Some(slot) = digit_slot(code) {
-                                self.hotbar_sel = slot;
-                                self.hotbar_toast = Some((self.hotbar[slot], 2.0));
-                                println!("[engine] ranura {} ({:?})", slot + 1, self.hotbar[slot]);
+                            }
+                            // F: alterna modo vuelo.
+                            KeyCode::KeyF => {
+                                self.flying = !self.flying;
+                                println!(
+                                    "[engine] modo vuelo: {}",
+                                    if self.flying { "ON" } else { "OFF" }
+                                );
+                            }
+                            // F3: overlay de diagnostico.
+                            KeyCode::F3 => {
+                                self.show_stats = !self.show_stats;
+                                println!(
+                                    "[engine] overlay F3: {}",
+                                    if self.show_stats { "ON" } else { "OFF" }
+                                );
+                            }
+                            // F5: primera/tercera persona.
+                            KeyCode::F5 => {
+                                self.third_person = !self.third_person;
+                                println!(
+                                    "[engine] camara: {}",
+                                    if self.third_person {
+                                        "tercera persona"
+                                    } else {
+                                        "primera persona"
+                                    }
+                                );
+                            }
+                            // Con el inventario abierto, escribe en la busqueda; si
+                            // no, `1`-`9` seleccionan ranura.
+                            _ => {
+                                if self.inventory_open {
+                                    if code == KeyCode::Backspace {
+                                        self.inv_search.pop();
+                                        self.inv_scroll = 0;
+                                    } else if let Some(text) = event.text.as_deref() {
+                                        for ch in text.chars() {
+                                            if (ch.is_alphanumeric() || ch == ' ')
+                                                && self.inv_search.chars().count() < 24
+                                            {
+                                                self.inv_search.push(ch);
+                                            }
+                                        }
+                                        self.inv_scroll = 0;
+                                    }
+                                } else if let Some(slot) = digit_slot(code) {
+                                    self.hotbar_sel = slot;
+                                    self.hotbar_toast = Some((self.hotbar[slot], 2.0));
+                                    println!(
+                                        "[engine] ranura {} ({:?})",
+                                        slot + 1,
+                                        self.hotbar[slot]
+                                    );
+                                }
                             }
                         }
-                        _ => {}
                     }
                 }
             }
@@ -1397,46 +1936,57 @@ impl ApplicationHandler for App {
                 state: ElementState::Pressed,
                 button,
                 ..
-            } => match button {
-                // Click izquierdo: con mesa abierta va a la mesa; en el
-                // inventario elige bloque; capturado, rompe; si no, captura.
-                MouseButton::Left => {
-                    if self.crafting_open {
-                        self.crafting_click();
-                    } else if self.inventory_open {
-                        self.inventory_click();
-                    } else if self.mouse_locked {
-                        self.break_block();
-                    } else {
-                        self.lock_mouse();
+            } => {
+                if !self.screens.is_playing() {
+                    // En menus, el clic izquierdo activa el boton bajo el cursor.
+                    if button == MouseButton::Left {
+                        self.menu_click();
+                    }
+                } else {
+                    match button {
+                        // Click izquierdo: con mesa abierta va a la mesa; en el
+                        // inventario elige bloque; capturado, rompe; si no, captura.
+                        MouseButton::Left => {
+                            if self.crafting_open {
+                                self.crafting_click();
+                            } else if self.inventory_open {
+                                self.inventory_click();
+                            } else if self.mouse_locked {
+                                self.break_block();
+                            } else {
+                                self.lock_mouse();
+                            }
+                        }
+                        // Click derecho: sobre una mesa la abre; si no, coloca.
+                        MouseButton::Right
+                            if self.mouse_locked && !self.inventory_open && !self.crafting_open =>
+                        {
+                            let aimed_table = self
+                                .selection
+                                .zip(self.renderer.as_ref())
+                                .map(|(hit, r)| {
+                                    r.block_at(hit.block) == crate::world::Block::CraftingTable
+                                })
+                                .unwrap_or(false);
+                            if aimed_table {
+                                self.crafting_open = true;
+                                self.inventory_open = false;
+                                self.unlock_mouse();
+                                println!("[crafteo] mesa abierta (E o Escape para cerrar)");
+                            } else {
+                                self.place_block();
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                // Click derecho: sobre una mesa la abre; si no, coloca (solo
-                // con el cursor capturado y sin ventanas abiertas).
-                MouseButton::Right
-                    if self.mouse_locked && !self.inventory_open && !self.crafting_open =>
-                {
-                    // ¿Apuntamos a una mesa de crafteo? Se abre en vez de colocar.
-                    let aimed_table = self
-                        .selection
-                        .zip(self.renderer.as_ref())
-                        .map(|(hit, r)| r.block_at(hit.block) == crate::world::Block::CraftingTable)
-                        .unwrap_or(false);
-                    if aimed_table {
-                        self.crafting_open = true;
-                        self.inventory_open = false;
-                        self.unlock_mouse();
-                        println!("[crafteo] mesa abierta (E o Escape para cerrar)");
-                    } else {
-                        self.place_block();
-                    }
-                }
-                _ => {}
-            },
+            }
 
             // Rueda del raton: cambia de ranura en la hotbar.
             WindowEvent::MouseWheel { delta, .. } => {
-                if !self.inventory_open {
+                if !self.screens.is_playing() {
+                    // En menus no hace nada (los botones se pulsan).
+                } else if !self.inventory_open {
                     use winit::event::MouseScrollDelta;
                     let step = match delta {
                         MouseScrollDelta::LineDelta(_, y) => y.signum(),
@@ -1500,8 +2050,8 @@ impl ApplicationHandler for App {
 
                 let t_update = Instant::now();
                 self.update(dt);
-                // En modo demo no resaltamos (queremos ver el modelo limpio).
-                if !self.demo {
+                // En modo demo o en menus no resaltamos (vista limpia).
+                if !self.demo && self.screens.is_playing() {
                     self.update_selection();
                 }
 
@@ -1557,11 +2107,13 @@ impl ApplicationHandler for App {
                         player_eye.y - crate::player::EYE_HEIGHT,
                         player_eye.z,
                     );
-                    // Mano solo en primera persona (no en demo).
-                    let hand = (!self.demo && !third).then(|| crate::render::HandView {
-                        projection: camera.projection(),
-                        swing: self.swing,
-                        bob: self.bob,
+                    // Mano solo en primera persona y jugando (no en demo/menus).
+                    let hand = (!self.demo && !third && self.screens.is_playing()).then(|| {
+                        crate::render::HandView {
+                            projection: camera.projection(),
+                            swing: self.swing,
+                            bob: self.bob,
+                        }
                     });
                     // Personaje solo en tercera persona.
                     let character = third.then(|| crate::render::CharacterView {
@@ -1639,6 +2191,11 @@ impl ApplicationHandler for App {
     /// otro repintado: asi tenemos refresh continuo (necesario para que la
     /// camara se mueva de forma fluida).
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if self.exit_requested {
+            self.finalize_save();
+            _event_loop.exit();
+            return;
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -1678,7 +2235,10 @@ mod tests {
 
     #[test]
     fn la_mesa_abierta_atenua_el_fondo_y_dibuja_la_rejilla() {
-        let mut app = App::default();
+        let mut app = App {
+            screens: ScreenStack::with_playing(),
+            ..Default::default()
+        };
         let base = app.build_ui(1280.0, 720.0).len();
         app.crafting_open = true;
         app.craft_grid = [

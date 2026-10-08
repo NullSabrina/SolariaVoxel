@@ -4,3 +4,6 @@
 *.vf
 *.vf.bak
 *.vf.tmp
+
+# Mundos multiples (datos en tiempo de ejecucion).
+saves/

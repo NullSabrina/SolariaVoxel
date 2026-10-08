@@ -3164,6 +3164,45 @@ silencio. Documentado para futuros scripts de arte.
 307 tests (+1 de tamano de fallbacks); clippy limpio. Capturas
 `v0.35.0_{sun,moon}_texture.png`. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.42.0 - Mundos multiples y pantallas (titulo/seleccion/crear/pausa)
+
+### 2026-10-07 - `saves/<slug>/` con level.json + pila de pantallas
+
+**Decision.**
+- `world/library.rs`: mundos en `saves/<slug>/` con `level.json` legible
+  (serde/serde_json), escritura **atomica**, `world.vf.bak` (ya lo hacia `save_to`),
+  `slug` saneado + unico, `create/rename/duplicate/delete`, `touch_last_played` e
+  **importacion** del `world.vf` antiguo. Base: `SOLARIA_HOME` o `.`.
+  Semilla de texto con **FNV-1a 64** (test con valor fijado).
+- `ui/screens.rs`: pila `Screen` (Title/WorldSelect/CreateWorld/Playing/Pause) sin
+  GPU; `engine/app.rs` la consume.
+- Arranque: si no hay mundos se crea "Mundo nuevo" (semilla 13371) o se importa el
+  `world.vf`; el renderer se crea para el mundo activo. Al cambiar de mundo se
+  guarda el actual en segundo plano y se reconstruye el renderer.
+- **`Esc` deja de cerrar el juego**: cierra inventario/menu o abre **pausa**; la X
+  de la ventana sigue guardando. Los menus se dibujan con `gui`+`font` (sin
+  toolkit nuevo) y se manejan por raton y teclado.
+
+**Motivo.** El Prompt 2 pide "abrir -> titulo -> crear mundo -> jugar -> pausa ->
+guardar y salir -> recargar" y varios mundos. La libreria (datos) y la pila
+(logica) son puros y testeables; el render solo dibuja.
+
+**Alternativas descartadas.** Sin serde (`level.json` a mano): fragil; se anaden
+`serde`/`serde_json`. Renombrar la **carpeta** del mundo (rompe rutas abiertas):
+se renombra el `display_name` y el slug queda estable. Deferir la creacion del
+renderer al pulsar "Jugar": mas limpio en teoria, pero reestructura el arranque y
+la demo; se mantiene el renderer listo bajo el titulo.
+
+**Pendiente honesto.** Menu de **opciones** + reasignacion de teclas, toolkit de
+widgets nine-slice, fuente con tildes/¿¡ en el render, y multi-mundo con
+miniaturas. La reasignacion de teclas y las opciones persistidas no estan.
+
+**Consecuencia.** `world/library.rs` (8 tests), `ui/screens.rs` (3 tests),
+`engine/app.rs` (pantallas + menus + ruta de guardado), `Cargo.toml`
+(serde/serde_json); env `SOLARIA_HOME`/`SOLARIA_SCREEN`. 319 tests; clippy limpio.
+Capturas `v0.42.0_{title,worlds,create,pause}.png`. `GENERATOR_VERSION`/
+`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

@@ -8,25 +8,26 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.35.0` — Sol y luna texturizados (arte de LibreSprite)
+## Estado actual: `v0.42.0` — Mundos múltiples y pantallas (título, selección, pausa)
 
-- **Astros con textura** (`v0.35.0`): el sol y la luna son **discos texturizados**
-  orientados a la camara (billboard con giro propio) que usan arte hecho en
-  **LibreSprite**: `assets/sun.png` (cara del sol) y `assets/moon_phases.png`
-  (tira de 8 fases). Se mezclan por alpha (fuera del disco se ve el cielo) y el
-  shader tiene **fallback procedural** si faltan. Fuentes `.aseprite` en
-  `assets/src/`. *(Antes eran cubos con fase analitica; se cambio a disco
-  texturizado porque el cubo mostraba el disco en cada cara visible.)*
+- **Librería de mundos** (`v0.42.0`): `saves/<slug>/` con `level.json` legible,
+  escritura **atómica**, `.bak`, `slug` saneado y único, **renombrar/duplicar/
+  eliminar**, e **importación** del `world.vf` antiguo. Semilla de texto con hash
+  FNV-1a estable. Base configurable con `SOLARIA_HOME`.
+- **Pantallas** (`v0.42.0`, pila en `ui::screens`): **título**, **selector de
+  mundos**, **crear mundo** (nombre + semilla) y **pausa** (`Esc`). `Esc` **ya no
+  cierra el juego**: abre pausa; la X de la ventana sigue guardando. Menús por
+  ratón y teclado.
+- **Astros texturizados** (`v0.35.0`): sol y luna son discos con arte de
+  **LibreSprite** (`assets/sun.png`, `assets/moon_phases.png`), con fallback
+  procedural.
 - **Grafo de densidad** (`v0.34.0`, Parte C / C1): `world::worldgen::graph`
   (`Node` DAG, `validate`, `compile`, evaluador). No integrado aun en `terrain.rs`.
-- **UI creativa** (`v0.41.0`): modulo `ui` sin GPU (i18n es/en, inventario con
-  categorias y busqueda sin tildes), nombre del bloque sobre la hotbar.
-- **Distancia de vista y niebla** (`v0.33.0`): radios separados
-  (`world::ViewSettings`), carga circular y niebla al horizonte.
-- **Cielo y atmosfera** (`v0.30`–`v0.31.1`): gradiente por fases (OKLab),
-  estrellas, halo (Henyey-Greenstein), Cinturon de Venus y hora azul.
-- **Pendiente honesto**: integracion del grafo en el terreno + clima (C2–C4),
-  pantallas/menus y guardado multi-mundo del Prompt 2, y `sky_physical` opcional.
+- **UI creativa** (`v0.41.0`), **distancia de vista** (`v0.33.0`) y **cielo/atmosfera**
+  (`v0.30`–`v0.31.1`).
+- **Pendiente honesto**: menú de **opciones** y reasignación de teclas, toolkit de
+  widgets nine-slice y fuente con tildes en el render, integración del grafo en el
+  terreno + clima (C2–C4), y `sky_physical` opcional.
 - **Paleta por fases** (`scene/sky.rs`): 7 bandas de la tabla de direccion de arte
   (noche profunda, crepusculos astronomico/nautico/civil, golden hour, manana/tarde,
   mediodia), mezcladas en **OKLab** con `smoothstep` para que recorrer 24 h no de
@@ -86,7 +87,7 @@ Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
 | `F` | Alterna modo **vuelo** (`Espacio`/`Shift` sube/baja). |
 | `F3` | Alterna el **overlay de diagnostico** en pantalla. |
 | `F5` | Alterna **primera / tercera persona** (ver el personaje). |
-| `Escape` | Cierra inventario / libera el raton; si ya esta libre, cierra y guarda. |
+| `Escape` | Cierra inventario/menu; jugando abre la **pausa**. |
 
 ## Variables de entorno
 
@@ -109,6 +110,8 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_INVENTORY` | Abre el inventario creativo al arrancar (capturas). |
 | `SOLARIA_SEARCH` | Texto de busqueda inicial del inventario (abre el inventario). |
 | `SOLARIA_TOAST` | Muestra el nombre del bloque de esa ranura sobre la hotbar. |
+| `SOLARIA_HOME` | Directorio base de los mundos (`saves/` cuelga de aqui). |
+| `SOLARIA_SCREEN` | Arranca en una pantalla: `title`, `worlds`, `create`, `pause`. |
 | `SOLARIA_FLUID_BUDGET_CELLS` | Celdas de fluido simuladas por tick. |
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
 | `SOLARIA_TIME` | Hora inicial del ciclo dia/noche (0..1). |
@@ -128,9 +131,9 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-307 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+319 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color, distancia de
-vista, interfaz creativa y grafo de densidad). Lint:
+vista, interfaz creativa, grafo de densidad, libreria de mundos y pantallas). Lint:
 
 ```bash
 cargo fmt
@@ -205,7 +208,8 @@ src/
 │   └── sky.rs          Cielo/atmosfera: paleta, orbita solar y SkyState.
 ├── ui/                 Estado/logica de interfaz sin GPU (i18n, inventario).
 │   ├── lang.rs         Traducciones es/en.
-│   └── inventory.rs    Categorias, busqueda y filtrado del inventario.
+│   ├── inventory.rs    Categorias, busqueda y filtrado del inventario.
+│   └── screens.rs      Pila de pantallas (titulo, mundos, crear, jugar, pausa).
 ├── physics.rs          Fisica AABB de entidades (gravedad, colision, flotar).
 ├── math/
 │   ├── vec3.rs         Vector de 3 componentes.
@@ -233,6 +237,7 @@ src/
     ├── memory.rs       Contabilidad de memoria del mundo por categorias.
     ├── bench.rs        Benchmarks reproducibles (solo tests).
     ├── save.rs         Versionado + guardado/carga del mundo (bincode + LZ4).
+    ├── library.rs      Mundos multiples: saves/<slug>/ + level.json + importar.
     └── store.rs        World: columnas en memoria + streaming + luz.
 ```
 
