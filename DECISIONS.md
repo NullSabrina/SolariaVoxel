@@ -4138,6 +4138,43 @@ bloque). `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5).
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5). Verificacion **manual** del
 flujo Esc/cursor en Windows pendiente (la logica esta cubierta por tests).
 
+## v0.46.2 (MEGA PROMPT 3) - Fase C: modelo de stacks y guardado
+
+### 2026-10-08 - `ItemStack` + hotbar persistida con migracion v5->v6
+
+**Decision.**
+- **`world/item.rs`**: `ItemStack { block, count }` con `MAX = 64`, `is_empty`,
+  `full`. Reexportado como `world::ItemStack`.
+- **`engine/app.rs`**: la hotbar pasa de `[Block; 9]` a `[Option<ItemStack>; 9]`.
+  Helpers `hotbar_block(i)` / `hotbar_block_sel()` / `set_hotbar_sel(block)`. El
+  hotbar se guarda y se restaura; las ranuras vacias se conservan por posicion.
+- **Guardado**: `FORMAT_VERSION 5 -> 6`. `WorldSave` gana `hotbar: Vec<(u8, u8)>`.
+  `load_from` decodifica v6 con el layout nuevo y v5 con el espejo `WorldSaveV5`
+  (sin hotbar) al que pone la **hotbar por defecto** (`default_hotbar()`: los 9
+  primeros colocables a pila llena). Migrador `V5ToV6` en la cadena. Un mundo
+  viejo **abre sin perdida** (bloques/posicion intactos; el inventario no se
+  guardaba antes, asi que no hay nada que convertir: se le da el por defecto).
+
+**Motivo.** Seccion 4.1 del prompt. El inventario **no** se guardaba en v0.45.6
+(solo `player_pos`), asi que la migracion no puede "recuperar" stacks inexistentes;
+se documenta y se da la hotbar por defecto.
+
+**Tests.** `world/item.rs` (2), `roundtrip_guarda_y_carga_la_hotbar`,
+`guardado_migra_hotbar_vieja_a_stacks_sin_perder_bloques` (construye un v5 a mano,
+lo carga y comprueba la hotbar por defecto y la posicion intacta).
+
+**Alternativas descartadas.**
+- No persistir el inventario (dejarlo runtime): el prompt pide que "los stacks van
+  al guardado"; se hace con migracion.
+- Cambiar el modelo sin subir `FORMAT_VERSION`: bincode es posicional; decodificar
+  un v5 con el layout v6 daria bytes mal interpretados.
+
+**Consecuencia.** `world/item.rs` (nuevo), `world/mod.rs`, `world/save.rs`,
+`engine/app.rs`. **371 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.46.2`.
+`FORMAT_VERSION -> 6` (cambio de guardado, con migrador y test);
+`GENERATOR_VERSION` intacto (20). Captura de humo `screenshots/ui_after_hud.png`
+(el juego arranca y dibuja la hotbar con stacks).
+
 ## Plantilla para nuevas entradas
 
 ```

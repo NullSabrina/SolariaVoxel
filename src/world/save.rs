@@ -47,7 +47,7 @@ pub const LEGACY_TERRAIN_Y0: u32 = 64;
 ///   (`fluid`), para que el agua que fluye no vuelva a fuente al recargar. Un
 ///   registro v4 migra con `fluid` vacio = todo `Water` es fuente (comportamiento
 ///   anterior, sin perdida de datos).
-pub const FORMAT_VERSION: u32 = 5;
+pub const FORMAT_VERSION: u32 = 6;
 
 /// Version actual del generador de terreno.
 ///
@@ -319,10 +319,30 @@ pub struct WorldSave {
     pub chunks: HashMap<ChunkPos, ChunkRecord>,
     /// Posicion del jugador (guardado completo). Desde el formato v3.
     pub player_pos: [f32; 3],
+    /// Hotbar como stacks `(id_de_bloque, cantidad)`. Desde el formato v6.
+    pub hotbar: Vec<(u8, u8)>,
 }
 
 /// Regresion del jugador por defecto (si un mundo viejo no la trae).
 pub const DEFAULT_PLAYER_POS: [f32; 3] = [8.0, 76.0, 20.0];
+
+/// Hotbar por defecto: los primeros `HOTBAR_SLOTS` bloques colocables, a pila
+/// llena (creativo). Es lo que reciben los mundos viejos (v5) al migrar.
+pub fn default_hotbar() -> Vec<(u8, u8)> {
+    super::registry::BlockRegistry::items()
+        .iter()
+        .take(9)
+        .map(|b| (b.id(), crate::world::ItemStack::MAX))
+        .collect()
+}
+
+/// Espejo del `WorldSave` **v5**: sin hotbar.
+#[derive(Encode, Decode)]
+struct WorldSaveV5 {
+    header: WorldHeader,
+    chunks: HashMap<ChunkPos, ChunkRecord>,
+    player_pos: [f32; 3],
+}
 
 /// Espejo del `WorldSave` **v3**: mismo `player_pos` pero con los `ChunkRecord`
 /// antiguos (una sola seccion, sin `y0`/`height`).
@@ -405,6 +425,7 @@ impl WorldSave {
             header: WorldHeader::new(seed, created_at),
             chunks: HashMap::new(),
             player_pos: DEFAULT_PLAYER_POS,
+            hotbar: default_hotbar(),
         }
     }
 
@@ -452,9 +473,22 @@ impl WorldSave {
             });
         }
         match version {
-            5 => {
+            6 => {
                 let (save, _) = bincode::decode_from_slice::<WorldSave, _>(&bytes, standard())?;
                 Ok(save)
+            }
+            5 => {
+                // v5 no guardaba hotbar: se le da la por defecto (pila llena), sin
+                // perder nada del mundo (bloques/posicion se conservan).
+                let (v5, _) = bincode::decode_from_slice::<WorldSaveV5, _>(&bytes, standard())?;
+                let mut header = v5.header;
+                header.format_version = 5;
+                Ok(WorldSave {
+                    header,
+                    chunks: v5.chunks,
+                    player_pos: v5.player_pos,
+                    hotbar: default_hotbar(),
+                })
             }
             4 => {
                 let (v4, _) = bincode::decode_from_slice::<WorldSaveV4, _>(&bytes, standard())?;
@@ -468,6 +502,7 @@ impl WorldSave {
                         .map(|(p, r)| (p, upgrade_v4_record(r)))
                         .collect(),
                     player_pos: v4.player_pos,
+                    hotbar: default_hotbar(),
                 })
             }
             3 => {
@@ -482,6 +517,7 @@ impl WorldSave {
                         .map(|(p, r)| (p, upgrade_v3_record(r)))
                         .collect(),
                     player_pos: v3.player_pos,
+                    hotbar: default_hotbar(),
                 })
             }
             2 => {
@@ -496,6 +532,7 @@ impl WorldSave {
                         .map(|(p, r)| (p, upgrade_v3_record(r)))
                         .collect(),
                     player_pos: DEFAULT_PLAYER_POS,
+                    hotbar: default_hotbar(),
                 })
             }
             // v1: bloques sin comprimir, sin flag `compressed` ni `player_pos`.
@@ -511,6 +548,7 @@ impl WorldSave {
                         .map(|(p, r)| (p, upgrade_v1_record(r)))
                         .collect(),
                     player_pos: DEFAULT_PLAYER_POS,
+                    hotbar: default_hotbar(),
                 })
             }
             from => Err(SaveError::NoMigration {
@@ -682,6 +720,19 @@ impl WorldMigrator for V4ToV5 {
     }
 }
 
+/// Migrador v5 -> v6: anade la **hotbar** (stacks). Los mundos v5 no la
+/// guardaban; `load_from` les pone la por defecto (pila llena) sin perder nada.
+pub struct V5ToV6;
+
+impl WorldMigrator for V5ToV6 {
+    fn from_version(&self) -> u32 {
+        5
+    }
+    fn to_version(&self) -> u32 {
+        6
+    }
+}
+
 /// Cadena de migradores.
 #[derive(Default)]
 pub struct MigrationChain {
@@ -696,6 +747,7 @@ impl MigrationChain {
                 Box::new(V2ToV3),
                 Box::new(V3ToV4),
                 Box::new(V4ToV5),
+                Box::new(V5ToV6),
             ],
         }
     }
@@ -795,6 +847,44 @@ mod tests {
             "ratio {}",
             record.compression_ratio()
         );
+    }
+
+    #[test]
+    fn roundtrip_guarda_y_carga_la_hotbar() {
+        let mut save = WorldSave::new(9, 1);
+        save.hotbar = vec![
+            (Block::Dirt.id(), 3),
+            (0, 0),
+            (Block::Stone.id(), 64),
+        ];
+        let path = temp_path("hotbar_roundtrip");
+        save.save_to(&path).unwrap();
+        let loaded = WorldSave::load_from(&path).unwrap();
+        cleanup(&path);
+        assert_eq!(loaded.hotbar, save.hotbar);
+    }
+
+    #[test]
+    fn guardado_migra_hotbar_vieja_a_stacks_sin_perder_bloques() {
+        // Un mundo v5 (sin hotbar) se carga con la hotbar por defecto (pila
+        // llena) sin perder bloques/posicion del mundo.
+        let mut header = WorldHeader::new(7, 1);
+        header.format_version = 5;
+        let v5 = WorldSaveV5 {
+            header,
+            chunks: HashMap::new(),
+            player_pos: [1.0, 2.0, 3.0],
+        };
+        let bytes = bincode::encode_to_vec(&v5, standard()).unwrap();
+        let path = temp_path("hotbar_v5");
+        std::fs::write(&path, &bytes).unwrap();
+        let loaded = load_and_migrate(&path).unwrap();
+        cleanup(&path);
+        assert_eq!(loaded.header.format_version, FORMAT_VERSION);
+        assert_eq!(loaded.player_pos, [1.0, 2.0, 3.0]);
+        assert_eq!(loaded.hotbar.len(), 9);
+        assert!(loaded.hotbar.iter().all(|&(_, c)| c == 64));
+        assert_eq!(loaded.hotbar, default_hotbar());
     }
 
     #[test]

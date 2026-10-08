@@ -62,8 +62,8 @@ pub struct App {
     flying: bool,
     /// Bloque apuntado por la camara en el ultimo frame (y su cara).
     selection: Option<crate::world::RayHit>,
-    /// Barra rapida: 9 ranuras con un bloque cada una.
-    hotbar: [crate::world::Block; 9],
+    /// Barra rapida: 9 ranuras con un **stack** cada una (vacio = `None`).
+    hotbar: [Option<crate::world::ItemStack>; 9],
     /// Ranura seleccionada de la barra (0..9).
     hotbar_sel: usize,
     /// ¿Esta abierto el inventario? (`E`).
@@ -308,6 +308,36 @@ impl App {
                 _ => Mode::Menu,
             }
         }
+    }
+
+    /// Bloque de la ranura `i` de la hotbar (aire si esta vacia).
+    fn hotbar_block(&self, i: usize) -> crate::world::Block {
+        self.hotbar
+            .get(i)
+            .copied()
+            .flatten()
+            .map_or(crate::world::Block::Air, |s| s.block)
+    }
+
+    /// Bloque de la ranura activa de la hotbar.
+    fn hotbar_block_sel(&self) -> crate::world::Block {
+        self.hotbar_block(self.hotbar_sel)
+    }
+
+    /// Pone un stack lleno del bloque dado en la ranura activa.
+    fn set_hotbar_sel(&mut self, block: crate::world::Block) {
+        self.hotbar[self.hotbar_sel] = Some(crate::world::ItemStack::full(block));
+    }
+
+    /// Restaura la hotbar desde el guardado (`(id, cantidad)`), rellenando hasta
+    /// 9 ranuras. Ids desconocidos o cantidad 0 -> ranura vacia.
+    fn set_hotbar_from_save(&mut self, saved: &[(u8, u8)]) {
+        self.hotbar = std::array::from_fn(|i| {
+            saved.get(i).and_then(|&(id, count)| {
+                let stack = crate::world::ItemStack::new(crate::world::Block::from_u8(id), count);
+                (!stack.is_empty()).then_some(stack)
+            })
+        });
     }
 
     /// Intenta capturar el cursor. Si el SO lo rechaza (ventana sin foco) deja
@@ -555,6 +585,12 @@ impl App {
         // Guardado completo: la posicion **logica** del jugador (no la de render).
         let p = self.player_pos;
         save.player_pos = [p.x, p.y, p.z];
+        // Hotbar como stacks `(id, cantidad)`; ranuras vacias = `(0, 0)`.
+        save.hotbar = self
+            .hotbar
+            .iter()
+            .map(|s| s.map_or((0, 0), |s| (s.block.id(), s.count)))
+            .collect();
         let chunks = save.chunks.len();
         let path = active_world_path(&self.world_base, &self.world_slug);
         let requested = match self.save_worker.as_ref() {
@@ -620,8 +656,8 @@ impl App {
                 return;
             }
         }
+        let block = self.hotbar_block_sel();
         if let Some(renderer) = self.renderer.as_mut() {
-            let block = self.hotbar[self.hotbar_sel];
             renderer.set_block(target, block);
             println!("[edit] colocado {block:?} en {target:?}");
         }
@@ -764,7 +800,7 @@ impl App {
             uv: region_uv(gui::HOTBAR),
             layer: -1,
         });
-        for (i, (cell, item)) in self
+        for (i, (cell, stack)) in self
             .hotbar_cells(win_w, win_h)
             .iter()
             .zip(self.hotbar.iter())
@@ -778,16 +814,20 @@ impl App {
                     layer: -1,
                 });
             }
-            quads.push(UiQuad {
-                rect: [
-                    sx + inset,
-                    sy + inset,
-                    slot - 2.0 * inset,
-                    slot - 2.0 * inset,
-                ],
-                uv: [0.0, 0.0, 1.0, 1.0],
-                layer: item.face_tile(Face::PosY) as i32,
-            });
+            if let Some(stack) = stack
+                && !stack.is_empty()
+            {
+                quads.push(UiQuad {
+                    rect: [
+                        sx + inset,
+                        sy + inset,
+                        slot - 2.0 * inset,
+                        slot - 2.0 * inset,
+                    ],
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    layer: stack.block.face_tile(Face::PosY) as i32,
+                });
+            }
         }
 
         // Mesa de crafteo: rejilla 3x3 + flecha + resultado (nuestra hotbar
@@ -1079,7 +1119,7 @@ impl App {
         }
         for (cell, item) in self.inventory_slots(win_w, win_h) {
             if inside(&cell) {
-                self.hotbar[self.hotbar_sel] = item;
+                self.set_hotbar_sel(item);
                 self.hotbar_toast = Some((item, 2.0));
                 println!("[engine] ranura {} = {item:?}", self.hotbar_sel + 1);
                 return;
@@ -1202,14 +1242,14 @@ impl App {
         }
         let base = self.world_base.clone();
         let path = active_world_path(&base, &slug);
-        let (seed, restored, header, player_pos) = match crate::world::load_and_migrate(&path) {
+        let (seed, restored, header, player_pos, hotbar) = match crate::world::load_and_migrate(&path) {
             Ok(save) => {
                 let restored = save
                     .chunks
                     .iter()
                     .map(|(pos, rec)| (*pos, rec.clone()))
                     .collect();
-                (save.header.seed, restored, save.header, save.player_pos)
+                (save.header.seed, restored, save.header, save.player_pos, save.hotbar)
             }
             Err(e) => {
                 eprintln!("[world] no se pudo cargar '{slug}': {e}");
@@ -1245,6 +1285,7 @@ impl App {
         }
         self.seed = seed;
         self.world_header = header;
+        self.set_hotbar_from_save(&hotbar);
         self.world_slug = slug;
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.warm_streaming(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
@@ -1805,7 +1846,7 @@ impl App {
         // 1. Resultado: asigna a la ranura activa y consume la rejilla.
         if inside(&result) {
             if let Some(out) = self.craft_result {
-                self.hotbar[self.hotbar_sel] = out;
+                self.set_hotbar_sel(out);
                 println!("[crafteo] {out:?} -> ranura {}", self.hotbar_sel + 1);
                 self.craft_grid = [None; 9];
                 self.craft_result = None;
@@ -1897,7 +1938,7 @@ impl ApplicationHandler for App {
         let path = active_world_path(&base, &self.world_slug);
 
         // Cargamos el mundo de disco si existe (semilla + chunks editados + pos).
-        let (seed, restored, header, player_pos) = match crate::world::load_and_migrate(&path) {
+        let (seed, restored, header, player_pos, hotbar) = match crate::world::load_and_migrate(&path) {
             Ok(save) => {
                 let restored: Vec<_> = save
                     .chunks
@@ -1911,7 +1952,7 @@ impl ApplicationHandler for App {
                     save.chunks.len(),
                     save.player_pos
                 );
-                (save.header.seed, restored, save.header, save.player_pos)
+                (save.header.seed, restored, save.header, save.player_pos, save.hotbar)
             }
             Err(e) => {
                 println!("[world] sin mundo previo ({e}); se crea uno nuevo (semilla 13371)");
@@ -1921,6 +1962,7 @@ impl ApplicationHandler for App {
                     Vec::new(),
                     crate::world::WorldHeader::new(seed, now_unix()),
                     crate::world::save::DEFAULT_PLAYER_POS,
+                    crate::world::save::default_hotbar(),
                 )
             }
         };
@@ -1956,6 +1998,7 @@ impl ApplicationHandler for App {
         }
         self.seed = seed;
         self.world_header = header;
+        self.set_hotbar_from_save(&hotbar);
         // Hora inicial y velocidad del dia por entorno (fuera del modo demo).
         let start_time = std::env::var("SOLARIA_TIME")
             .ok()
@@ -1978,7 +2021,11 @@ impl ApplicationHandler for App {
         );
         // Barra rapida por defecto.
         // Barra rapida por defecto: los primeros `HOTBAR_SLOTS` items.
-        self.hotbar = std::array::from_fn(|i| registry::BlockRegistry::items()[i]);
+        self.hotbar = std::array::from_fn(|i| {
+            Some(crate::world::ItemStack::full(
+                registry::BlockRegistry::items()[i],
+            ))
+        });
 
         // Demo de interfaz: abrir el inventario, una busqueda y el nombre del
         // bloque sobre la hotbar (para capturas sin interaccion).
@@ -1992,7 +2039,7 @@ impl ApplicationHandler for App {
         if let Ok(v) = std::env::var("SOLARIA_TOAST") {
             let idx = v.parse::<usize>().unwrap_or(2).min(HOTBAR_SLOTS - 1);
             self.hotbar_sel = idx;
-            self.hotbar_toast = Some((self.hotbar[idx], 9999.0));
+            self.hotbar_toast = Some((self.hotbar_block(idx), 9999.0));
         }
 
         // Carga **sincrona** del area inicial antes de posar al jugador (o
@@ -2222,11 +2269,11 @@ impl ApplicationHandler for App {
                                     }
                                 } else if let Some(slot) = digit_slot(code) {
                                     self.hotbar_sel = slot;
-                                    self.hotbar_toast = Some((self.hotbar[slot], 2.0));
+                                    self.hotbar_toast = Some((self.hotbar_block(slot), 2.0));
                                     println!(
                                         "[engine] ranura {} ({:?})",
                                         slot + 1,
-                                        self.hotbar[slot]
+                                        self.hotbar_block(slot)
                                     );
                                 }
                             }
@@ -2302,7 +2349,7 @@ impl ApplicationHandler for App {
                     } else if step < 0.0 {
                         self.hotbar_sel = (self.hotbar_sel + 1) % 9;
                     }
-                    self.hotbar_toast = Some((self.hotbar[self.hotbar_sel], 2.0));
+                    self.hotbar_toast = Some((self.hotbar_block_sel(), 2.0));
                 } else {
                     // Con el inventario abierto, la rueda hace scroll.
                     use winit::event::MouseScrollDelta;
@@ -2387,6 +2434,7 @@ impl ApplicationHandler for App {
                 let ui = self.build_ui(win_w, win_h);
                 self.update_ms = t_update.elapsed().as_secs_f32() * 1000.0;
                 let t_render = Instant::now();
+                let held_block = self.hotbar_block_sel();
                 if let (Some(renderer), Some(camera)) =
                     (self.renderer.as_mut(), self.camera.as_mut())
                 {
@@ -2436,7 +2484,7 @@ impl ApplicationHandler for App {
                         world: crate::scene::player::character_matrix(feet, camera.yaw_deg),
                         walk: self.bob,
                     });
-                    renderer.set_hand_item(self.hotbar[self.hotbar_sel]);
+                    renderer.set_hand_item(held_block);
                     renderer.sync_streaming(player_eye);
                     renderer.render(&view_projection, position, &sky_basis, &ui, hand, character);
                     // Restaura la camara del jugador para la fisica del proximo frame.

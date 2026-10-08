@@ -19,6 +19,7 @@ pub mod chunk;
 pub mod fluid_mesher;
 pub mod generator;
 pub mod greedy;
+pub mod item;
 pub mod library;
 pub mod memory;
 pub mod mesh_snapshot;
@@ -35,6 +36,7 @@ pub mod water;
 pub mod worldgen;
 
 pub use block::{Block, Face};
+pub use item::ItemStack;
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};
 pub use generator::GeneratorKind;
 pub use library::{WorldEntry, WorldMeta, seed_from_text};
