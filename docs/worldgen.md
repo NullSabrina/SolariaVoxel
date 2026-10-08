@@ -80,3 +80,22 @@ Escenas demo del motor: `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_RIVER`,
   guardado sube `FORMAT_VERSION` con migrador + test.
 - Actual: `GENERATOR_VERSION = 16`, `FORMAT_VERSION = 5`,
   `WORLDGEN_CONFIG_VERSION = 3`.
+
+## Grafo de densidad (Parte C)
+
+Desde v0.34/v0.44 el worldgen puede definirse como **datos** (un grafo DAG) en vez
+de codigo cableado:
+
+- `world/worldgen/graph.rs`: `Node` (const, ruido fBm 2D/3D, add/mul/min/max,
+  clamp, abs, spline, `YGradient`, `Warp`, `Cache2D`), arena `Graph`,
+  `validate()`/`compile()` (orden topologico) y evaluador determinista. Se
+  serializa a **JSON** (`Graph::to_json`/`from_json`).
+- `GeneratorKind::{Legacy16, Graph}` (en `level.json`): coexisten sin migrar el
+  binario. Mundos nuevos con `SOLARIA_GENERATOR=graph`.
+- Camino `Graph`: la **densidad 3D** (`default_density_graph`:
+  `superficie - y + cueva`) se evalua en una **retícula gruesa 4x4x4** e interpola
+  trilinealmente (`terrain::sample_density`); el **clima**
+  (`climate_graph`: temperatura/lluvia) elige el bioma con `biomes::select`.
+- Preview offline: `cargo run --example graph_preview -- <seed> <px> <bpp>`.
+- Pendiente: rios/acuifero del grafo; `Cache2D` y evaluacion en retícula del resto
+  de canales.

@@ -8,27 +8,30 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.44.2` — Worldgen con grafo (altura, densidad y clima)
+## Estado actual: `v0.44.3` — Worldgen con grafo (altura, densidad, clima) + C5/C6
 
-- **Clima como canales del grafo** (`v0.44.2`): el camino `Graph` evalúa grafos de
-  **temperatura** y **lluvia** y elige el bioma con el scoring existente
-  (`biomes::select`); el bioma decide materiales y decoración. *(El generador
-  legacy sigue con su clima de `WorldGen`.)*
-- **Campo de densidad 3D** (`v0.44.1`): densidad `superficie − y + cueva` en una
-  **retícula gruesa 4×4×4** interpolada trilinealmente; el ruido 3D recortado cava
-  **cuevas/túneles** sin islas flotantes. El océano solo rellena por encima del
-  terreno.
-- **Grafo + coexistencia** (`v0.44.0`): `GeneratorKind::{Legacy16, Graph}` en
-  `level.json` (sin migrar el binario). Grafo serializable a **JSON**. Mundos
-  nuevos: `SOLARIA_GENERATOR=graph`. Determinista (test 1 vs N hilos).
-- **Fix**: la luz de bloque no propaga a columnas no cargadas (antes podía crecer
-  sin cota).
+- **Decoración sin flotantes** (`v0.44.3`, C5): los árboles se apoyan en el techo
+  **sólido real** de la columna (una cueva bajo la superficie ya no deja el tronco
+  flotando), en ambos generadores; test de **5 semillas** sin flotantes.
+  `GENERATOR_VERSION → 17` (el relieve legacy cambia muy poco).
+- **Preview del grafo** (`v0.44.3`, C6): `cargo run --example graph_preview` exporta
+  un PNG con el mapa de altura + un corte vertical de densidad del grafo.
+- **Clima como canales del grafo** (`v0.44.2`, C4): temperatura y lluvia del grafo
+  eligen el bioma (`biomes::select`).
+- **Campo de densidad 3D** (`v0.44.1`, C2): retícula 4×4×4 + interpolación
+  trilineal; cuevas/túneles sin islas flotantes.
+- **Grafo + coexistencia** (`v0.44.0`, C1/C3): `GeneratorKind::{Legacy16, Graph}`
+  en `level.json` (sin migrar el binario). Grafo serializable a **JSON**. Mundos
+  nuevos: `SOLARIA_GENERATOR=graph`.
+- **Fix**: la luz de bloque no propaga a columnas no cargadas.
 - **Fuente con tildes** (`v0.43.3`), **Opciones/Controles** (`v0.43.1`/`v0.43.2`),
   **mundos múltiples y pantallas** (`v0.42.0`), **astros texturizados** (`v0.35.0`),
   **UI creativa** (`v0.41.0`), **distancia de vista** (`v0.33.0`) y
   **cielo/atmosfera** (`v0.30`–`v0.31.1`).
-- **Pendiente honesto**: cuevas del grafo sin acuífero, restricciones de decoración
-  (C5), toolkit nine-slice, `sky_physical` opcional.
+- **Pendiente honesto**: ríos/acuífero en el camino graph, toolkit nine-slice,
+  `sky_physical` opcional.
+
+`GENERATOR_VERSION = 17` (subió por C5) · `FORMAT_VERSION = 5`.
 
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
@@ -124,7 +127,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-335 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
+336 tests de unidad e integracion (determinismo, persistencia, meshing, luz,
 fluidos estilo Minecraft, raycast, worldgen, cuevas, cielo/color, distancia de
 vista, interfaz creativa, grafo de densidad, libreria de mundos, pantallas y
 opciones). Lint:
@@ -154,10 +157,16 @@ Galeria de semillas (mosaico de mapas de bioma):
 cargo run --release --example seed_gallery
 ```
 
-Preview del **cielo** (tira de 24 h + hemisferio completo, offline):
+Preview del **cielo** (tira de 24 h + hemisferio, offline):
 
 ```bash
 cargo run --release --example sky_preview -- 0.28
+```
+
+Preview del **grafo de densidad** (altura + corte de densidad, offline):
+
+```bash
+cargo run --release --example graph_preview -- 13371 384 4
 ```
 
 Capturas:

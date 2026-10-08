@@ -381,7 +381,16 @@ impl TerrainGenerator {
                 }
                 if !coastal && (2..=13).contains(&x) && (2..=13).contains(&z) {
                     match self.decorator.decide(wx, wz, &geo, surface as i32, 0) {
-                        Some(DecorationKind::Tree) => tree_candidates.push((x, z, surface)),
+                        Some(DecorationKind::Tree) => {
+                            // Base = techo **solido real** de la columna (una cueva
+                            // bajo la superficie no debe dejar el arbol flotando).
+                            if let Some(top) = (0..WORLD_HEIGHT)
+                                .rev()
+                                .find(|&y| column.get(x, y, z).is_solid())
+                            {
+                                tree_candidates.push((x, z, top + 1));
+                            }
+                        }
                         Some(DecorationKind::Boulder) => {
                             // Solo sobre suelo firme (no flotando).
                             if let Some(gy) =
@@ -533,7 +542,15 @@ impl TerrainGenerator {
                 // excluyen costas y el borde del chunk (las copas no caben).
                 if !coastal && (2..=13).contains(&x) && (2..=13).contains(&z) {
                     match self.decorator.decide(wx, wz, &geo, height as i32, slope) {
-                        Some(DecorationKind::Tree) => tree_candidates.push((x, z, height)),
+                        Some(DecorationKind::Tree) => {
+                            // Base = techo **solido real** (una cueva bajo la
+                            // superficie no debe dejar el arbol flotando).
+                            if let Some(top) =
+                                (0..height).rev().find(|&y| column.get(x, y, z).is_solid())
+                            {
+                                tree_candidates.push((x, z, top + 1));
+                            }
+                        }
                         // Roca solo sobre suelo firme (no flotando sobre una cueva).
                         Some(DecorationKind::Boulder)
                             if column.get(x, height.saturating_sub(1), z).is_solid() =>
@@ -1319,5 +1336,40 @@ mod tests {
         }
         assert!(max - min > 0.3, "el clima del grafo deberia variar");
         assert!(biomas.len() > 1, "deberia haber varios biomas");
+    }
+
+    /// Devuelve `Some((x, z, base_y))` del primer arbol flotante (tronco sin
+    /// suelo solido debajo), si lo hay.
+    fn arbol_flotante(col: &Column, ox: i32, oz: i32) -> Option<(i32, i32, usize)> {
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                if let Some(base) = (0..WORLD_HEIGHT).find(|&y| col.get(x, y, z) == Block::Wood) {
+                    let supported = base > 0 && col.get(x, base - 1, z).is_solid();
+                    if !supported {
+                        return Some((ox + x as i32, oz + z as i32, base));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn ningun_arbol_flota_en_cinco_semillas() {
+        // C5: cero decoracion flotante en 5 semillas, en AMBOS generadores.
+        for seed in [1u32, 7, 42, 13_371, 999_983] {
+            for kind in [GeneratorKind::Legacy16, GeneratorKind::Graph] {
+                let g = TerrainGenerator::with_kind(seed, kind);
+                for cz in -3..3 {
+                    for cx in -3..3 {
+                        let (ox, oz) = (cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
+                        let col = g.generate_column(ox, oz);
+                        if let Some((x, z, y)) = arbol_flotante(&col, ox, oz) {
+                            panic!("arbol flotante en ({x},{y},{z}) seed {seed} {kind:?}");
+                        }
+                    }
+                }
+            }
+        }
     }
 }

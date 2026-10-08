@@ -3379,6 +3379,33 @@ del camino legacy (romperia mundos existentes). Mezclar clima graph + WorldGen
 clippy limpio. Captura `v0.44.2_graph_climate.png`.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
+## v0.44.3 - Decoracion sin flotantes (C5) y preview del grafo (C6)
+
+### 2026-10-07 - Arboles sobre el techo solido real + herramienta offline
+
+**Decision.**
+- **C5**: al plantar arboles (ambos generadores) la base es el **techo solido real**
+  de la columna (`(0..h).rev().find(solido)`), no la altura teorica: una cueva bajo
+  la superficie ya no deja el tronco flotando. Test `ningun_arbol_flota_en_cinco_semillas`
+  (5 semillas x 2 generadores x 6x6 columnas). Como cambia el mundo legacy (muy
+  poco), `GENERATOR_VERSION -> 17`.
+- **C6**: `examples/graph_preview.rs` compila los grafos por defecto y exporta un
+  PNG con el **mapa de altura** + un **corte vertical de densidad**, mas metricas
+  (rango de altura, % solido).
+
+**Motivo.** El Prompt 1 Parte C pide "cero arboles/estructuras flotantes" y
+herramientas de preview del grafo.
+
+**Alternativas descartadas.** No tocar el legacy (dejaria flotantes reales): se
+corrige y se sube `GENERATOR_VERSION`, que es para lo que existe. Un `min_clearance`
+por esquinas de la huella: el chequeo del techo real + `headroom` ya cubre el caso
+(el tronco es de 1x1).
+
+**Consecuencia.** `world/terrain.rs` (base solida en ambos caminos + test),
+`world/save.rs` (`GENERATOR_VERSION = 17`), `examples/graph_preview.rs`.
+336 tests; clippy limpio. Captura `screenshots/graph_preview_13371.png`.
+`FORMAT_VERSION` intacto (5).
+
 ## Plantilla para nuevas entradas
 
 ```
