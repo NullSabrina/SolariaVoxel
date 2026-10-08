@@ -3325,6 +3325,35 @@ carga). Ahora el BFS **salta lo no cargado**.
 clippy limpio. Captura `v0.44.0_graph.png`. `GENERATOR_VERSION`/`FORMAT_VERSION`
 intactos (16/5).
 
+## v0.44.1 - Campo de densidad 3D del grafo (Parte C, C2)
+
+### 2026-10-07 - Retícula gruesa + interpolación trilineal + cuevas
+
+**Decision.** El camino `Graph` deja de usar solo la altura: `default_density_graph`
+produce `superficie(x,z) - y + cueva`, donde `cueva` es un ruido 3D **recortado a
+la parte positiva** (`Max(n - 0.15, 0) * -70`), de modo que cava túneles/cuevas sin
+bajar toda la superficie ni crear islas flotantes. `generate_column_graph` lo
+evalúa en una **retícula gruesa** (x,z cada 4 → 5 muestras; y cada 4 → 97) y
+**interpola trilinealmente** por vóxel (`sample_density`), así el ruido 3D no se
+paga por celda. El océano solo rellena por **encima del terreno** (las cuevas bajo
+el mar quedan secas: el grafo no tiene acuífero).
+
+**Motivo.** El Prompt 1 Parte C pide "no evalúes ruido por cada vóxel: retícula
+gruesa + interpolación" y cuevas. Se mantiene todo el pipeline (bioma/materiales/
+decoración) y solo cambia la solidez.
+
+**Alternativas descartadas.** Retícula y paso 8 (perdía las cuevas de ~6 bloques al
+interpolar): se usa paso 4 en Y (algo mas caro) para conservarlas. Ruido 3D sumado
+(creaba islas flotantes): se recorta a la parte positiva y se resta.
+
+**Nota.** El acuífero y los ríos del grafo quedan pendientes (C4/C5). El clima/bioma
+sigue viniendo de `WorldGen`.
+
+**Consecuencia.** `world/worldgen/graph.rs` (`default_density_graph`),
+`world/terrain.rs` (`generate_column_graph` con densidad + `sample_density`).
+334 tests; clippy limpio. Captura `v0.44.1_graph_density.png`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
+
 ## Plantilla para nuevas entradas
 
 ```

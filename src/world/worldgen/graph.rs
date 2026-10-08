@@ -504,6 +504,73 @@ pub fn default_height_graph(seed: u64) -> Graph {
     g
 }
 
+/// Grafo por defecto que produce un campo de **densidad 3D**: `superficie(x,z) - y
+/// + cueva`. Donde la densidad es `> 0` hay solido; el ruido 3D (recortado a la
+/// parte positiva y restado) cava cuevas/tuneles sin crear islas flotantes. Es la
+/// base del camino `Graph` (estilo 1.18).
+pub fn default_density_graph(seed: u64) -> Graph {
+    let mut g = Graph::new();
+    // Superficie por (x, z): continentalidad + detalle.
+    let cont = g.push(Node::Noise {
+        kind: NoiseKind::Value2D,
+        salt: seed,
+        frequency: 0.0022,
+        octaves: 4,
+        persistence: 0.5,
+        lacunarity: 2.0,
+    });
+    let spline = g.push(Node::Spline {
+        input: cont,
+        points: vec![
+            (-1.0, -26.0),
+            (-0.3, -8.0),
+            (0.0, 2.0),
+            (0.35, 18.0),
+            (1.0, 46.0),
+        ],
+    });
+    let detail = g.push(Node::Noise {
+        kind: NoiseKind::Value2D,
+        salt: seed ^ 0x9E37_79B9_7F4A_7C15,
+        frequency: 0.03,
+        octaves: 3,
+        persistence: 0.5,
+        lacunarity: 2.0,
+    });
+    let detail_amp = g.push(Node::Const(9.0));
+    let detail_scaled = g.push(Node::Mul(detail, detail_amp));
+    let relief = g.push(Node::Add(spline, detail_scaled));
+    let base = g.push(Node::Const(64.0));
+    let surface = g.push(Node::Add(relief, base));
+    // `-y`: gradiente de 0 (y=0) a -WORLD_HEIGHT (y=384).
+    let y_sub = g.push(Node::YGradient {
+        from_y: 0,
+        to_y: 384,
+        from_v: 0.0,
+        to_v: -384.0,
+    });
+    // Ruido 3D que cava tuneles: se recorta a la parte positiva (solo cava donde
+    // supera el umbral) y se resta; asi no baja toda la superficie ni flota.
+    let cave = g.push(Node::Noise {
+        kind: NoiseKind::Value3D,
+        salt: seed ^ 0xD1B5_4A32_D192_ED03,
+        frequency: 0.07,
+        octaves: 3,
+        persistence: 0.5,
+        lacunarity: 2.0,
+    });
+    let threshold = g.push(Node::Const(-0.15));
+    let shifted = g.push(Node::Add(cave, threshold));
+    let zero = g.push(Node::Const(0.0));
+    let carve01 = g.push(Node::Max(shifted, zero));
+    let carve_amp = g.push(Node::Const(-70.0));
+    let carve = g.push(Node::Mul(carve01, carve_amp));
+    // densidad = superficie - y + carve  (raiz = ultimo nodo).
+    let d1 = g.push(Node::Add(surface, y_sub));
+    g.push(Node::Add(d1, carve));
+    g
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

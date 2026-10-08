@@ -26,7 +26,7 @@ use super::caves::{Carve, CaveContext, CaveSystem};
 use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 use super::generator::GeneratorKind;
 use super::worldgen::decoration::{DecorationKind, Decorator};
-use super::worldgen::graph::{Graph, Program, default_height_graph};
+use super::worldgen::graph::{Graph, Program, default_density_graph, default_height_graph};
 use super::worldgen::{WorldGen, biomes};
 
 /// Altura media del terreno, en bloques (nivel del mar).
@@ -88,8 +88,12 @@ pub struct TerrainGenerator {
     noise_calls: AtomicU32,
     /// Tipo de generador (coexistencia legacy/graph).
     kind: GeneratorKind,
-    /// Grafo de densidad + programa compilado (solo si `kind == Graph`).
-    graph: Option<(Graph, Program)>,
+    /// Grafo de **altura** + programa (solo si `kind == Graph`): superficie para
+    /// elegir materiales.
+    height_graph: Option<(Graph, Program)>,
+    /// Grafo de **densidad 3D** + programa (solo si `kind == Graph`): decide
+    /// solido/aire con cuevas y voladizos.
+    density_graph: Option<(Graph, Program)>,
 }
 
 impl TerrainGenerator {
@@ -103,13 +107,20 @@ impl TerrainGenerator {
     /// densidad por defecto** (data-driven) que produce la altura del terreno.
     pub fn with_kind(seed: u32, kind: GeneratorKind) -> Self {
         let mix = |k: u32| seed.wrapping_mul(0x9E37_79B9).wrapping_add(k);
-        let graph = (kind == GeneratorKind::Graph).then(|| {
-            let g = default_height_graph(seed as u64);
-            let prog = g
+        let compile = |g: Graph| {
+            let p = g
                 .compile()
                 .expect("el grafo de densidad por defecto debe ser valido");
-            (g, prog)
-        });
+            (g, p)
+        };
+        let (height_graph, density_graph) = if kind == GeneratorKind::Graph {
+            (
+                Some(compile(default_height_graph(seed as u64))),
+                Some(compile(default_density_graph(seed as u64))),
+            )
+        } else {
+            (None, None)
+        };
         Self {
             worldgen: WorldGen::new(seed),
             surface_detail: Perlin::new(mix(6)),
@@ -120,7 +131,8 @@ impl TerrainGenerator {
             seed,
             noise_calls: AtomicU32::new(0),
             kind,
-            graph,
+            height_graph,
+            density_graph,
         }
     }
 
@@ -271,51 +283,84 @@ impl TerrainGenerator {
         }
     }
 
-    /// Altura segun el **grafo de densidad** (o `height()` si no hay grafo).
+    /// Altura de superficie segun el **grafo** (para elegir materiales).
     fn graph_height(&self, world_x: i32, world_z: i32) -> usize {
-        let Some((graph, prog)) = &self.graph else {
+        let Some((graph, prog)) = &self.height_graph else {
             return self.height(world_x, world_z);
         };
         let h = prog.eval(graph, world_x as f32, 0.0, world_z as f32);
         (h.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize
     }
 
-    /// Genera una columna con el **grafo de densidad** para la altura; el bioma,
-    /// los materiales, el agua (nivel del mar) y la decoracion siguen el pipeline
+    /// Genera una columna con el **campo de densidad 3D** del grafo, evaluado en
+    /// una **retícula gruesa 4x4x4** e interpolado trilinealmente (C2): asi el
+    /// ruido 3D no se paga por voxel. El bioma, los materiales (por altura de
+    /// superficie), el agua (nivel del mar) y la decoracion siguen el pipeline
     /// comun. Determinista y `Send + Sync`.
     fn generate_column_graph(&self, world_x: i32, world_z: i32) -> Column {
         let mut column = Column::empty();
         let mut tree_candidates: Vec<(usize, usize, usize)> = Vec::new();
+        // Retícula gruesa: x,z cada 4 (5 muestras: 0,4,8,12,16); y cada 4 (97).
+        const GX: usize = 5;
+        const GZ: usize = 5;
+        const GY: usize = (WORLD_HEIGHT / 4) + 1;
+        let mut dens = vec![0.0f32; GY * GZ * GX];
+        if let Some((graph, prog)) = &self.density_graph {
+            for (yi, gy) in (0..=WORLD_HEIGHT).step_by(4).enumerate() {
+                for (zi, gz) in (0..=CHUNK_SIZE).step_by(4).enumerate() {
+                    for (xi, gx) in (0..=CHUNK_SIZE).step_by(4).enumerate() {
+                        dens[(yi * GZ + zi) * GX + xi] = prog.eval(
+                            graph,
+                            (world_x + gx as i32) as f32,
+                            gy as f32,
+                            (world_z + gz as i32) as f32,
+                        );
+                    }
+                }
+            }
+        }
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let wx = world_x + x as i32;
                 let wz = world_z + z as i32;
                 let geo = self.worldgen.sample(wx as f64, wz as f64);
                 let biome = geo.biome;
-                let height = self.graph_height(wx, wz);
+                let surface = self.graph_height(wx, wz);
                 let variant = self.surface_variant(wx, wz);
-                let coastal = height <= (SEA_LEVEL as usize) + 1;
-                for y in 0..height {
-                    let block = if coastal {
-                        coastal_block(y, height, variant)
-                    } else {
-                        surface_block(y, height, biome, variant, false)
-                    };
-                    column.set(x, y, z, block);
+                let coastal = surface <= (SEA_LEVEL as usize) + 1;
+                for y in 0..WORLD_HEIGHT {
+                    if sample_density(&dens, x, y, z, GX, GZ) > 0.0 {
+                        let block = if coastal {
+                            coastal_block(y, surface, variant)
+                        } else {
+                            surface_block(y, surface, biome, variant, false)
+                        };
+                        column.set(x, y, z, block);
+                    }
                 }
-                if height < SEA_LEVEL as usize {
-                    for y in height..SEA_LEVEL as usize {
+                // Oceano: solo rellena por **encima del terreno**; las cuevas bajo
+                // el mar quedan secas (el generador graph no tiene acuifero).
+                let top = (0..WORLD_HEIGHT)
+                    .rev()
+                    .find(|&y| column.get(x, y, z).is_solid());
+                if let Some(top) = top
+                    && top < SEA_LEVEL as usize
+                {
+                    for y in (top + 1)..SEA_LEVEL as usize {
                         column.set(x, y, z, Block::Water);
                     }
                     column.push_water_surface(x, z, SEA_LEVEL as usize - 1);
                 }
                 if !coastal && (2..=13).contains(&x) && (2..=13).contains(&z) {
-                    match self.decorator.decide(wx, wz, &geo, height as i32, 0) {
-                        Some(DecorationKind::Tree) => tree_candidates.push((x, z, height)),
-                        Some(DecorationKind::Boulder)
-                            if column.get(x, height.saturating_sub(1), z).is_solid() =>
-                        {
-                            place_boulder(&mut column, x, height, z, variant);
+                    match self.decorator.decide(wx, wz, &geo, surface as i32, 0) {
+                        Some(DecorationKind::Tree) => tree_candidates.push((x, z, surface)),
+                        Some(DecorationKind::Boulder) => {
+                            // Solo sobre suelo firme (no flotando).
+                            if let Some(gy) =
+                                (0..surface).rev().find(|&y| column.get(x, y, z).is_solid())
+                            {
+                                place_boulder(&mut column, x, gy + 1, z, variant);
+                            }
                         }
                         _ => {}
                     }
@@ -588,6 +633,25 @@ fn surface_block(y: usize, height: usize, biome: Biome, variant: f64, border: bo
             Block::Stone
         }
     }
+}
+
+/// Muestrea la **retícula gruesa de densidad** con interpolacion trilineal.
+/// `x,z` van cada 4 (`gx`/`gz` muestras), `y` cada 4. Los voxeles del borde usan
+/// el ultimo tramo de la retícula (indice acotado a `len-2`).
+fn sample_density(dens: &[f32], x: usize, y: usize, z: usize, gx: usize, gz: usize) -> f32 {
+    let gy = WORLD_HEIGHT / 4 + 1;
+    let (xf, zf, yf) = (x as f32 / 4.0, z as f32 / 4.0, y as f32 / 4.0);
+    let xi = (xf as usize).min(gx - 2);
+    let zi = (zf as usize).min(gz - 2);
+    let yi = (yf as usize).min(gy - 2);
+    let (tx, tz, ty) = (xf - xi as f32, zf - zi as f32, yf - yi as f32);
+    let at = |xi: usize, yi: usize, zi: usize| dens[(yi * gz + zi) * gx + xi];
+    let l = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    let c00 = l(at(xi, yi, zi), at(xi + 1, yi, zi), tx);
+    let c10 = l(at(xi, yi + 1, zi), at(xi + 1, yi + 1, zi), tx);
+    let c01 = l(at(xi, yi, zi + 1), at(xi + 1, yi, zi + 1), tx);
+    let c11 = l(at(xi, yi + 1, zi + 1), at(xi + 1, yi + 1, zi + 1), tx);
+    l(l(c00, c10, ty), l(c01, c11, ty), tz)
 }
 
 /// Bloque de una columna **costera/submarina**: arena arriba, piedra debajo,
@@ -1175,5 +1239,37 @@ mod tests {
             parallel[idx] = hash_column(&res.column);
         }
         assert_eq!(sequential, parallel, "graph difiere 1 hilo vs N hilos");
+    }
+
+    #[test]
+    fn el_campo_de_densidad_cava_cuevas_y_es_determinista() {
+        let g = TerrainGenerator::with_kind(13_371, GeneratorKind::Graph);
+        // Escanea varias columnas: hay aire subterraneo (cuevas) si alguna tiene
+        // aire por debajo de su bloque solido mas alto.
+        let mut with_cave = 0;
+        for cz in 0..3 {
+            for cx in 0..3 {
+                let c = g.generate_column(cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
+                for x in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        let mut top = 0;
+                        for y in 0..WORLD_HEIGHT {
+                            if c.get(x, y, z).is_solid() {
+                                top = y;
+                            }
+                        }
+                        if (0..top).any(|y| c.get(x, y, z) == Block::Air) {
+                            with_cave += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(with_cave > 0, "el campo de densidad deberia cavar cuevas");
+        assert_eq!(
+            hash_column(&g.generate_column(0, 0)),
+            hash_column(&g.generate_column(0, 0)),
+            "el campo de densidad no es determinista"
+        );
     }
 }
