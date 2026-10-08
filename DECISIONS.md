@@ -3841,6 +3841,56 @@ bugs **confirmados leyendo el codigo** (no se actuo sobre sospechas sin verifica
 (+1 ignorado); clippy limpio. `Cargo.toml -> 0.45.1`. `GENERATOR_VERSION`/
 `FORMAT_VERSION` intactos (20/5): no cambia el mundo generado.
 
+## v0.45.1 (MEGA PROMPT 2) - Fase B: modelo de agua (bug 2.1)
+
+### 2026-10-08 - Una fuente/caida a nivel 8 solo se reparte al tocar suelo
+
+**Decision.** En `water::spread`, tras intentar bajar, si el fondo esta **lleno**
+(agua a nivel 8) una celda a **nivel 8** (fuente o caida) **no** se reparte en
+horizontal: sigue alimentando su columna vertical. Solo se reparte cuando
+descansa sobre **solido** (la rama de abajo ya lo cubre). El resto del modelo
+(fuentes, 2x2, retroceso, preferencia por bajar) se mantiene. `get_new_level` no
+cambia: una celda con agua **arriba** es la cadena de caida.
+
+**Motivo.** Seccion 2.1 del Prompt 2: "la caida solo aplica a la celda que esta
+directamente debajo de una fuente o de una caida... Un flujo horizontal nunca debe
+volverse nivel 8 por tener agua encima". La causa real era que, con el fondo lleno,
+**cada** celda de la columna (y la propia fuente) se repartia en horizontal a su
+altura, generando un charco por nivel que realimentaba el nivel 8.
+
+**Antes/despues (`water_probe`, presupuesto 16 384/tick).**
+| escenario | antes | despues |
+|---|---|---|
+| fuente en y=10: celdas | 38 510 | **122** |
+| fuente en y=10: niveles en y=1 (d=0..) | 8,8,8,8,8,8,8,8,8,8 | **8,7,6,5,4,3,2,1,0,0** |
+| fuente en y=10: celdas por altura | 113 en y=2..10 | **1** en y=2..10 (tubo) |
+| cascada de 6: celdas | 9 218 | **118** |
+| cascada de 6: lateral en y=2..6 | 2520..112 | **0** |
+| regresion `World` (1 fuente) | 6 652 celdas | **< 1 000** (pasa) |
+
+Cumple los tres criterios de 2.1: (a) charco de radio 7 con niveles decrecientes +
+tubo de nivel 8; (b) <= 1 000 celdas; (c) cascada sin lateral salvo en el suelo.
+
+**Contrato de bloques que bloquean el agua (2.2).** Ya resuelto en la Fase E del
+Prompt 1: `Block::blocks_fluid` bloquea solidos, lava y todo visible no liquido
+(hojas, antorcha), y `set_water_raw` no pisa esas celdas. Se referencia, no se
+duplica.
+
+**Tests.** `una_fuente_alta_no_inunda_un_volumen`, `una_cascada_no_se_extiende_en_lateral`
+(en `water.rs`), y se **activa** `el_volumen_de_una_fuente_esta_acotado` (World)
+que estaba `#[ignore]`. Se mantienen alcance 7 en canal, retroceso y 2x2.
+
+**Alternativas descartadas.**
+- Flag *falling* explicito aparte del nibble: el nibble ya distingue (nivel 8 no
+  fuente = caida; horizontal <= 7). No hace falta mas estado.
+- Que la fuente se reparta en horizontal aunque tenga agua debajo (comportamiento
+  de Minecraft): contradice el criterio (c) del prompt; se prefiere "solo baja".
+
+**Consecuencia.** `world/water.rs` (`spread` + doc + 2 tests), `world/store.rs`
+(test activado). **355 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.45.2`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5): no cambia el mundo
+generado, solo la simulacion.
+
 ## Plantilla para nuevas entradas
 
 ```

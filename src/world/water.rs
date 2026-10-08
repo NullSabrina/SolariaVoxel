@@ -13,9 +13,12 @@
 //!   la fuente, el agua **retrocede** a su nivel por distancia y desaparece.
 //! * **Fuente infinita**: una celda de flujo con **2+ vecinos fuente**
 //!   ortogonales se vuelve fuente (el clasico 2x2).
-//! * **Caida**: si hay agua/fuente **arriba**, la celda es *falling* a nivel 8;
-//!   al tocar suelo se reparte a `8 -> 7`. El agua **prefiere bajar**; solo se
-//!   extiende en horizontal si no puede caer.
+//! * **Caida**: una celda es *falling* (nivel 8) si la de **arriba** tiene agua
+//!   (cadena vertical bajo una fuente o una caida); al tocar suelo se reparte a
+//!   `8 -> 7`. Una celda a nivel 8 (fuente o caida) **solo** se reparte en
+//!   horizontal cuando descansa sobre solido: mientras su columna no este llena,
+//!   solo baja (asi una cascada no ensancha a cada altura). El agua **prefiere
+//!   bajar**; solo se extiende en horizontal si no puede caer.
 //! * Una celda de flujo **sin fuente** (ni agua arriba) desaparece.
 //!
 //! A diferencia de Minecraft (tick cada 5 ticks = 0.25 s), aqui el tick es mas
@@ -207,6 +210,13 @@ fn spread<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3], level: u8) -> bool {
         if !bf.is_source() && bf.level() < MAX_LEVEL {
             grid.set_fluid(below, Fluid::Flow(MAX_LEVEL));
             return true;
+        }
+        // El fondo ya esta **lleno** (agua a nivel 8). Una celda a nivel 8 (fuente
+        // o caida) sigue alimentando su columna vertical y NO se reparte en
+        // horizontal: solo lo hace al tocar **suelo** (rama de abajo). Sin esto,
+        // cada altura de la cascada generaba un charco (bug 2.1).
+        if level == MAX_LEVEL {
+            return false;
         }
     }
 
@@ -423,6 +433,53 @@ mod tests {
             assert_eq!(g.fluid([d as i32, 1, 0]).level(), MAX_LEVEL - d, "d={d}");
         }
         assert_eq!(g.fluid([MAX_LEVEL as i32, 1, 0]), Fluid::None);
+    }
+
+    #[test]
+    fn una_fuente_alta_no_inunda_un_volumen() {
+        // 2.1: una fuente en y=10 sobre suelo plano debe formar un charco de
+        // radio 7 (niveles 8..1) y un tubo de nivel 8 debajo, NO un bloque lleno.
+        let mut g = TestGrid::new(0);
+        g.set([0, 10, 0], Fluid::Source);
+        for _ in 0..200 {
+            tick_all(&mut g);
+        }
+        assert!(
+            g.cells.len() < 1000,
+            "una fuente inundo {} celdas",
+            g.cells.len()
+        );
+        // En el suelo, el nivel decae con la distancia.
+        for d in 1..MAX_LEVEL {
+            assert_eq!(g.fluid([d as i32, 1, 0]).level(), MAX_LEVEL - d, "d={d}");
+        }
+        assert_eq!(g.fluid([MAX_LEVEL as i32, 1, 0]), Fluid::None);
+        // La columna de caida es de nivel 8 (no se ensancha).
+        for y in 2..=9 {
+            assert_eq!(g.fluid([0, y, 0]).level(), MAX_LEVEL, "caida y={y}");
+        }
+    }
+
+    #[test]
+    fn una_cascada_no_se_extiende_en_lateral() {
+        // 2.1(c): cascada de 6; solo hay agua lateral en el suelo (y=1).
+        let mut g = TestGrid::new(0);
+        g.set([0, 6, 0], Fluid::Source);
+        for _ in 0..200 {
+            tick_all(&mut g);
+        }
+        for y in 2..=6 {
+            let lateral = g
+                .cells
+                .keys()
+                .filter(|p| p[1] == y && (p[0] != 0 || p[2] != 0))
+                .count();
+            assert_eq!(lateral, 0, "agua lateral en y={y}");
+        }
+        assert!(
+            g.fluid([3, 1, 0]).is_water(),
+            "deberia haber charco en el suelo"
+        );
     }
 
     #[test]

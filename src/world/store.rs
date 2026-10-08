@@ -1928,7 +1928,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "reproduce el bug 2.1 (una fuente inunda); se activa en la Fase B"]
     fn el_volumen_de_una_fuente_esta_acotado() {
         // Fase A/B (2.1): sobre columnas reales, una sola fuente alta no debe
         // inundar un volumen. Con el modelo actual falla (niveles todos a 8).
