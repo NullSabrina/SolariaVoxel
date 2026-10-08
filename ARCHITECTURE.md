@@ -44,7 +44,7 @@ main.rs ──> lib.rs ──> engine::run()
 | `engine` | Ciclo de vida de la app, eventos de winit, input, ventana. | `render`, `scene`, `player`, `world`, `math` |
 | `render` | Todo lo que toca `wgpu`: superficie, pipelines, mallas, shaders e **interfaz 2D** (hotbar/inventario). | `world` (para meshear), `scene`, `math` |
 | `scene` | Que hay en la escena: la camara FPS, el ciclo dia/noche y el **cielo** (paleta, orbita solar y `SkyState`, todo puro y testeable). | `math` |
-| `ui` | Estado y **logica de interfaz sin GPU**: i18n (`lang`) y reglas del inventario creativo (categorias, busqueda, filtrado). | `world` (tipos) |
+| `ui` | Estado y **logica de interfaz sin GPU**: i18n (`lang`), **maquina de estados de input** (`input_mode`: Esc/cursor, overlays), **inventario** (`inventory_state`: stacks, arrastre, shift/doble/1-9/Q), catalogo creativo (`inventory`), opciones (`options`) y pantallas (`screens`). | `world` (tipos) |
 | `player` | Fisica del jugador: vertical (gravedad/salto/vuelo), colision horizontal y test de solape bloque/jugador. | `scene`, `world` (tipos), `math` |
 | `world` | Datos del mundo: bloques, columnas, meshing, raycast, guardado. | `render::mesh` (el tipo `Vertex`), `math` |
 | `math` | Matematica 3D propia (`Vec3`, `Mat4`). | ninguna |
@@ -210,6 +210,30 @@ una migracion**; hay tests que lo verifican.
 - **Colision del jugador (horizontal)**: eje a eje; si un eje choca, se cancela y
   el otro desliza. Con auto-escalon, un escalon de <= 1 bloque se sube andando.
 - **Cero comentarios de relleno**: se documenta el *porque*, no el *que*.
+
+## Interfaz (UI)
+
+Separacion estricta: la **logica** vive en `ui/` (sin GPU, testeable), `render/`
+solo dibuja, y `engine/app.rs` traduce eventos.
+
+- **Modo de input** (`ui/input_mode.rs`): `Mode { Playing, Overlay(Inventory|
+  Crafting|Pause), Menu }`; `on_escape`/`on_inventory_key` devuelven `Effect`s que
+  `app.rs` aplica. Un **solo** Esc abre la pausa y libera el cursor; cerrar un
+  overlay **recaptura** el cursor sin click (con reintento al recuperar foco).
+- **Inventario** (`ui/inventory_state.rs`): `hotbar[9] + main[27] + cursor + drag`;
+  click izq/der, arrastre (reparto uniforme / uno por ranura), shift-click, doble
+  click, 1-9 y Q. Invariante de unidades verificado por fuzz determinista.
+- **Items** (`world/item.rs`): `ItemStack { block, count }` (max 64); la hotbar se
+  persiste como stacks (formato de guardado v6).
+- **Dibujo** (`render/ui.rs` + `ui.wgsl`): `UiQuad { rect, uv, layer }` -> NDC.
+  Capa `< 0` = textura de interfaz (`assets/gui.png`, regiones en `assets/gui.json`),
+  `-2` = fuente, `>= 0` = tile del atlas (iconos). Arte de GUI pintado en
+  LibreSprite (`tools/gen_gui.js`).
+- **Menus**: botones con estados (normal/hover/pulsado) + foco de teclado (flechas
+  + Enter/Espacio). Fuente bitmap 5x7 (`render/font.rs`).
+- **Pendiente**: `tint` por quad (fade de transiciones, hover amarillo, sombra de
+  fuente), escala de GUI configurable, panoramica de titulo y fuente 8x8 con
+  minusculas desde `assets/font.png`.
 
 ## Como se prueba
 

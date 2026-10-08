@@ -4332,6 +4332,63 @@ Captura `screenshots/ui_after_menu.png` (titulo con boton enfocado/resaltado).
 **380 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.46.6`. `FORMAT_VERSION`
 6 / `GENERATOR_VERSION` 20 intactos.
 
+## v0.46.7 (MEGA PROMPT 3) - Fase H: pulido, documentacion y cierre
+
+### 2026-10-08 - Seccion de UI en ARCHITECTURE, capturas finales e informe
+
+**Decision.** Se cierra el MEGA PROMPT 3. Documentacion al dia:
+- `ARCHITECTURE.md`: nueva seccion **Interfaz (UI)** (input_mode, inventory_state,
+  item, dibujo por `UiQuad`, menus con estados, fuente) y fila del modulo `ui`
+  actualizada.
+- `assets/README.md`: fila de `gui.png` (256x256, bisel, botones de 4 estados) +
+  `gui.json` + `src/ui/gui.aseprite` (hecho en la Fase E).
+- Capturas finales: `screenshots/ui_final_{title,inventory}.png` (v0.46.6).
+
+**Estado por fase (todas commiteadas y con tag).**
+| Fase | Que | Tag |
+|---|---|---|
+| A | Reproducir + capturas base + verificar LibreSprite | v0.46.0 |
+| B | Maquina de estados de input (Esc/cursor) | v0.46.1 |
+| C | `ItemStack` + hotbar persistida (v6 + migracion) | v0.46.2 |
+| D | Inventario con arrastre/tooltips (fuzz de invariante) | v0.46.3 |
+| E | Arte de GUI en LibreSprite + manifiesto | v0.46.4 |
+| F | Menus con estados de boton + teclado | v0.46.5 |
+| G | Animacion (rebote hotbar + reducir movimiento) | v0.46.6 |
+| H | Docs + capturas + cierre | v0.46.7 |
+
+**Tests de la seccion 6 que pasan.** `esc_en_juego_abre_pausa_y_libera_cursor_en_un_solo_paso`,
+`esc_en_inventario_cierra_y_recaptura_sin_click`,
+`e_en_inventario_cierra_y_recaptura_sin_click`,
+`pausa_volver_recaptura_cursor_y_vuelve_a_playing`,
+`arrastre_izquierdo_reparte_uniforme_sin_perder_unidades`,
+`arrastre_derecho_deja_uno_por_ranura`, `shift_click_cruza_hotbar_e_inventario`,
+`doble_click_recoge_todo_el_mismo_bloque`, `stack_nunca_supera_64`,
+`invariante_unidades_por_bloque_en_secuencias_aleatorias`,
+`guardado_migra_hotbar_vieja_a_stacks_sin_perder_bloques`. **380 tests; 0 fallos**;
+clippy limpio.
+
+**Lo que NO se pudo verificar (honesto).**
+- **Esc/cursor manual en Windows**: la logica esta cubierta por la maquina de
+  estados (tests), pero no se simulo input real al juego; queda para tu prueba
+  manual.
+- **Capturas 1x/2x/3x**: la **escala de GUI configurable** no se implemento
+  (`UI_SCALE` sigue fijo a 2.0), asi que solo hay capturas a esa escala.
+- **Verificacion visual en GPU** de las animaciones/fade: el fade y el hover
+  amarillo necesitan `tint` por quad (pendiente).
+
+**Riesgos y deuda tecnica.**
+- **Migracion de guardado**: `FORMAT_VERSION -> 6`. Un mundo v5 se carga con la
+  hotbar por defecto (pila llena) sin perder bloques/posicion (test). El nibble de
+  flujo y el layout de `ChunkRecord` no cambiaron.
+- **Panoramica de titulo**: no implementada (arte LibreSprite pendiente); hoy el
+  titulo usa el mundo real atenuado.
+- **Fuente 8x8 con minusculas + sombra**: pendiente (hoy 5x7 mayusculas en codigo).
+- **`tint` por quad**: la pieza que falta para fade/hover/sombra.
+
+**Consecuencia.** `ARCHITECTURE.md`, `assets/README.md`,
+`screenshots/ui_final_{title,inventory}.png`. **380 tests; 0 fallos**; clippy
+limpio. `Cargo.toml -> 0.46.7`. `FORMAT_VERSION` 6 / `GENERATOR_VERSION` 20.
+
 ## Plantilla para nuevas entradas
 
 ```
