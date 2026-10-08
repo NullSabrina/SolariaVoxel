@@ -427,21 +427,62 @@ impl World {
         self.wake_column_water(pos);
     }
 
-    /// Despierta el agua **generada** de una columna recien cargada: encola la
-    /// celda de agua superior de cada `(x, z)` que no este ya en equilibrio, para
-    /// que el agua de worldgen (rios/lagos) se **asiente sola** al llegar en vez
-    /// de quedarse congelada hasta que el jugador edite algo.
+    /// Despierta el agua de una columna recien cargada:
+    /// 1. la **superficie generada** (pista barata de worldgen: rios/lagos/mar),
+    /// 2. el agua **en movimiento** restaurada de disco (nibble de flujo > 0), que
+    ///    sin esto se quedaba congelada para siempre al recargar (2.3),
+    /// 3. el agua de los **vecinos ya cargados** que toca la cara compartida, para
+    ///    que pueda fluir hacia la columna nueva (los flujos que cruzaban a un
+    ///    chunk no cargado se perdian).
     fn wake_column_water(&mut self, pos: ChunkPos) {
         let ox = pos.x * CHUNK_SIZE as i32;
         let oz = pos.z * CHUNK_SIZE as i32;
-        let cells: Vec<[i32; 3]> = match self.columns.get(&pos) {
-            Some(column) => column
-                .water_surface()
-                .iter()
-                .map(|&[x, z, y]| [ox + x as i32, y as i32, oz + z as i32])
-                .collect(),
-            None => return,
-        };
+        let mut cells: Vec<[i32; 3]> = Vec::new();
+        {
+            let Some(column) = self.columns.get(&pos) else {
+                return;
+            };
+            for &[x, z, y] in column.water_surface() {
+                cells.push([ox + x as i32, y as i32, oz + z as i32]);
+            }
+            if column.has_flow_storage() {
+                for y in 0..WORLD_HEIGHT {
+                    for z in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            if column.flow_at(x, y, z) > 0 {
+                                cells.push([ox + x as i32, y as i32, oz + z as i32]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Vecinos: agua en la cara compartida (incluye fuentes colocadas por el
+        // jugador, que no estan en `water_surface`).
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+            let Some(column) = self.columns.get(&n) else {
+                continue;
+            };
+            let nx = n.x * CHUNK_SIZE as i32;
+            let nz = n.z * CHUNK_SIZE as i32;
+            for i in 0..CHUNK_SIZE {
+                let (lx, lz) = if dx == 1 {
+                    (CHUNK_SIZE - 1, i)
+                } else if dx == -1 {
+                    (0, i)
+                } else if dz == 1 {
+                    (i, CHUNK_SIZE - 1)
+                } else {
+                    (i, 0)
+                };
+                for y in 0..WORLD_HEIGHT {
+                    if column.get(lx, y, lz) == Block::Water {
+                        cells.push([nx + lx as i32, y as i32, nz + lz as i32]);
+                    }
+                }
+            }
+        }
         for c in cells {
             if !self.water_in_equilibrium(c) {
                 self.enqueue_water(c);
@@ -1755,6 +1796,54 @@ mod tests {
             "el nivel de flujo se perdio al descargar/recargar"
         );
         assert_eq!(world.water_at([8, 101, 8]), Fluid::Source);
+        // Fase C: el flujo restaurado queda **despierto** (pendiente), no congelado.
+        assert!(
+            world.pending_water_cells() > 0,
+            "el flujo restaurado deberia quedar pendiente (despierto)"
+        );
+    }
+
+    #[test]
+    fn un_flujo_cruza_al_cargar_el_chunk_vecino() {
+        use super::super::block::Block;
+        // Radio 1 (radio de simulacion = 1). La fuente esta en el borde +X del
+        // chunk (1,0); al principio no puede fluir a (2,0), que no esta cargado.
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]); // centro (0,0): chunks -1..1
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 16..32 {
+                world.set_block([x, 100, z], Block::Stone);
+                for y in 101..112 {
+                    world.set_block([x, y, z], Block::Air);
+                }
+            }
+        }
+        world.set_block([31, 101, 8], Block::Water);
+        for _ in 0..20 {
+            world.tick_water(100_000);
+        }
+        assert!(
+            !world.water_at([32, 101, 8]).is_water(),
+            "aun no: el chunk vecino no esta cargado"
+        );
+
+        // Cargamos el chunk (2,0): el agua del borde debe despertarse y cruzar.
+        world.update_streaming([40.0, 120.0, 8.0]); // centro (2,0)
+        assert!(world.is_loaded(ChunkPos::new(2, 0)));
+        assert!(world.is_loaded(ChunkPos::new(1, 0)), "el vecino sigue cargado");
+        for z in 0..CHUNK_SIZE as i32 {
+            world.set_block([32, 100, z], Block::Stone);
+            for y in 101..112 {
+                world.set_block([32, y, z], Block::Air);
+            }
+        }
+        for _ in 0..20 {
+            world.tick_water(100_000);
+        }
+        assert!(
+            world.water_at([32, 101, 8]).is_water(),
+            "el flujo no cruzo al cargar el chunk vecino"
+        );
     }
 
     #[test]

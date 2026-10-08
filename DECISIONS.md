@@ -3891,6 +3891,50 @@ que estaba `#[ignore]`. Se mantienen alcance 7 en canal, retroceso y 2x2.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5): no cambia el mundo
 generado, solo la simulacion.
 
+## v0.45.3 (MEGA PROMPT 2) - Fase C: mundo y carga del agua
+
+### 2026-10-08 - Despertar agua restaurada, bordes de chunk, worldgen y presupuesto
+
+**Decision.**
+- **Agua restaurada (2.3).** `wake_column_water` ahora tambien encola las celdas
+  con **flujo > 0** de la columna recien cargada (nibble restaurado de disco).
+  Antes solo encolaba la pista `water_surface` de worldgen, asi que el agua en
+  movimiento de un chunk guardado se quedaba **congelada para siempre** al
+  recargar. El escaneo solo se paga si `has_flow_storage()` (raro): el agua
+  generada no reserva nibbles.
+- **Bordes de chunk.** Al cargar una columna, se encola tambien el agua **no en
+  equilibrio** de la **cara compartida** de los 4 vecinos ya cargados (incluye
+  fuentes colocadas por el jugador, que no estan en `water_surface`). Asi un flujo
+  que cruzaba a un chunk no cargado **no se pierde** al cargar el vecino.
+- **Agua de worldgen (2.6): se mantiene como `Source`.** Es estable (como en
+  Minecraft): un oceano/rio/lago generado no se drena. Ponerlo como `Flow` haria
+  que rios y lagos **se secaran solos** (un flujo sin fuente desaparece). El mar
+  son fuentes en equilibrio -> coste 0 en el tick. "Lago generado drenable" queda
+  fuera de alcance (documentado).
+- **Presupuesto (2.4).** Tras la Fase B la cola se vacia en **muy pocos ticks**
+  (probe: una fuente procesa 492 celdas, un dique roto 257). El presupuesto fijo
+  (16 384 celdas / 6 ms a 10 Hz) sobra; **no** se anade presupuesto adaptativo
+  (medido, no a ojo). Se mantiene el tick a 10 Hz.
+
+**Motivo.** Secciones 2.3, 2.6 y 2.4 del Prompt 2.
+
+**Tests.** `un_flujo_cruza_al_cargar_el_chunk_vecino` (radio 1: el agua del borde
+de (1,0) cruza a (2,0) al cargarlo) y se amplia
+`el_flujo_sobrevive_a_descargar_y_recargar_la_columna` (el flujo restaurado queda
+**pendiente**, no congelado).
+
+**Alternativas descartadas.**
+- Marca explicita "agua de oceano que no se simula": el modelo de equilibrio ya
+  deja el mar a coste 0; una marca nueva complicaria el guardado.
+- Presupuesto adaptativo con feedback de frame: sin ese feedback es adivinar; la
+  medicion dice que no hace falta.
+
+**Consecuencia.** `world/store.rs` (`wake_column_water` + escaneo de bordes, 2
+tests). **356 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.45.3`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5): no cambia el mundo generado.
+Rendimiento: `warm_streaming` 81 columnas = **291.5 ms** (igual que la linea base;
+el escaneo de bordes es despreciable frente a la generacion).
+
 ## Plantilla para nuevas entradas
 
 ```
