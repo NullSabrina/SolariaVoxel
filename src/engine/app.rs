@@ -189,6 +189,19 @@ fn generator_kind_from_env() -> crate::world::GeneratorKind {
         .unwrap_or_default()
 }
 
+/// Semilla de un mundo nuevo a partir del texto introducido. Si el campo esta
+/// vacio se usa una semilla de reloj (`now` + `nanos`), de modo que **cada mundo
+/// sin semilla es distinto**; un texto no vacio se convierte con
+/// [`crate::world::seed_from_text`] (un entero se usa tal cual).
+fn seed_for_new_world(text: &str, now: u64, nanos: u32) -> u32 {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        now as u32 ^ nanos.wrapping_mul(0x9E37_79B9)
+    } else {
+        crate::world::seed_from_text(trimmed)
+    }
+}
+
 /// Segundos desde el epoch de UNIX (para la fecha del header).
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
@@ -1603,7 +1616,10 @@ impl App {
                         self.rename_target = None;
                         self.create_name = "Mundo nuevo".into();
                         self.create_seed = String::new();
-                        self.create_focus = 0;
+                        // El foco entra directo en **Semilla**: antes empezaba en
+                        // Nombre y lo que escribias iba al nombre, dejando la
+                        // semilla vacia (mismo mundo siempre).
+                        self.create_focus = 1;
                         self.screens.replace(Screen::CreateWorld);
                     }
                     2 => {
@@ -1783,7 +1799,16 @@ impl App {
             self.screens.replace(Screen::WorldSelect);
             return;
         }
-        let seed = crate::world::seed_from_text(&self.create_seed);
+        let seed = seed_for_new_world(&self.create_seed, now_unix(), {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        });
+        println!(
+            "[world] creando '{name}' | semilla {seed} | generador {}",
+            generator_kind_from_env().name()
+        );
         match crate::world::library::create_world_kind(
             &self.world_base,
             &name,
@@ -1996,7 +2021,7 @@ impl App {
             }
             if self.rename_target.is_none() {
                 quads.extend(font::text_quads(
-                    "TAB o clic: cambiar campo. Semilla = numero o texto.",
+                    "Semilla = numero o texto. TAB o clic: cambiar de campo.",
                     fx,
                     fy + 2.0,
                     UI_SCALE,
@@ -2871,5 +2896,41 @@ mod tests {
             "el primer quad es el dim a pantalla completa"
         );
         assert_eq!(app.craft_result, Some(crate::world::Block::Planks));
+    }
+
+    #[test]
+    fn la_semilla_escrita_llega_al_mundo_creado() {
+        // Reproduce el flujo "crear mundo -> escribir semilla": la semilla debe
+        // quedar en los metadatos del mundo (antes el foco caia en Nombre y la
+        // semilla quedaba vacia, asi que todo mundo salia con la misma).
+        let base = std::env::temp_dir().join(format!("solaria_app_seed_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let mut app = App {
+            world_base: base.clone(),
+            create_name: "Con semilla".into(),
+            create_seed: "4242".into(),
+            create_focus: 1,
+            ..Default::default()
+        };
+        app.screens.replace(Screen::CreateWorld);
+        app.submit_create_or_rename();
+        let worlds = crate::world::library::list_worlds(&base);
+        assert_eq!(worlds.len(), 1, "deberia haber un mundo");
+        assert_eq!(worlds[0].meta.seed, 4242, "la semilla escrita debe ir al mundo");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn la_semilla_vacia_no_es_fija() {
+        // Un texto no vacio se usa tal cual.
+        assert_eq!(seed_for_new_world("77", 1, 2), 77);
+        assert_eq!(seed_for_new_world("  42 ", 1, 2), 42);
+        // Vacio: depende del reloj, asi que dos mundos sin semilla difieren.
+        assert_ne!(
+            seed_for_new_world("", 100, 1),
+            seed_for_new_world("", 200, 1)
+        );
+        assert_eq!(seed_for_new_world("  ", 7, 9), seed_for_new_world("", 7, 9));
     }
 }

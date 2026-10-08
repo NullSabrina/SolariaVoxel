@@ -4519,6 +4519,35 @@ octava.
 **Consecuencia.** `Cargo.toml -> 0.47.0`; `GENERATOR_VERSION -> 21`;
 `FORMAT_VERSION` intacto (6). **429 tests + 1 ignored; clippy limpio.**
 
+## v0.47.0 (MEGA PROMPT 4) - Fix: crear un mundo y entrar en el
+
+### 2026-10-08 - La entrada a un mundo nuevo usa su semilla (no 13371)
+
+**Decision.** Un mundo recien creado solo tiene `level.json` (aun no hay
+`world.vf`). Se arregla la entrada en dos puntos de `engine/app.rs`:
+- **`load_world`** ya no aborta cuando falta `world.vf`: inicializa el mundo con
+  la **semilla y el generador de sus metadatos**.
+- **Arranque**: si el mundo activo no tiene `world.vf`, usa la semilla de su
+  `level.json` en vez de forzar `13371`.
+- **Foco del campo Semilla**: al abrir "Crear mundo" el foco entra en **Semilla**
+  (antes en Nombre, asi que lo que se escribia iba al nombre y la semilla quedaba
+  vacia -> todos los mundos salian iguales). Ademas, clic para enfocar cualquier
+  campo, y una pista en pantalla.
+- **Semilla vacia = aleatoria** (`seed_for_new_world`, `now` + `nanos`): dos
+  mundos sin semilla ya no colisionan.
+
+**Motivo.** Bug reportado: "al crear un mundo, sea cual sea la semilla, me envia
+al mismo mundo predeterminado". Causa doble: (1) la entrada rechazaba un mundo
+sin `world.vf`; (2) el texto se escribia en Nombre, dejando la semilla vacia.
+
+**Tests.** `la_semilla_escrita_llega_al_mundo_creado`,
+`la_semilla_vacia_no_es_fija` (engine::app), `un_mundo_nuevo_conserva_semilla_y_generador`
+(world::library).
+
+**Consecuencia.** `src/engine/app.rs`, `src/world/library.rs`, `README.md`.
+**432 tests; clippy limpio.** `GENERATOR_VERSION`/`FORMAT_VERSION` intactos
+(21/6). Binarios debug y release reconstruidos.
+
 ## Plantilla para nuevas entradas
 
 ```
