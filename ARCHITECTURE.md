@@ -122,6 +122,8 @@ WorldGen (semilla)  ->  config + seeds derivadas + ruido (continental, macro,
 TerrainGenerator
       │  genera_column(x,z) -> altura del TerrainSample + clima/bioma + superficie
       │                          + cuevas (Perlin 3D, iso-superficie) + acuifero
+      │                          + decoracion (arboles por coordenada global con
+      │                            margen de chunk + rocas)
       v
    Column (24 x Chunk de 16^3, + arrays de luz cielo/bloque)
       │  greedy::greedy_section_query(query, light, section, origin)
@@ -172,7 +174,12 @@ una migracion**; hay tests que lo verifican.
   `is_visible` = se dibuja pero no bloquea (antorcha, **liquidos** y **hojas**). El
   mesher dibuja `is_solid || is_visible` y solo oculta una cara si el vecino es
   solido. Las hojas, ademas, son **no solidas** y con **cutout** (huecos de alfa
-  0): se atraviesan y se ven por sus huecos.
+  0): se atraviesan y se ven por sus huecos. Una cara de hoja solo se emite contra
+  **aire** (nunca contra solido, agua u otra hoja): evita caras coplanares con el
+  pase de agua, que no escribe profundidad.
+- **Contrato de hojas**: aunque no son solidas, `Block::blocks_fluid()` devuelve
+  `true` para todo bloque visible no liquido (hojas, antorcha), asi el agua **no**
+  las sustituye; `World::set_water_raw` tambien lo respeta de forma defensiva.
 - **Agua translucida**: el agua es visible no solida y, ademas, se **separa** en
   el greedy a su propio buffer; el renderer la dibuja en un **pase aparte** con
   blending alfa y sin escritura de z (`ScenePipeline::water_pipeline`). Los oceanos

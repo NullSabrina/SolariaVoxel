@@ -292,9 +292,11 @@ where
             return None;
         }
     } else if block == Block::Leaves {
-        // Las hojas son visibles no solidas (cutout): se dibujan contra aire,
-        // pero no entre ellas (rendimiento) ni contra un solido.
-        if neighbor == Block::Leaves || neighbor.is_solid() {
+        // Las hojas son visibles no solidas (cutout): solo asoman su cara contra
+        // **aire**. Ni entre ellas (rendimiento), ni contra un solido, ni contra
+        // un liquido (evita caras coplanares con el agua, que no escribe
+        // profundidad).
+        if neighbor != Block::Air {
             return None;
         }
     } else if !block.is_solid() || neighbor.is_solid() {
@@ -572,6 +574,34 @@ mod tests {
         assert!(
             vertices.iter().any(|v| v.sky > 0.9 && v.block == 0.0),
             "deberia haber caras con cielo alto y bloque nulo"
+        );
+    }
+
+    #[test]
+    fn las_hojas_solo_emiten_caras_contra_aire() {
+        // Fase E (2.2b): una cara de hoja contra solido, agua o otra hoja NO se
+        // emite (evita caras coplanares y "hojas dentro" del agua/terreno).
+        let light = |_: i32, _: i32, _: i32| (15u8, 0u8);
+        let leaf_face = |neighbor: Block| {
+            let query = move |x: i32, _y: i32, _z: i32| {
+                if x == 1 { neighbor } else { Block::Leaves }
+            };
+            mask_value(&query, &light, Face::PosX, 0, 0, 0)
+        };
+        assert!(leaf_face(Block::Air).is_some(), "hoja contra aire debe verse");
+        assert!(leaf_face(Block::Stone).is_none(), "hoja contra solido no");
+        assert!(leaf_face(Block::Water).is_none(), "hoja contra agua no");
+        assert!(leaf_face(Block::Leaves).is_none(), "hoja contra hoja no");
+        assert!(leaf_face(Block::Torch).is_none(), "hoja contra antorcha no");
+
+        // Una cara de SOLIDO contra hojas si se emite (se ve el terreno por los
+        // huecos del cutout), y no hay cara de hoja coplanar.
+        let solid_query = |x: i32, _y: i32, _z: i32| {
+            if x == 1 { Block::Leaves } else { Block::Stone }
+        };
+        assert!(
+            mask_value(&solid_query, &light, Face::PosX, 0, 0, 0).is_some(),
+            "el solido junto a hojas deberia verse"
         );
     }
 

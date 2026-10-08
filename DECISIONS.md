@@ -3432,6 +3432,308 @@ Reusar `moon_phases.png` (8 frames) en el cubo: mostraba el disco en cada cara
 limpio. Capturas `v0.44.4_{sun,moon}_cube_tex.png`.
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (17/5).
 
+## v0.45.0-dev (MEGA PROMPT 1) - Fase A: auditoria de arboles (linea base)
+
+### 2026-10-08 - `examples/tree_audit.rs`: medir antes de tocar
+
+**Decision.** Se anade `examples/tree_audit.rs` para medir arboles y hojas sobre
+columnas reales (sin GPU) en 5 semillas x una rejilla de chunks. No cambia logica
+de generacion: es la **linea base** que exige la seccion 7 del prompt. Rejilla de
+referencia: 24x24 chunks (384x384 bloques = 0,1475 km2) por semilla, semillas
+{13371, 7, 2024, 99, 4242}. Salida: tabla por semilla y por bioma + PNG cenital
+`screenshots/tree_audit_<seed>.png`.
+
+**Motivo.** La seccion 0 manda "analiza antes de programar" y "no cambies
+constantes a ojo". La seccion 2 afirma cinco problemas; esta herramienta los
+confirma o descarta con numeros sobre el camino real `TerrainGenerator` (legacy).
+
+**Linea base (GLOBAL, 5 semillas).**
+| metrica | valor |
+|---|---|
+| arboles/km2 | **1150** |
+| tronco medio (bloques) | **5.01** |
+| alturas de tronco distintas | **3** (4:268, 5:305, 6:275) |
+| hojas totales | 48879 |
+| hojas contra terreno (no tronco) | **0** |
+| hojas sobre agua | **0** |
+| troncos en borde de chunk (`0..=1`, `14..=15`) | **0** |
+| copas recortadas por el chunk | **0** |
+| alturas locales contradictorias | **0** (=> la altura es funcion de `(lx,lz)`) |
+
+Biomas con arboles: **Forest, Swamp, Taiga, Plains**. Biomas con **cero**
+arboles: **Desert, Savanna, Tundra** (su `tree_density` en `biomes::BIOMES` es
+`0.0`). Densidad muy dispar: Forest 935-7043 arboles/km2, Plains 77-604.
+
+**Confirmacion de la seccion 2.**
+- **2.1 refrendado.** Una sola forma de copa (`place_tree`, 4 capas 1-2-2-1) y
+  solo **3 alturas de tronco** (4/5/6) para todos los biomas. `hash_u32(x*31+7,
+  z*17+3)` con `x,z` **locales** => la altura es la misma en cualquier chunk
+  (`alturas locales contradictorias = 0`, que es la prueba de la repeticion).
+- **2.3 refrendado.** Cero troncos en la banda `0..=1`/`14..=15`: `(2..=13)`
+  vacia literalmente los bordes del chunk (enrejado visible en los PNG).
+- **2.2c mitigado hoy.** `hojas contra terreno = 0`: la banda + `headroom_clear`
+  (3x3x7 dentro del chunk) impiden copas pegadas a laderas. Es decir, 2.2a
+  (agua borra hojas en `set_water_raw`) y 2.2b (caras de hoja contra agua en
+  `greedy.rs`) son **de simulacion/mesher**, no de generacion: la generacion
+  produce 0 hojas embebidas. Se corregiran en la Fase E, no aqui.
+- **2.4 pendiente.** El camino `graph` pasa `slope = 0` fijo
+  (`terrain.rs:383`); este audit solo cubre el camino legacy.
+
+**Alternativas descartadas.** Medir sobre `World`/`Column` ya cargadas (anade
+simulacion de agua y ruido al baseline): se uso `generate_column` directo. Ampliar
+a 7 semillas: 5 basta para la varianza observada. Un test de `#[test]` en vez de
+`example`: el prompt pide una herramienta offline reejecutable, no un test.
+
+**Consecuencia.** `examples/tree_audit.rs` (nuevo). `cargo test --lib` sigue en
+**336 tests, 0 fallos** (el ejemplo no toca la lib). `GENERATOR_VERSION`/
+`FORMAT_VERSION` intactos (17/5); `Cargo.toml` sigue en 0.44.4 (la subida a
+0.45.0 se hara con el primer cambio real de generacion). PNGs en
+`screenshots/tree_audit_*.png`.
+
+## v0.45.0 (MEGA PROMPT 1) - Fase B: bioma unico y ecotonos
+
+### 2026-10-08 - Un solo `biome_at` (WorldGen) y transiciones suaves
+
+**Decision.**
+- **Bioma unico.** El camino `graph` deja de derivar el bioma de su propio clima
+  (`graph_climate` + `biomes::select`); ahora usa `geo.biome`, la **misma** fuente
+  que el legacy y que ya exponia `TerrainGenerator::biome_at`. Se retira por
+  completo el canal de clima del grafo: campo `climate`, `graph_climate`, la
+  construccion de `climate_graph` en `with_kind`, la funcion `climate_graph` en
+  `graph.rs` y su re-export. Esto **supersede** la decision C4 (v0.44.1); el texto
+  honesto va tambien en la cabecera de `graph.rs`.
+- **Ecotono por ruido.** `surface_block` recibe `ecotone: f32` (en vez del booleano
+  `border`). `ecotone = ecotone_strength(geo.cell_edge)` (1 en la frontera de la
+  celda de bioma, 0 en el centro, con `smoothstep`). En la capa superior, si
+  `ecotone * (1 - |variant|) > 0.45` se siembra un `transition_block` neutro del
+  bioma. Se elimina el parche cuadrado anterior (`border && variant.abs() < 0.35`).
+
+**Motivo.** La seccion 3.2 del prompt pide un unico `biome_at` usado por todos los
+caminos y decoraciones, y ecotonos "por ruido, no parches cuadrados".
+
+**Medicion (cobertura de biomas, preview 4000x4000, 5 semillas).** Dominante
+**Plains 24-27%**, Forest 21-23%, Savanna 15-17%, resto <13%; los 7 aparecen en
+todas. Muy por debajo del 45% exigido: **no hizo falta calibrar `BIOMES`**.
+
+**Alternativas descartadas.**
+- Conservar el clima del grafo (dejar dos fuentes de bioma): lo descarto el usuario;
+  ademas el mismo punto daba bioma distinto entre caminos (rompe consistencia).
+- Ecotono con el bioma **vecino** real (muestrear `WorldGen` al otro lado del borde):
+  +1 muestra 2D en cada columna de borde (~+20% de coste) y supera el presupuesto
+  de la seccion 3.5; se aplaza. El ecotono por ruido actual no anade muestras.
+- Calibrar `BIOMES` a mano: innecesario segun la medicion; "no cambiar constantes a
+  ojo".
+
+**Consecuencia.** `world/terrain.rs` (bioma unico en graph, `ecotone_strength`,
+`transition_block`, `surface_block`, test `el_grafo_y_el_legacy_comparten_bioma`,
+test `ningun_bioma_domina_mas_del_45_por_ciento`), `world/worldgen/graph.rs`
+(retirado `climate_graph`), `world/worldgen/mod.rs` (re-export), `world/save.rs`
+(`GENERATOR_VERSION -> 18`). **337 tests; clippy limpio.** `FORMAT_VERSION`
+intacto (5). `Cargo.toml -> 0.45.0`. El mundo **generado cambia** (material de
+superficie en bordes de bioma y bioma del grafo), de ahi el salto de version.
+
+## v0.45.0 (MEGA PROMPT 1) - Fase C: superficie por pendiente y slope real
+
+### 2026-10-08 - Roca en laderas, sedimento en valles; el grafo ya no pasa slope=0
+
+**Decision.**
+- **Umbrales en `config.rs`** (data-driven): `rock_slope = 3.0`,
+  `sediment_height = 72.0`, `sediment_chance = 0.70`; validados y
+  `WORLDGEN_CONFIG_VERSION -> 4`.
+- **`surface_block` recibe `slope` y `cfg`.** Orden de decision en la capa
+  superior: (1) pendiente `>= rock_slope` -> `Stone`/`Gravel` (aflora roca);
+  (2) valle bajo y llano (`height <= sediment_height && slope <= 1`) dithered por
+  ruido -> `CoarseDirt` (o `Sand` en desierto/sabana); (3) ecotono; (4) material
+  del bioma.
+- **Slope real en el camino graph (2.4).** Se construye una **rejilla de altura
+  del grafo con padding 1** (`graph_height`, 18x18) igual que el legacy, y de ahi
+  salen tanto `surface` como `slope` por columna. El decorador recibe ese slope
+  (antes iba `0` fijo), asi que ya no planta arboles en laderas del grafo.
+- **`TerrainGenerator::surface_height(x, z)`** publico: la altura de la superficie
+  de materiales del camino activo (grafo o WorldGen). Lo usan los tests.
+
+**Motivo.** Seccion 2.4 (graph pasaba `slope = 0`), 2.6 (superficie plana sin
+mirar la pendiente) y 3.1/3.3 (roca en laderas, sedimento en valles, densidad y
+claros con pendiente real).
+
+**Medicion.** Test `hay_roca_en_laderas_en_el_mundo_generado` (seed 13371, anillo
+que contiene cordilleras): toda columna no costera con `slope >= 3` tiene
+`Stone`/`Gravel` en la superficie, y hay `laderas > 0`. No se encontro ninguna
+ladera en el origen de 13371/7/99: las cordilleras estan lejos del spawn, de ahi
+el area elegida.
+
+**Alternativas descartadas.**
+- Calcular el slope del grafo con 4 `graph_height` por columna: mas caro que la
+  rejilla con padding (que ademas sustituye el `graph_height` por columna). Se
+  elige la rejilla, que **espeja el legacy**.
+- Dejar `sediment_height` mas alto (todo el llano): enmugrecia llanuras enteras.
+  Se queda en 72 (8 sobre el mar) y `sediment_chance = 0.70` (solo picos de ruido).
+- Umbrales cableados en `terrain.rs`: el prompt pide calibracion desde `config.rs`.
+
+**Consecuencia.** `world/worldgen/config.rs` (3 campos + validacion + version 4),
+`world/terrain.rs` (`surface_block`, rejilla de altura del grafo, `surface_height`,
+throw de `slope` al decorador; tests `la_superficie_por_pendiente_responde`,
+`hay_roca_en_laderas_en_el_mundo_generado`,
+`el_grafo_no_planta_arboles_en_laderas_empinadas`), `world/save.rs`
+(`GENERATOR_VERSION -> 19`). **340 tests; clippy limpio.** `FORMAT_VERSION`
+intacto (5). El mundo cambia (materiales de superficie), de ahi el salto de
+version.
+
+## v0.45.0 (MEGA PROMPT 1) - Fase D: arboles procedimentales
+
+### 2026-10-08 - `worldgen/trees.rs`: 4 especies, copa procedimental, colocacion con margen
+
+**Decision.**
+- **Modulo nuevo `worldgen/trees.rs`.** [`TreePlacer::plan`] es una decision
+  **pura por coordenada global** `(wx, wz)`: bioma + altura + pendiente -> un
+  `TreePlan` (especie, tronco, semilla) o `None`. Todos los hash usan `(wx, wz)`
+  globales; el mismo arbol es identico sin importar el orden de chunks.
+- **4 especies** elegidas por bioma y ruido regional: **Roble** (copa ovoide
+  irregular, tronco 4-6), **Picea** (cono en capas, tronco 6-9), **Abedul**
+  (copa alta y estrecha, tronco 5-7), **Acacia** (copa plana de "paraguas",
+  tronco 4-5). Forest/Plains mezclan roble y abedul; Taiga picea; Swamp roble;
+  Savanna acacia. Desert y Tundra, sin arboles.
+- **Copa procedimental, no plantilla.** Elipsoide (o cono) con el radio
+  perturbado por un **Perlin 3D** de baja frecuencia (`CANOPY_SCALE 0.09`) y
+  recorte por distancia al tronco. Ya no hay la copa fija 1-2-2-1.
+- **Colocacion con margen (camino A).** Cada chunk recorre `-MARGIN..16+MARGIN`
+  (`MARGIN = 4`) y dibuja solo la parte de cada copa que cae en su volumen. El
+  tronco tiene **prioridad** sobre las hojas (asi un tronco no queda truncado por
+  la copa de un vecino). Se eliminan `(2..=13)`, `place_tree` y `headroom_clear`.
+- **Soporte global.** `tree_base_supported` rechaza arboles cuya base no tenga
+  solido debajo, con una decision global: cuevas del legacy (`cave_carve_at`) o
+  **densidad interpolada** del grafo (misma retícula 4x4x4 que la generacion).
+  Evita flotantes en el camino graph.
+- **Biomas.** Savanna pasa de `tree_density = 0` a `0.02` (arboles dispersos);
+  Swamp 0.03 -> 0.04; Plains 0.01 -> 0.012. `decoration.rs` queda solo con rocas
+  (se retira `DecorationKind::Tree` y el ruido de agrupacion de alli).
+
+**Motivo.** Seccion 2.1 (forma unica, hash local, sin especies) y 3.3 del prompt.
+
+**Tabla antes/despues (`tree_audit`, rejilla 24x24 x 5 semillas).**
+| metrica | antes (Fase A) | despues |
+|---|---|---|
+| arboles/km2 | 1150 | **5225** |
+| tronco medio | 5.01 | 5.38 |
+| alturas de tronco distintas | 3 (4-6) | **7 (3-9)** |
+| hojas | 48879 | 144052 |
+| troncos en borde de chunk | 0 | **1672** (banda `2..=13` eliminada) |
+| alturas locales contradictorias | 0 | **2069** (hash global: el patron ya no se repite) |
+| hojas que reemplazan agua | 0 | **0** |
+| `terrain_generate_column` (dev) | 4.945 ms | 5.100 ms (**+3,1 %**) |
+
+**Alternativas descartadas.**
+- **Tronco inclinado de la acacia**: aplazado. Un tronco diagonal deja celdas
+  cuyo unico soporte esta en el chunk vecino, y la garantia "sin flotantes"
+  (medida por columna) no se puede verificar a traves de la frontera. La acacia
+  conserva su rasgo definitorio (copa plana). Deuda anotada.
+- **2-3 tiles de hoja por arbol**: aplazado. Requiere variantes de `Block` +
+  `atlas.rs` + inventario + `TILE_COUNT`; se documenta como pendiente. La
+  variacion actual es de **forma** (silueta procedural).
+- Rechazar la generacion si la densidad puntual del grafo no es solida: la
+  densidad puntual no coincide con la interpolacion; se usa la interpolacion
+  real.
+- Mantener `headroom_clear`: eliminaba los arboles de borde (2.3) y no es
+  necesario con la colocacion global.
+
+**Consecuencia.** `world/worldgen/trees.rs` (nuevo, con 5 tests),
+`world/worldgen/decoration.rs` (solo rocas), `world/worldgen/mod.rs`,
+`world/worldgen/biomes.rs` (densidades), `world/terrain.rs` (campo `trees`,
+pasada de margen en ambos caminos, `sample_slope`/`graph_slope`/
+`interpolated_density`/`tree_base_supported`, se retiran `place_tree` y
+`headroom_clear`; tests `un_arbol_que_cruza_la_frontera...` en `trees.rs`,
+`ningun_arbol_flota...`, `los_arboles_no_se_plantan_flotando`),
+`world/save.rs` (`GENERATOR_VERSION -> 20`). **343 tests; clippy limpio.**
+`FORMAT_VERSION` intacto (5).
+
+## v0.45.0 (MEGA PROMPT 1) - Fase E: contrato de hojas, agua y mesher
+
+### 2026-10-08 - Las hojas bloquean el agua y solo asoman contra aire
+
+**Decision (contrato de hojas, 3.4).** Las hojas se quedan **`visible && !solid`**
+(el jugador las atraviesa, como en Minecraft). A cambio:
+- **`Block::blocks_fluid`** devuelve `true` para solidos, lava y **todo bloque
+  visible no liquido** (hojas y antorcha). El agua ya no las sustituye.
+- **`World::set_water_raw`** tiene un guardia defensivo: si la celda ya contiene
+  un bloque que bloquea el fluido, **no** la pisa (2.2a).
+- **Mesher (`greedy.rs`)**: una cara de hoja solo se emite contra **aire**
+  (`neighbor != Air -> None`). Se ocultan las caras de hoja contra solidos,
+  **agua/lava** y otras hojas. La cara de un **solido** junto a hojas si se
+  emite (se ve el terreno por los huecos del cutout); al ocultar la cara de hoja
+  coplanar desaparece el z-fighting con el agua (que no escribe profundidad).
+
+**Motivo.** Seccion 2.2 (a: el agua borraba hojas; b: caras de hoja contra agua)
+y 3.4 del prompt; coordinado con el punto 3.7 del MEGA PROMPT 2 (el agua debe
+**respetar** las hojas).
+
+**Tests.** `hojas_y_antorcha_bloquean_el_agua_pero_el_agua_no` (block),
+`las_hojas_solo_emiten_caras_contra_aire` (mesher, `mask_value`),
+`el_agua_no_borra_las_hojas` (World: fuente junto a una hoja; el agua llega a la
+celda contigua y la hoja queda intacta), `las_hojas_no_pisan_solidos_ni_agua`
+(`trees.rs`: dibujar sobre una columna llena de agua no sustituye nada).
+
+**Alternativas descartadas.**
+- **Hojas solidas**: cambiaria el movimiento (no atravesarlas) y el culling; se
+  prefiere la referencia de Minecraft (`visible && !solid` + bloqueo de agua).
+- Emitir caras de hoja contra agua y ocultar la del agua: el pase de agua no
+  escribe profundidad, asi que la cara de hoja seguiria parpadeando. Se oculta la
+  de hoja.
+
+**Consecuencia.** `world/block.rs` (`blocks_fluid` + test), `world/greedy.rs`
+(culling de hojas + test), `world/store.rs` (`set_water_raw` + test),
+`world/worldgen/trees.rs` (test). **347 tests; clippy limpio.**
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (20/5): no cambia el mundo
+generado, solo el comportamiento del agua y la geometria de las hojas.
+
+## v0.45.0 (MEGA PROMPT 1) - Fase F: pulido, capturas y documentacion
+
+### 2026-10-08 - Cierre del Prompt 1 (terreno, biomas, arboles y hojas)
+
+**Decision.** Se cierra el MEGA PROMPT 1. Capturas regeneradas sin GPU:
+`screenshots/seed_gallery.png` (8 semillas), `screenshots/graph_preview_13371.png`
+(altura + corte de densidad), `screenshots/tree_audit_<seed>.png` (mapa cenital de
+madera/hojas de 5 semillas, que revela el fin del enrejado de chunk).
+Documentacion actualizada: `docs/worldgen.md` (modulos, fases, versiones, secciones
+de bioma unico/superficie y arboles) y `ARCHITECTURE.md` (pipeline + contrato de
+hojas); changelog en `src/lib.rs`.
+
+**Tabla antes/despues (`tree_audit`, 5 semillas x 24x24 chunks).**
+| metrica | antes | despues |
+|---|---|---|
+| arboles/km2 | 1150 | 5225 |
+| tronco medio | 5.01 | 5.38 |
+| alturas de tronco distintas | 3 | 7 |
+| hojas | 48879 | 144052 |
+| troncos en borde de chunk | 0 | 1672 |
+| alturas locales contradictorias | 0 | 2069 |
+| hojas que reemplazan agua | 0 | 0 |
+| `terrain_generate_column` (dev) | 4.945 ms | 5.100 ms (+3,1 %) |
+
+**Lo que no se pudo verificar (honesto).**
+- **Visual en GPU**: las capturas son mapas cenitales offline; no se abrio la
+  ventana ni se mesheo/renderizo una escena real (sin GPU en el entorno). El
+  comportamiento del mesher de hojas se cubre con test unitario de `mask_value`.
+- **Aspecto artistico de los arboles**: la forma (silueta) es determinista y
+  testeada, pero el "look" final depende de las texturas del atlas, que no se
+  tocaron.
+- **Densidad percibida**: los bosques salen densos (Forest hasta ~2,6 % de
+  columnas); conviene revisarlo en juego.
+
+**Riesgos y deuda tecnica.**
+- Tronco inclinado de la acacia y 2-3 tiles de hoja por arbol: aplazados (ver
+  Fases D). Exigen soporte de soporte cruzado entre chunks y atlas/registro.
+- Los arboles pueden solapar copas (el tronco tiene prioridad); visualmente
+  aceptable, pero no hay `headroom` que los separe.
+- `hojas contra terreno` deja de ser 0 (las copas pueden tocar laderas); el
+  mesher ya no emite esas caras, pero conviene una revision visual.
+- El ecotono es un sustrato neutro dithered, no una mezcla real de los dos
+  biomas (coste de muestreo, ver Fase B).
+
+**Consecuencia.** Docs y capturas; `GENERATOR_VERSION`/`FORMAT_VERSION`/
+`Cargo.toml` sin cambios (20/5/0.45.0). **347 tests; clippy limpio.** Con esto se
+cumplen los criterios de aceptacion de la seccion 5 del prompt salvo la
+verificacion visual en GPU (ver arriba).
+
 ## Plantilla para nuevas entradas
 
 ```

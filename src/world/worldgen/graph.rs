@@ -12,7 +12,9 @@
 //!
 //! Estado (honesto): C1 implementa el modelo de datos, el validador, el
 //! compilador y el evaluador. La integracion en `terrain.rs` (C2), el formato
-//! en disco (RON/JSON), `GeneratorKind` y el clima (C4) quedan como pendientes.
+//! en disco (RON/JSON) y `GeneratorKind` quedan como pendientes. El canal de
+//! **clima del grafo (C4) se retiro** en la Fase B del MEGA PROMPT 1: el bioma
+//! sale siempre de `WorldGen` (`biome_at`), fuente unica para los dos caminos.
 
 use serde::{Deserialize, Serialize};
 
@@ -568,36 +570,6 @@ pub fn default_density_graph(seed: u64) -> Graph {
     // densidad = superficie - y + carve  (raiz = ultimo nodo).
     let d1 = g.push(Node::Add(surface, y_sub));
     g.push(Node::Add(d1, carve));
-    g
-}
-
-/// Grafo de **clima**: una banda de clima en `0..1` (temperatura o lluvia) segun
-/// el `salt`. Ruido 2D de baja frecuencia con contraste para que haya regiones
-/// claramente calidas/frias o secas/humedas.
-pub fn climate_graph(seed: u64, salt: u64) -> Graph {
-    let mut g = Graph::new();
-    let n = g.push(Node::Noise {
-        kind: NoiseKind::Value2D,
-        salt: seed ^ salt,
-        frequency: 0.0015,
-        octaves: 4,
-        persistence: 0.5,
-        lacunarity: 2.0,
-    });
-    let half = g.push(Node::Const(0.5));
-    let n_half = g.push(Node::Mul(n, half));
-    let band = g.push(Node::Add(n_half, half)); // 0..1
-    // Contraste: aleja de 0.5 para repartir mejor los biomas.
-    let neg_half = g.push(Node::Const(-0.5));
-    let centered = g.push(Node::Add(band, neg_half));
-    let gain = g.push(Node::Const(1.6));
-    let stretched = g.push(Node::Mul(centered, gain));
-    let recentered = g.push(Node::Add(stretched, half));
-    g.push(Node::Clamp {
-        input: recentered,
-        lo: 0.0,
-        hi: 1.0,
-    });
     g
 }
 

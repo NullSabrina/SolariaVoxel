@@ -10,7 +10,18 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
-//! ## Estado actual: v0.29.0 - Personaje y camara en tercera persona
+//! ## v0.45.0 - Terreno, biomas, arboles y hojas (MEGA PROMPT 1)
+//!
+//! Refactor del worldgen por fases: **bioma unico** desde `WorldGen` (retirado el
+//! clima del grafo), **superficie por pendiente** (roca en laderas, sedimento en
+//! valles) y **ecotonos** por ruido, **arboles procedimentales** (`worldgen/trees.rs`:
+//! 4 especies, copa por ruido 3D, colocacion por coordenada global con margen de
+//! chunk, sin cortes en fronteras) y **contrato de hojas** (bloquean el agua y
+//! solo asoman caras contra aire). `GENERATOR_VERSION -> 20`,
+//! `WORLDGEN_CONFIG_VERSION -> 4`, `FORMAT_VERSION` intacto (5). Detalle y tablas
+//! antes/despues en `DECISIONS.md`.
+//!
+//! ## v0.29.0 - Personaje y camara en tercera persona
 //!
 //! Se anade el **personaje** completo (humanoide de 1.8, algo mas detallado que
 //! Steve: pelo, ojos, cinturon y botas) con **animacion de andar** (piernas y

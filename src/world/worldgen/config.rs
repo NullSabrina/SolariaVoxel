@@ -11,7 +11,7 @@
 //! parametros".
 
 /// Version de la configuracion de worldgen.
-pub const WORLDGEN_CONFIG_VERSION: u32 = 3;
+pub const WORLDGEN_CONFIG_VERSION: u32 = 4;
 
 /// Parametros de la generacion de mundo. Valores iniciales a calibrar.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -102,6 +102,17 @@ pub struct WorldGenConfig {
     pub cliff_step: f32,
     /// Umbral del ruido de landform por encima del cual hay terrazas.
     pub terrace_region: f32,
+
+    // --- Superficie por pendiente (MEGA PROMPT 1, Fase C) ---
+    /// Pendiente (diferencia de altura con las 4 vecinas, en bloques) a partir
+    /// de la cual **aflora roca** en la superficie (grava/piedra). Antes una
+    /// ladera de 40 grados tenia la misma hierba que un prado.
+    pub rock_slope: f32,
+    /// Altura (bloques) por debajo de la cual un llano acumula **sedimento**
+    /// (grava/tierra) propio de valles, mezclado por ruido.
+    pub sediment_height: f32,
+    /// Umbral de ruido de sedimento (0..1): mas alto, menos sedimento.
+    pub sediment_chance: f32,
 }
 
 impl Default for WorldGenConfig {
@@ -160,6 +171,10 @@ impl Default for WorldGenConfig {
             terrace_step: 4.0,
             cliff_step: 14.0,
             terrace_region: 0.18,
+
+            rock_slope: 3.0,
+            sediment_height: 72.0,
+            sediment_chance: 0.70,
         }
     }
 }
@@ -198,6 +213,8 @@ impl WorldGenConfig {
             ("terrace_step", self.terrace_step),
             ("cliff_step", self.cliff_step),
             ("climate_contrast", self.climate_contrast),
+            ("rock_slope", self.rock_slope),
+            ("sediment_height", self.sediment_height),
         ] {
             if v <= 0.0 {
                 return Err(ConfigError::NotPositive(name));
@@ -214,6 +231,9 @@ impl WorldGenConfig {
         }
         if !(0.0..=1.0).contains(&self.terrace_region) {
             return Err(ConfigError::OutOfRange("terrace_region"));
+        }
+        if !(0.0..=1.0).contains(&self.sediment_chance) {
+            return Err(ConfigError::OutOfRange("sediment_chance"));
         }
         if !(0.0..=1.0).contains(&self.cell_jitter) {
             return Err(ConfigError::OutOfRange("cell_jitter"));

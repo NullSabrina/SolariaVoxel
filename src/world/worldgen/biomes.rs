@@ -54,7 +54,7 @@ pub const BIOMES: [BiomeDefinition; 7] = [
         temperature: (0.40, 0.80),
         humidity: (0.70, 1.05),
         elevation: (0.0, 0.38),
-        tree_density: 0.03,
+        tree_density: 0.04,
     },
     BiomeDefinition {
         biome: Biome::Taiga,
@@ -70,7 +70,7 @@ pub const BIOMES: [BiomeDefinition; 7] = [
         temperature: (0.56, 0.88),
         humidity: (0.32, 0.60),
         elevation: (0.0, 0.58),
-        tree_density: 0.0,
+        tree_density: 0.02,
     },
     BiomeDefinition {
         biome: Biome::Forest,
@@ -86,7 +86,7 @@ pub const BIOMES: [BiomeDefinition; 7] = [
         temperature: (0.30, 0.68),
         humidity: (0.25, 0.62),
         elevation: (0.0, 0.55),
-        tree_density: 0.01,
+        tree_density: 0.012,
     },
 ];
 

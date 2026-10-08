@@ -1,34 +1,21 @@
-//! Decoracion por **reglas** (FASE 7).
+//! Decoracion por **reglas** (FASE 7): hoy solo **rocas** (boulders).
 //!
-//! Cada tipo de decoracion (arboles, rocas) es una [`DecorationRule`]: un
-//! conjunto de **condiciones** sobre la muestra de la columna (bioma, altura,
-//! humedad, cercania a rio) y su **pendiente**, mas una probabilidad. Asi anadir
-//! un tipo de decoracion es anadir una fila, no tocar una cascada de `if`.
-//!
-//! Dos ruidos de baja frecuencia dan **coherencia regional**:
-//! * `clusters` — agrupa los arboles en **bosques con claros** (si el ruido baja,
-//!   no hay arbol aunque el bioma sea boscoso).
-//! * `boulders` — forma **manchas de rocas** en laderas altas.
-//!
-//! La pendiente y la altura las calcula `TerrainGenerator` sobre una **rejilla de
-//! muestras con padding** (una sola pasada), no re-muestreando `height()` por
-//! candidato.
+//! Los arboles se movieron a [`super::trees`] (MEGA PROMPT 1, Fase D): su
+//! decision es ahora una funcion pura por coordenada global con copa
+//! procedimental. Aqui queda la decoracion de rocas en laderas altas, tambien
+//! por reglas (condiciones sobre la muestra + pendiente + probabilidad).
 
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 
 use super::TerrainSample;
 use crate::world::terrain::Biome;
 
-/// Escala del ruido de agrupacion (bosques).
-const CLUSTER_SCALE: f64 = 0.018;
 /// Escala del ruido de manchas de roca.
 const ROCK_SCALE: f64 = 0.05;
 
 /// Que coloca una regla.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DecorationKind {
-    /// Arbol (tronco + copa).
-    Tree,
     /// Roca/boulder sobre la superficie.
     Boulder,
 }
@@ -50,93 +37,35 @@ pub struct DecorationRule {
     pub max_humidity: f32,
     /// No aparece si la proximidad al cauce de un rio supera esto (`0` = ignora).
     pub max_river: f32,
-    /// Umbral del ruido de agrupacion: bosques (arboles) o manchas de roca.
+    /// Umbral del ruido de agrupacion (manchas de roca).
     pub cluster: f32,
-    /// Probabilidad por columna elegible (solo `Boulder`; los arboles usan la
-    /// densidad de la **definicion del bioma**, `tree_density`).
+    /// Probabilidad por columna elegible.
     pub chance: f64,
 }
 
 /// Tabla de reglas. **El orden importa**: gana la primera que casa.
-pub const RULES: &[DecorationRule] = &[
-    // --- Arboles por bioma (densidad = `tree_density` del bioma) ---
-    DecorationRule {
-        name: "forest_tree",
-        kind: DecorationKind::Tree,
-        biomes: &[Biome::Forest],
-        min_height: 40,
-        max_height: 175,
-        max_slope: 1,
-        min_humidity: 0.35,
-        max_humidity: 1.0,
-        max_river: 0.35,
-        cluster: -0.05,
-        chance: 0.0,
-    },
-    DecorationRule {
-        name: "taiga_tree",
-        kind: DecorationKind::Tree,
-        biomes: &[Biome::Taiga],
-        min_height: 40,
-        max_height: 175,
-        max_slope: 1,
-        min_humidity: 0.35,
-        max_humidity: 1.0,
-        max_river: 0.35,
-        cluster: -0.10,
-        chance: 0.0,
-    },
-    DecorationRule {
-        name: "plains_tree",
-        kind: DecorationKind::Tree,
-        biomes: &[Biome::Plains],
-        min_height: 45,
-        max_height: 150,
-        max_slope: 1,
-        min_humidity: 0.25,
-        max_humidity: 0.70,
-        max_river: 0.35,
-        cluster: 0.15,
-        chance: 0.0,
-    },
-    DecorationRule {
-        name: "swamp_tree",
-        kind: DecorationKind::Tree,
-        biomes: &[Biome::Swamp],
-        min_height: 55,
-        max_height: 78,
-        max_slope: 1,
-        min_humidity: 0.6,
-        max_humidity: 1.0,
-        max_river: 0.5,
-        cluster: -0.2,
-        chance: 0.0,
-    },
-    // --- Rocas: laderas altas y pendientes moderadas ---
-    DecorationRule {
-        name: "mountain_boulder",
-        kind: DecorationKind::Boulder,
-        biomes: &[
-            Biome::Tundra,
-            Biome::Taiga,
-            Biome::Plains,
-            Biome::Savanna,
-            Biome::Desert,
-        ],
-        min_height: 88,
-        max_height: 255,
-        max_slope: 2,
-        min_humidity: 0.0,
-        max_humidity: 1.0,
-        max_river: 0.0,
-        cluster: 0.15,
-        chance: 0.10,
-    },
-];
+pub const RULES: &[DecorationRule] = &[DecorationRule {
+    name: "mountain_boulder",
+    kind: DecorationKind::Boulder,
+    biomes: &[
+        Biome::Tundra,
+        Biome::Taiga,
+        Biome::Plains,
+        Biome::Savanna,
+        Biome::Desert,
+    ],
+    min_height: 88,
+    max_height: 255,
+    max_slope: 2,
+    min_humidity: 0.0,
+    max_humidity: 1.0,
+    max_river: 0.0,
+    cluster: 0.15,
+    chance: 0.10,
+}];
 
 /// El decorador, determinista por semilla.
 pub struct Decorator {
-    clusters: Fbm<Perlin>,
     boulders: Fbm<Perlin>,
 }
 
@@ -144,10 +73,6 @@ impl Decorator {
     pub fn new(seed: u32) -> Self {
         let s = |k: u32| seed.wrapping_mul(0x9E37_79B9).wrapping_add(k);
         Self {
-            clusters: Fbm::<Perlin>::new(s(61))
-                .set_octaves(2)
-                .set_frequency(1.0)
-                .set_persistence(0.5),
             boulders: Fbm::<Perlin>::new(s(67))
                 .set_octaves(2)
                 .set_frequency(1.0)
@@ -165,9 +90,6 @@ impl Decorator {
         height: i32,
         slope: i32,
     ) -> Option<DecorationKind> {
-        let cluster =
-            self.clusters
-                .get([wx as f64 * CLUSTER_SCALE, wz as f64 * CLUSTER_SCALE]) as f32;
         for rule in RULES {
             if !rule.biomes.contains(&sample.biome) {
                 continue;
@@ -185,16 +107,6 @@ impl Decorator {
                 continue;
             }
             match rule.kind {
-                DecorationKind::Tree => {
-                    // Claro: si el ruido de agrupacion baja, no hay arbol.
-                    if cluster < rule.cluster {
-                        continue;
-                    }
-                    let density = sample.biome.tree_density();
-                    if density > 0.0 && hash01(wx, wz) < density {
-                        return Some(DecorationKind::Tree);
-                    }
-                }
                 DecorationKind::Boulder => {
                     // Mancha de rocas: ruido propio (solo se evalua si la regla
                     // llego hasta aqui, para no pagarlo en cada columna).
@@ -248,33 +160,6 @@ mod tests {
     }
 
     #[test]
-    fn los_bosques_tienen_mas_arboles_que_las_llanuras() {
-        let d = Decorator::new(13_371);
-        let forest = sample_for_test(Biome::Forest, 0.7, 70);
-        let plains = sample_for_test(Biome::Plains, 0.5, 70);
-        let count = |s: &TerrainSample| {
-            (0..80)
-                .flat_map(|x| (0..80).map(move |z| (x, z)))
-                .filter(|&(x, z)| d.decide(x, z, s, 70, 0) == Some(DecorationKind::Tree))
-                .count()
-        };
-        assert!(count(&forest) > count(&plains));
-    }
-
-    #[test]
-    fn hay_bosques_con_claros() {
-        // En un bosque, ni todos los sitios ni ninguno tienen arbol.
-        let d = Decorator::new(7);
-        let forest = sample_for_test(Biome::Forest, 0.7, 70);
-        let trees = (0..80)
-            .flat_map(|x| (0..80).map(move |z| (x, z)))
-            .filter(|&(x, z)| d.decide(x, z, &forest, 70, 0) == Some(DecorationKind::Tree))
-            .count();
-        assert!(trees > 0, "no hay arboles en el bosque");
-        assert!(trees < 80 * 80, "no hay claros");
-    }
-
-    #[test]
     fn aparecen_rocas_en_laderas_altas() {
         let d = Decorator::new(2_024);
         let high = sample_for_test(Biome::Tundra, 0.3, 130);
@@ -286,16 +171,14 @@ mod tests {
     }
 
     #[test]
-    fn no_hay_arboles_en_pendiente_fuerte() {
+    fn no_hay_rocas_en_pendiente_fuerte_ni_bajo() {
         let d = Decorator::new(99);
-        let forest = sample_for_test(Biome::Forest, 0.7, 70);
+        let high = sample_for_test(Biome::Tundra, 0.3, 130);
+        let low = sample_for_test(Biome::Tundra, 0.3, 40);
         for x in 0..40 {
             for z in 0..40 {
-                assert_ne!(
-                    d.decide(x, z, &forest, 70, 3),
-                    Some(DecorationKind::Tree),
-                    "arbol en pendiente en ({x},{z})"
-                );
+                assert_eq!(d.decide(x, z, &high, 130, 3), None, "roca en ladera");
+                assert_eq!(d.decide(x, z, &low, 40, 0), None, "roca bajo el umbral");
             }
         }
     }
@@ -304,10 +187,10 @@ mod tests {
     fn la_decoracion_es_determinista() {
         let a = Decorator::new(5);
         let b = Decorator::new(5);
-        let s = sample_for_test(Biome::Forest, 0.6, 80);
+        let s = sample_for_test(Biome::Tundra, 0.3, 120);
         for x in 0..40 {
             for z in 0..40 {
-                assert_eq!(a.decide(x, z, &s, 80, 0), b.decide(x, z, &s, 80, 0));
+                assert_eq!(a.decide(x, z, &s, 120, 1), b.decide(x, z, &s, 120, 1));
             }
         }
     }

@@ -153,13 +153,13 @@ impl Block {
         registry::definition(self).fluid.is_liquid()
     }
 
-    /// ¿Bloquea el paso del **agua** en la simulacion? Los solidos y la lava
-    /// (el agua no fluye dentro de la lava; la reaccion agua+lava queda para
-    /// mas adelante).
+    /// ¿Bloquea el paso del **agua** en la simulacion? Los solidos, la lava y los
+    /// bloques **visibles no liquidos** (hojas y antorcha): el agua no los
+    /// sustituye. Los liquidos (agua, lava) no bloquean el agua.
     #[inline]
     pub fn blocks_fluid(self) -> bool {
         let def = registry::definition(self);
-        def.solid || def.fluid == FluidKind::Lava
+        def.solid || def.fluid == FluidKind::Lava || (def.visible && def.fluid == FluidKind::None)
     }
 
     /// Luz que **emite** el bloque (0..15). La antorcha emite 14, la lava 15.
@@ -225,6 +225,18 @@ mod tests {
         assert!(!Block::Leaves.is_solid());
         assert!(Block::Leaves.is_visible());
         assert!(Block::Grass.is_solid());
+    }
+
+    #[test]
+    fn hojas_y_antorcha_bloquean_el_agua_pero_el_agua_no() {
+        // Contrato (Fase E): el agua no sustituye hojas ni antorcha (visibles no
+        // liquidas), pero si fluye a traves de agua/aire.
+        assert!(Block::Leaves.blocks_fluid());
+        assert!(Block::Torch.blocks_fluid());
+        assert!(Block::Stone.blocks_fluid());
+        assert!(Block::Lava.blocks_fluid());
+        assert!(!Block::Water.blocks_fluid());
+        assert!(!Block::Air.blocks_fluid());
     }
 
     #[test]

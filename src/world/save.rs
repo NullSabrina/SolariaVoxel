@@ -84,7 +84,7 @@ pub const FORMAT_VERSION: u32 = 5;
 /// * v17: **decoracion sin flotantes** (Parte C, C5): los arboles se apoyan en el
 ///   techo **solido real** de la columna (una cueva bajo la superficie ya no deja
 ///   el tronco flotando), en ambos generadores.
-pub const GENERATOR_VERSION: u32 = 17;
+pub const GENERATOR_VERSION: u32 = 20;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";

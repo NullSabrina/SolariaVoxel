@@ -1084,6 +1084,12 @@ impl World {
             return;
         };
         let (x, y, z) = (local[0], local[1], local[2]);
+        // El agua **nunca** sustituye un bloque que la bloquea (solido, hoja,
+        // antorcha, lava): la simulacion ya evita esas celdas, pero esto lo
+        // garantiza de forma defensiva (2.2a).
+        if column.get(x, y, z).blocks_fluid() {
+            return;
+        }
         match f {
             Fluid::None => {
                 column.set_flow(x, y, z, 0);
@@ -1881,6 +1887,31 @@ mod tests {
         assert!(
             world.water_at([6, 101, 8]).is_water() || world.water_at([4, 101, 8]).is_water(),
             "el agua deberia acercarse a la lava"
+        );
+    }
+
+    #[test]
+    fn el_agua_no_borra_las_hojas() {
+        // Fase E (2.2a): una fuente de agua junto a una hoja no la sustituye.
+        let mut world = World::new(1, 0, vec![]);
+        world.update_streaming([8.0, 100.0, 8.0]);
+        for x in 2..14 {
+            world.set_block([x, 99, 8], Block::Stone); // suelo plano
+        }
+        world.set_block([6, 100, 8], Block::Leaves);
+        world.set_block([8, 100, 8], Block::Water);
+        for _ in 0..60 {
+            world.tick_water(100_000);
+        }
+        assert_eq!(
+            world.get_block([6, 100, 8]),
+            Block::Leaves,
+            "el agua borro la hoja"
+        );
+        assert_eq!(world.water_at([6, 100, 8]), Fluid::None);
+        assert!(
+            world.water_at([7, 100, 8]).is_water(),
+            "el agua deberia acercarse hasta la hoja"
         );
     }
 
