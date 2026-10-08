@@ -11,7 +11,9 @@
 
 pub mod inventory;
 pub mod lang;
+pub mod options;
 pub mod screens;
 
 pub use lang::{Lang, translate};
+pub use options::Options;
 pub use screens::{Screen, ScreenStack};

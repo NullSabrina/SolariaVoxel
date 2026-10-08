@@ -153,6 +153,10 @@ pub struct App {
     rename_target: Option<String>,
     /// Peticion de salida (se atiende tras procesar el evento).
     exit_requested: bool,
+    /// Opciones persistentes (video, juego, teclas).
+    options: crate::ui::Options,
+    /// Intervalo de autoguardado en segundos (de las opciones).
+    autosave_period: f32,
 }
 
 /// Distancia y altura de la camara en tercera persona.
@@ -188,10 +192,6 @@ const UI_SCALE: f32 = 2.0;
 /// del render. Es mas rapido que Minecraft (que usa 5 ticks = 0.25 s por paso)
 /// pero sin llegar a verse nervioso: cada paso mueve el agua un bloque.
 const WATER_PERIOD: f32 = 0.1;
-
-/// Periodo del **autoguardado** en segundo plano (segundos). El mundo se guarda
-/// sin bloquear el render.
-const AUTOSAVE_PERIOD: f32 = 300.0;
 
 /// Paso fijo de la simulacion del jugador (segundos). 120 Hz da margen a
 /// velocidades altas; el render puede ir a otro ritmo.
@@ -300,7 +300,7 @@ impl App {
 
             // Autoguardado en segundo plano (no bloquea el render).
             self.autosave_timer += frame_dt;
-            if self.autosave_timer >= AUTOSAVE_PERIOD {
+            if self.autosave_timer >= self.autosave_period {
                 self.autosave_timer = 0.0;
                 self.save_world();
             }
@@ -1061,9 +1061,10 @@ impl App {
     /// Vuelve atras desde un menu (Esc). `Title` es la base.
     fn menu_back(&mut self) {
         match self.screens.top() {
-            Screen::Pause => {
+            Screen::Pause | Screen::Options => {
                 self.screens.pop();
-                if !self.demo {
+                // Al cerrar la pausa (y no quedar menus) se recaptura el raton.
+                if self.screens.is_playing() && !self.demo {
                     self.lock_mouse();
                 }
             }
@@ -1092,13 +1093,17 @@ impl App {
         }
     }
 
-    /// Carga y juega el mundo `slug` (reconstruye el renderer).
+    /// Carga y juega el mundo `slug`. Si ya era el activo, solo cierra los menus.
     fn enter_world(&mut self, slug: String) {
-        // Si ya es el mundo activo, solo cierra los menus.
         if slug == self.world_slug && self.renderer.is_some() {
             self.resume_play();
             return;
         }
+        self.load_world(slug);
+    }
+
+    /// Carga `slug` reconstruyendo el renderer (aunque sea el activo).
+    fn load_world(&mut self, slug: String) {
         // Guarda el mundo actual en segundo plano (con su ruta) antes de cambiar;
         // el worker seguira vivo y escribira el mundo anterior mientras cargamos.
         if self.renderer.is_some() {
@@ -1129,7 +1134,12 @@ impl App {
         let Some(window) = self.window.clone() else {
             return;
         };
-        match Renderer::new(window, seed, restored) {
+        match Renderer::new(
+            window,
+            seed,
+            restored,
+            self.options.view_settings().with_env_overrides(),
+        ) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
                 eprintln!("[world] no se pudo crear el renderer: {e}");
@@ -1144,6 +1154,8 @@ impl App {
         }
         let mut camera = Camera::new(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
         camera.pitch_deg = -12.0;
+        camera.fov_y_deg = self.options.fov_deg;
+        camera.sensitivity_deg_per_px = self.options.mouse_sensitivity;
         if let Some(window) = self.window.as_ref() {
             let s = window.inner_size();
             camera.update_projection(s.width as f32 / s.height.max(1) as f32);
@@ -1168,7 +1180,7 @@ impl App {
             return vec!["Si, eliminar".into(), "Cancelar".into()];
         }
         match self.screens.top() {
-            Screen::Title => vec!["Un jugador".into(), "Salir".into()],
+            Screen::Title => vec!["Un jugador".into(), "Opciones".into(), "Salir".into()],
             Screen::WorldSelect => vec![
                 "Jugar".into(),
                 "Crear mundo".into(),
@@ -1184,8 +1196,23 @@ impl App {
                     vec!["Crear".into(), "Volver".into()]
                 }
             }
+            Screen::Options => {
+                let o = &self.options;
+                vec![
+                    format!("Distancia: {} chunks", o.render_radius),
+                    format!("Simulacion: {} chunks", o.sim_radius),
+                    format!("Niebla: {}", o.fog),
+                    format!("FOV: {:.0}", o.fov_deg),
+                    format!("Sensibilidad: {:.2}", o.mouse_sensitivity),
+                    format!("Idioma: {}", o.lang),
+                    format!("Autoguardado: {:.0} s", o.autosave_secs),
+                    format!("F3 al iniciar: {}", if o.show_f3 { "si" } else { "no" }),
+                    "Hecho".into(),
+                ]
+            }
             Screen::Pause => vec![
                 "Volver al juego".into(),
+                "Opciones".into(),
                 "Guardar mundo ahora".into(),
                 "Guardar y salir al titulo".into(),
             ],
@@ -1222,7 +1249,8 @@ impl App {
                     self.reload_worlds();
                     self.screens.replace(Screen::WorldSelect);
                 }
-                1 => self.exit_requested = true,
+                1 => self.screens.push(Screen::Options),
+                2 => self.exit_requested = true,
                 _ => {}
             },
             Screen::WorldSelect => {
@@ -1277,14 +1305,100 @@ impl App {
             },
             Screen::Pause => match i {
                 0 => self.resume_play(),
-                1 => self.save_world(),
-                2 => {
+                1 => self.screens.push(Screen::Options),
+                2 => self.save_world(),
+                3 => {
                     self.save_world();
                     self.screens.to_title();
                 }
                 _ => {}
             },
+            Screen::Options => self.options_action(i),
             Screen::Playing => {}
+        }
+    }
+
+    /// Accion de una fila de opciones (cicla el valor) o "Hecho".
+    fn options_action(&mut self, i: usize) {
+        let prev_radius = self.options.render_radius;
+        let prev_sim = self.options.sim_radius;
+        match i {
+            0 => {
+                self.options.render_radius = if self.options.render_radius >= 32 {
+                    2
+                } else {
+                    self.options.render_radius + 2
+                }
+            }
+            1 => {
+                self.options.sim_radius = if self.options.sim_radius >= 12 {
+                    1
+                } else {
+                    self.options.sim_radius + 1
+                }
+            }
+            2 => self.options.cycle_fog(),
+            3 => {
+                self.options.fov_deg = if self.options.fov_deg >= 110.0 {
+                    30.0
+                } else {
+                    self.options.fov_deg + 10.0
+                }
+            }
+            4 => {
+                self.options.mouse_sensitivity = if self.options.mouse_sensitivity >= 0.5 {
+                    0.02
+                } else {
+                    self.options.mouse_sensitivity + 0.04
+                }
+            }
+            5 => self.options.cycle_lang(),
+            6 => {
+                self.options.autosave_secs = if self.options.autosave_secs >= 900.0 {
+                    30.0
+                } else {
+                    self.options.autosave_secs + 60.0
+                }
+            }
+            7 => self.options.show_f3 = !self.options.show_f3,
+            8 => {
+                // "Hecho": vuelve a la pantalla anterior.
+                self.menu_back();
+                return;
+            }
+            _ => return,
+        }
+        self.options.clamp();
+        self.apply_options();
+        // Distancia de vista/simulacion requiere reconstruir el mundo.
+        if self.options.render_radius != prev_radius || self.options.sim_radius != prev_sim {
+            let slug = self.world_slug.clone();
+            self.load_world(slug);
+            self.screens.push(Screen::Options);
+        }
+    }
+
+    /// Aplica las opciones a la camara/idioma/autoguardado y las persiste.
+    fn apply_options(&mut self) {
+        self.lang = if self.options.lang == "en" {
+            crate::ui::Lang::En
+        } else {
+            crate::ui::Lang::Es
+        };
+        self.autosave_period = self.options.autosave_secs;
+        let (fov, sens) = (self.options.fov_deg, self.options.mouse_sensitivity);
+        if let Some(camera) = self.camera.as_mut() {
+            camera.fov_y_deg = fov;
+            camera.sensitivity_deg_per_px = sens;
+            if let Some(window) = self.window.as_ref() {
+                let s = window.inner_size();
+                camera.update_projection(s.width as f32 / s.height.max(1) as f32);
+            }
+            camera.update_view();
+        }
+        let path = self.world_base.join(crate::ui::options::OPTIONS_FILE);
+        if let Err(e) = self.options.save(&path) {
+            eprintln!("[options] no se pudo guardar: {e}");
         }
     }
 
@@ -1379,6 +1493,7 @@ impl App {
                     self.menu_action(0);
                 }
             }
+            Screen::Options => {}
             Screen::Playing => {}
         }
     }
@@ -1410,6 +1525,7 @@ impl App {
                 }
             }
             Screen::Pause => "PAUSA".to_string(),
+            Screen::Options => "OPCIONES".to_string(),
             Screen::Playing => String::new(),
         };
         let scale = UI_SCALE * 2.0;
@@ -1595,6 +1711,14 @@ impl ApplicationHandler for App {
         }
         self.world_base = base.clone();
         self.worlds = worlds;
+        // Opciones persistentes (video/juego/teclas) del archivo global.
+        self.options = crate::ui::Options::load(&base.join(crate::ui::options::OPTIONS_FILE));
+        self.autosave_period = self.options.autosave_secs;
+        self.lang = if self.options.lang == "en" {
+            crate::ui::Lang::En
+        } else {
+            crate::ui::Lang::Es
+        };
         if let Some(first) = self.worlds.first() {
             self.world_slug = first.slug.clone();
         }
@@ -1638,7 +1762,12 @@ impl ApplicationHandler for App {
                 player_pos
             };
 
-        match Renderer::new(window.clone(), seed, restored) {
+        match Renderer::new(
+            window.clone(),
+            seed,
+            restored,
+            self.options.view_settings().with_env_overrides(),
+        ) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
                 eprintln!("[engine] no se pudo iniciar el renderer: {e}");
@@ -1698,6 +1827,8 @@ impl ApplicationHandler for App {
         // por defecto. La fisica la posara sobre el terreno antes del primer frame.
         let mut camera = Camera::new(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
         camera.pitch_deg = -12.0;
+        camera.fov_y_deg = self.options.fov_deg;
+        camera.sensitivity_deg_per_px = self.options.mouse_sensitivity;
         let size = window.inner_size();
         camera.update_projection(size.width as f32 / size.height.max(1) as f32);
         camera.update_view();
@@ -1741,7 +1872,7 @@ impl ApplicationHandler for App {
         // Modo demo (SOLARIA_DEMO=1): escena fija para las capturas. La camara
         // queda congelada (ver `Self::demo`), asi la vista no se mueve antes de
         // la foto. El montaje vive en `engine::demo`.
-        self.show_stats = std::env::var("SOLARIA_STATS").is_ok();
+        self.show_stats = std::env::var("SOLARIA_STATS").is_ok() || self.options.show_f3;
         self.third_person = std::env::var("SOLARIA_THIRD").is_ok();
         self.demo = demo::is_active();
         if self.demo {
@@ -1796,6 +1927,11 @@ impl ApplicationHandler for App {
                 "pause" => {
                     let mut s = ScreenStack::with_playing();
                     s.push(Screen::Pause);
+                    s
+                }
+                "options" => {
+                    let mut s = ScreenStack::with_title();
+                    s.push(Screen::Options);
                     s
                 }
                 _ => self.screens.clone(),

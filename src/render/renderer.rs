@@ -312,6 +312,7 @@ impl Renderer {
         window: Arc<Window>,
         seed: u32,
         restored: Vec<(ChunkPos, ChunkRecord)>,
+        view: ViewSettings,
     ) -> Result<Self, RendererError> {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
@@ -386,10 +387,9 @@ impl Renderer {
             .collect();
         let char_pivots = body.iter().map(|p| p.pivot).collect();
 
-        // Distancia de vista/simulacion/niebla (SOLARIA_VIEW_RADIUS, SOLARIA_SIM_RADIUS,
-        // SOLARIA_FOG). La carga es circular y la niebla termina dentro del area
-        // cargada para disimular el borde.
-        let view = ViewSettings::from_env();
+        // Distancia de vista/simulacion/niebla ya resuelta por el llamador
+        // (`ViewSettings` desde las opciones + env). La carga es circular y la
+        // niebla termina dentro del area cargada para disimular el borde.
         let fog_start = view.fog_start();
         let fog_end = view.fog_end();
         println!(

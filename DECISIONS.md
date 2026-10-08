@@ -1,4 +1,4 @@
-﻿# Decisiones de diseÃ±o (DECISIONS.md)
+# Decisiones de diseÃ±o (DECISIONS.md)
 
 Registro de decisiones tecnicas de Solaria Voxel. Cada entrada explica **que**
 se decidio, **por que** y **que alternativas** se descartaron. Se anade una
@@ -3202,6 +3202,37 @@ miniaturas. La reasignacion de teclas y las opciones persistidas no estan.
 (serde/serde_json); env `SOLARIA_HOME`/`SOLARIA_SCREEN`. 319 tests; clippy limpio.
 Capturas `v0.42.0_{title,worlds,create,pause}.png`. `GENERATOR_VERSION`/
 `FORMAT_VERSION` intactos (16/5).
+
+## v0.43.1 - Opciones persistentes (video/juego/teclas)
+
+### 2026-10-07 - `options.json` con aplicacion en vivo y rebind sin conflictos
+
+**Decision.** `ui/options.rs` define `Options` (serde) persistido en
+`options.json` (global, escritura atomica): distancia de render/simulacion,
+niebla, FOV, sensibilidad, idioma, autoguardado y F3 al iniciar. `Options::load`
+tolera archivos ausentes/corruptos (defaults) y `clamp` acota rangos. La
+**reasignacion de teclas** (`rebind`) resuelve conflictos **intercambiando** las
+teclas de las dos acciones. La pantalla **Opciones** (desde titulo y pausa) cicla
+cada valor con el raton y aplica **en vivo** (la distancia reconstruye el mundo);
+`ViewSettings` se deriva de las opciones y admite overrides de entorno
+(`with_env_overrides`) para demos/capturas.
+
+**Motivo.** El Prompt 2 pide "opciones persistidas" y "teclas reasignadas sin
+conflictos silenciosos"; se separa la logica (testeable) del dibujo.
+
+**Alternativas descartadas.** Reescribir el renderer en cada cambio (solo se hace
+para distancia/simulacion). Guardar las opciones dentro del mundo (son globales,
+no por mundo).
+
+**Pendiente honesto.** La **pantalla de controles** (interfaz para reasignar) no
+esta; la logica (`Options::rebind` + conflictos) esta probada. Faltan tambien
+nine-slice y fuente con tildes en el render.
+
+**Consecuencia.** `ui/options.rs` (6 tests), `ui/screens.rs` (+`Options`),
+`world/view.rs` (`with_env_overrides`), `render/renderer.rs`
+(`new(..., view: ViewSettings)`), `engine/app.rs` (carga/aplicacion de opciones,
+pantalla y ruta de guardado). 325 tests; clippy limpio. Capturas
+`v0.43.1_{title,options}.png`. `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
 ## Plantilla para nuevas entradas
 

@@ -125,34 +125,39 @@ impl ViewSettings {
         (self.render_radius as f32).max(1.0) * CHUNK_SIZE as f32
     }
 
-    /// Lee los ajustes del entorno.
-    ///
-    /// - `SOLARIA_VIEW_RADIUS`: radio de render (alias historico).
-    /// - `SOLARIA_SIM_RADIUS`: radio de simulacion.
-    /// - `SOLARIA_FOG`: `off|far|normal|short`.
-    pub fn from_env() -> Self {
-        let mut view = Self::default();
+    /// Aplica overrides de entorno sobre estos ajustes (para demos/capturas):
+    /// `SOLARIA_VIEW_RADIUS`, `SOLARIA_SIM_RADIUS` y `SOLARIA_FOG`.
+    pub fn with_env_overrides(mut self) -> Self {
         if let Some(r) = std::env::var("SOLARIA_VIEW_RADIUS")
             .ok()
             .and_then(|s| s.parse::<i32>().ok())
         {
-            view.render_radius = r.clamp(2, 32);
+            self.render_radius = r.clamp(2, 32);
         }
         if let Some(r) = std::env::var("SOLARIA_SIM_RADIUS")
             .ok()
             .and_then(|s| s.parse::<i32>().ok())
         {
-            view.simulation_radius = r.clamp(1, 12);
+            self.simulation_radius = r.clamp(1, 12);
         }
         if let Ok(m) = std::env::var("SOLARIA_FOG") {
-            view.fog = match m.to_ascii_lowercase().as_str() {
+            self.fog = match m.to_ascii_lowercase().as_str() {
                 "off" | "0" => FogMode::Off,
                 "far" | "lejana" => FogMode::Far,
                 "short" | "corta" => FogMode::Short,
                 _ => FogMode::Normal,
             };
         }
-        view
+        self
+    }
+
+    /// Lee los ajustes del entorno (defaults + overrides).
+    ///
+    /// - `SOLARIA_VIEW_RADIUS`: radio de render (alias historico).
+    /// - `SOLARIA_SIM_RADIUS`: radio de simulacion.
+    /// - `SOLARIA_FOG`: `off|far|normal|short`.
+    pub fn from_env() -> Self {
+        Self::default().with_env_overrides()
     }
 
     /// Preset `low`: poca distancia.

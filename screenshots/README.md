@@ -102,3 +102,5 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.42.0_worlds.png` | Selector de mundos (lista + acciones). |
 | `v0.42.0_create.png` | Crear mundo (nombre + semilla). |
 | `v0.42.0_pause.png` | Menu de pausa (Esc). |
+| `v0.43.1_title.png` | Titulo con boton "Opciones". |
+| `v0.43.1_options.png` | Menu de opciones (distancia, niebla, FOV, idioma...). |

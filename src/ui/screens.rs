@@ -12,6 +12,8 @@ pub enum Screen {
     WorldSelect,
     /// Crear mundo (nombre + semilla).
     CreateWorld,
+    /// Opciones (video, juego, teclas).
+    Options,
     /// Jugando (mundo + HUD).
     Playing,
     /// Menu de pausa.
