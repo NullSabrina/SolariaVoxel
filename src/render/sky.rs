@@ -67,13 +67,14 @@ pub struct SkyPipeline {
 
 /// Lado de la textura del sol, en pixels.
 const SUN_TEX: u32 = 16;
-/// Lado de un frame de la luna (la tira tiene 8 frames).
-const MOON_FRAME: u32 = 16;
+/// Lado de la textura (superficie) de la luna.
+const MOON_TEX: u32 = 16;
 
-/// Rutas de los assets pintados en LibreSprite.
+/// Rutas de los assets (superficies por cara para el cubo; ver
+/// `examples/gen_celestial.rs`).
 mod assets {
     pub const SUN_PATH: &str = "assets/sun.png";
-    pub const MOON_PATH: &str = "assets/moon_phases.png";
+    pub const MOON_PATH: &str = "assets/moon.png";
 }
 
 /// Carga un PNG de `path` (RGBA8) o usa el generador procedural `fallback`.
@@ -133,23 +134,15 @@ fn create_texture(
     (texture, view)
 }
 
-/// Fallback procedural: disco solar radial (sin `assets/sun.png`).
+/// Fallback procedural: superficie solar moteada (sin `assets/sun.png`).
 fn sun_pixels() -> Vec<u8> {
     let mut px = vec![0u8; (SUN_TEX * SUN_TEX * 4) as usize];
-    let c = 7.5f32;
     for y in 0..SUN_TEX {
         for x in 0..SUN_TEX {
-            let d = ((x as f32 + 0.5 - c).powi(2) + (y as f32 + 0.5 - c).powi(2)).sqrt();
-            if d > 7.6 {
-                continue;
-            }
-            let (r, g, b) = if d <= 3.0 {
-                (255, 248, 220)
-            } else if d <= 5.2 {
-                (255, 214, 90)
-            } else {
-                (255, 150, 54)
-            };
+            let n = hash01(x, y, 11);
+            let r = 255u8;
+            let g = (224.0 + 24.0 * n) as u8;
+            let b = (70.0 + 110.0 * n) as u8;
             let i = ((y * SUN_TEX + x) * 4) as usize;
             px[i..i + 4].copy_from_slice(&[r, g, b, 255]);
         }
@@ -157,34 +150,44 @@ fn sun_pixels() -> Vec<u8> {
     px
 }
 
-/// Fallback procedural: tira de 8 fases (sin `assets/moon_phases.png`).
+/// Fallback procedural: superficie lunar con crateres (sin `assets/moon.png`).
 fn moon_pixels() -> Vec<u8> {
-    let (w, h) = (MOON_FRAME * 8, MOON_FRAME);
-    let mut px = vec![0u8; (w * h * 4) as usize];
-    for f in 0..8u32 {
-        let phase = f as f32 / 8.0;
-        let xph = (std::f32::consts::TAU * phase).cos();
-        for y in 0..h {
-            for x in 0..MOON_FRAME {
-                let u = (x as f32 + 0.5 - 7.5) / 7.6;
-                let v = (y as f32 + 0.5 - 7.5) / 7.6;
-                let r = (u * u + v * v).sqrt();
-                if r > 1.0 {
-                    continue;
+    let craters: [(f32, f32, f32); 5] = [
+        (3.5, 4.5, 2.2),
+        (11.0, 3.0, 1.6),
+        (7.0, 9.5, 2.6),
+        (13.0, 12.0, 1.4),
+        (2.5, 12.5, 1.8),
+    ];
+    let mut px = vec![0u8; (MOON_TEX * MOON_TEX * 4) as usize];
+    for y in 0..MOON_TEX {
+        for x in 0..MOON_TEX {
+            let mut v = 170.0 + 26.0 * hash01(x, y, 7);
+            for (cx, cy, cr) in craters {
+                let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                if d < cr {
+                    v -= 46.0 * (1.0 - d / cr);
+                } else if d < cr + 1.0 {
+                    v += 12.0;
                 }
-                let srf = (1.0 - v * v).max(0.0).sqrt();
-                let lit = if phase <= 0.5 {
-                    u > xph * srf
-                } else {
-                    u < -xph * srf
-                };
-                let (r8, g8, b8) = if lit { (230, 230, 220) } else { (18, 18, 26) };
-                let i = ((y * w + f * MOON_FRAME + x) * 4) as usize;
-                px[i..i + 4].copy_from_slice(&[r8, g8, b8, 255]);
             }
+            let v = v.clamp(0.0, 255.0) as u8;
+            let i = ((y * MOON_TEX + x) * 4) as usize;
+            px[i..i + 4].copy_from_slice(&[v, v, (v as f32 * 0.96) as u8, 255]);
         }
     }
     px
+}
+
+/// Hash determinista de una celda a `[0, 1)` (fallback del cielo).
+fn hash01(x: u32, y: u32, salt: u32) -> f32 {
+    let mut h = salt ^ x.wrapping_mul(0x9E37_79B9) ^ y.wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7FEB_352D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846C_A68B);
+    h ^= h >> 16;
+    (h & 0xFFFF) as f32 / 65536.0
 }
 
 impl SkyPipeline {
@@ -243,7 +246,7 @@ impl SkyPipeline {
             ],
         });
 
-        // Texturas pintadas en LibreSprite (con fallback procedural si faltan).
+        // Texturas (superficies por cara para el cubo) con fallback procedural.
         let (sun_texture, sun_view) = create_texture(
             device,
             queue,
@@ -256,9 +259,9 @@ impl SkyPipeline {
             device,
             queue,
             "sky.moon",
-            MOON_FRAME * 8,
-            MOON_FRAME,
-            &load_or(assets::MOON_PATH, MOON_FRAME * 8, MOON_FRAME, moon_pixels),
+            MOON_TEX,
+            MOON_TEX,
+            &load_or(assets::MOON_PATH, MOON_TEX, MOON_TEX, moon_pixels),
         );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sky.sampler"),
@@ -411,9 +414,6 @@ mod tests {
     #[test]
     fn los_fallbacks_procedurales_tienen_el_tamano_esperado() {
         assert_eq!(sun_pixels().len(), (SUN_TEX * SUN_TEX * 4) as usize);
-        assert_eq!(
-            moon_pixels().len(),
-            (MOON_FRAME * 8 * MOON_FRAME * 4) as usize
-        );
+        assert_eq!(moon_pixels().len(), (MOON_TEX * MOON_TEX * 4) as usize);
     }
 }

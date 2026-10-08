@@ -11,11 +11,16 @@
 | `paleta_master.gpl` | - | Paleta maestra de LibreSprite (documenta los colores del atlas). |
 | `paleta_medieval.gpl` | - | Paleta medieval de LibreSprite. |
 | `models/solaria_torch.bbmodel` | - | Modelo fuente Blockbench de la antorcha. |
-| `sun.png` | 16x16 | Cara del sol (disco radial emisivo). Lo carga `render/sky.rs`; si falta, genera un sol procedural. Fuente editable: `src/sun.aseprite`. |
-| `moon_phases.png` | 128x16 | Tira de **8 fases lunares** (16x16 cada una; alpha fuera del disco). Fallback procedural si falta. Fuente: `src/moon_phases.aseprite`. |
-| `star.png` | 8x8 | Estrella de 4 puntas (reserva para la Via Lactea/sprite de estrella; las estrellas del cielo son procedurales). Fuente: `src/star.aseprite`. |
-| `src/*.aseprite` | - | Fuentes editables en LibreSprite de `sun.png`, `moon_phases.png` y `star.png`. |
-| `src/models/solaria_celestial.bbmodel` | - | Modelo fuente Blockbench del "rig celeste" (cubo-sol ~22 u, cubo-luna ~17 u, giro fijo yaw 30 grados / pitch -20). Es **referencia de proporciones**: el sol/luna se dibujan por interseccion rayo-caja en `render/sky.wgsl` (sin texturas), con las medidas reflejadas en `render/sky.rs`. |
+| `sun.png` | 16x16 | **Superficie** del cubo-sol (amarillo moteado emisivo). La carga `render/sky.rs`; si falta, fallback procedural. Regenerable: `cargo run --example gen_celestial`. |
+| `moon.png` | 16x16 | **Superficie** del cubo-luna (gris con crateres). La fase se aplica en el shader sobre el cubo. Fallback procedural si falta. Regenerable: `cargo run --example gen_celestial`. |
+| `star.png` | 8x8 | Estrella de 4 puntas (reserva; las estrellas del cielo son procedurales). Fuente: `src/star.aseprite`. |
+| `src/*.aseprite` | - | Fuentes editables en LibreSprite de las versiones **anteriores** (sprite 2D): `sun.aseprite`, `star.aseprite`. |
+| `src/models/solaria_celestial.bbmodel` | - | Modelo fuente Blockbench del "rig celeste" (cubo-sol ~22 u, cubo-luna ~17 u, giro fijo yaw 30 grados / pitch -20). Es **referencia de proporciones**; el sol/luna se dibujan por interseccion rayo-caja con estas superficies en `render/sky.wgsl`, con las medidas en `render/sky.rs`. |
+
+`sun.png`/`moon.png` son **superficies por cara** (no discos 2D): se aplican a las
+6 caras del cubo y el sombreado por cara + la fase dan la forma. Las fuentes
+`.aseprite` que quedan son de la version anterior (sprite 2D con disco), conservadas
+por trazabilidad.
 
 Regenerar el atlas (`tools/gen_atlas_final.py`) reproduce `atlas.png` byte a byte
 desde las matrices embebidas; los `.gpl` y los sprites son la referencia de

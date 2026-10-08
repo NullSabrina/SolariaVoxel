@@ -111,3 +111,5 @@ ejecutable en modo demo (ver `README.md`).
 | `v0.44.1_graph_density.png` | Mundo graph con campo de densidad 3D (cuevas/voladizos). |
 | `v0.44.2_graph_climate.png` | Mundo graph con clima (temperatura/lluvia) del grafo -> biomas. |
 | `graph_preview_13371.png` | Preview offline del grafo (mapa de altura + corte de densidad). |
+| `v0.44.4_sun_cube_tex.png` | Sol como cubo 3D con superficie moteada (textura por cara). |
+| `v0.44.4_moon_cube_tex.png` | Luna como cubo 3D con crateres y fase. |

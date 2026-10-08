@@ -1,11 +1,12 @@
-// Shader del cielo (v0.31.2).
+// Shader del cielo (v0.44.4).
 //
 // Se dibuja como un **triangulo a pantalla completa** sin vertex buffer y sin
 // escribir profundidad: el mundo lo tapa despues. El fragment reconstruye la
 // direccion de mirada, pinta el gradiente cenit <-> horizonte, el sol y la luna
-// como **discos texturizados** orientados a la camara (arte de LibreSprite:
-// `sun.png`, `moon_phases.png`) con giro propio, y un campo de **estrellas**
-// determinista por hash. Los colores llegan ya resueltos desde la CPU (lineales).
+// como **cubos 3D** (interseccion rayo-caja orientada) con las **texturas** de
+// LibreSprite (`sun.png`, `moon_phases.png`) en sus caras, y un campo de
+// **estrellas** determinista por hash. Los colores llegan ya resueltos desde la
+// CPU (lineales).
 
 struct SkyUniforms {
     forward: vec3<f32>,
@@ -46,6 +47,8 @@ var sky_samp: sampler;
 
 const PI: f32 = 3.14159265;
 const BODY_DIST: f32 = 100.0;
+const BODY_YAW: f32 = 0.52; // ~30 grados
+const BODY_PITCH: f32 = -0.34; // ~-20 grados
 
 struct VertexOutput {
     @builtin(position) clip: vec4<f32>,
@@ -78,44 +81,77 @@ fn hash33(p: vec3<f32>) -> vec3<f32> {
     return fract((q + d) * vec3<f32>(q.z, q.x, q.y));
 }
 
+fn rot_y(a: f32) -> mat3x3<f32> {
+    let s = sin(a);
+    let c = cos(a);
+    return mat3x3<f32>(vec3<f32>(c, 0.0, -s), vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(s, 0.0, c));
+}
+
+fn rot_x(a: f32) -> mat3x3<f32> {
+    let s = sin(a);
+    let c = cos(a);
+    return mat3x3<f32>(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, c, s), vec3<f32>(0.0, -s, c));
+}
+
 struct BodyHit {
     hit: f32,
-    uv: vec2<f32>,
+    normal: vec3<f32>,
+    local: vec3<f32>,
 };
 
-// Interseccion rayo-plano del **billboard** del cuerpo (un cuadrado de lado
-// `2*D*tan(ang)` centrado en `center_dir * D`, mirando a la camara, girado por
-// `self_spin`). Devuelve UV en 0..1 (alpha fuera del disco la resuelve el arte).
+// Interseccion rayo-caja orientada (cubo centrado en `center_dir * BODY_DIST`).
 fn body_hit(rd: vec3<f32>, center_dir: vec3<f32>, ang: f32) -> BodyHit {
     let center = center_dir * BODY_DIST;
-    let n = normalize(-center_dir);
     let h = BODY_DIST * tan(ang);
+    // R = Ry(self_spin) * Ry(yaw) * Rx(pitch); su traspuesta pasa a espacio local.
+    let r = rot_y(sky.self_spin) * rot_y(BODY_YAW) * rot_x(BODY_PITCH);
+    let rt = transpose(r);
+    let ro = rt * (-center);
+    let rdd = rt * rd;
+    let inv = 1.0 / rdd;
+    let ta = (-h - ro) * inv;
+    let tb = (h - ro) * inv;
+    let tmin = min(ta, tb);
+    let tmax = max(ta, tb);
+    let tenter = max(max(tmin.x, tmin.y), tmin.z);
+    let texit = min(min(tmax.x, tmax.y), tmax.z);
+
     var out: BodyHit;
     out.hit = 0.0;
-    out.uv = vec2<f32>(0.0);
-    let denom = dot(rd, n);
-    if (abs(denom) < 1.0e-6) {
+    out.normal = vec3<f32>(0.0, 1.0, 0.0);
+    out.local = vec3<f32>(0.0);
+    if (texit < max(tenter, 0.0)) {
         return out;
     }
-    let t = dot(center, n) / denom;
-    if (t <= 0.0) {
-        return out;
-    }
-    let rel = rd * t - center;
-    let right0 = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), n));
-    let up0 = cross(n, right0);
-    let sa = sin(sky.self_spin);
-    let ca = cos(sky.self_spin);
-    let r = right0 * ca + up0 * sa;
-    let u = -right0 * sa + up0 * ca;
-    let su = dot(rel, r);
-    let sv = dot(rel, u);
-    if (abs(su) > h || abs(sv) > h) {
-        return out;
+    let p = ro + rdd * tenter;
+    let ap = abs(p);
+    var n = vec3<f32>(0.0, 1.0, 0.0);
+    if (ap.x >= ap.y && ap.x >= ap.z) {
+        n = vec3<f32>(sign(p.x), 0.0, 0.0);
+    } else if (ap.y >= ap.z) {
+        n = vec3<f32>(0.0, sign(p.y), 0.0);
+    } else {
+        n = vec3<f32>(0.0, 0.0, sign(p.z));
     }
     out.hit = 1.0;
-    out.uv = vec2<f32>(su / (2.0 * h) + 0.5, 0.5 - sv / (2.0 * h));
+    out.normal = normalize(r * n);
+    out.local = p / h;
     return out;
+}
+
+// UV de la cara golpeada (0..1), eligiendo el plano segun el eje dominante de
+// `local` para que el disco no se estire en las caras laterales.
+fn face_uv(local: vec3<f32>) -> vec2<f32> {
+    let a = abs(local);
+    var uv: vec2<f32>;
+    if (a.x >= a.y && a.x >= a.z) {
+        uv = vec2<f32>(local.z, local.y);
+    } else if (a.y >= a.z) {
+        uv = vec2<f32>(local.x, local.z);
+    } else {
+        uv = vec2<f32>(local.x, local.y);
+    }
+    return clamp(uv * 0.5 + 0.5, vec2<f32>(0.0), vec2<f32>(1.0));
 }
 
 // Devuelve rgb del cuerpo en .rgb y cobertura en .a (con fade al horizonte).
@@ -124,10 +160,13 @@ fn sun_body(rd: vec3<f32>) -> vec4<f32> {
     if (hit.hit < 0.5) {
         return vec4<f32>(0.0);
     }
-    let tex = textureSample(sun_tex, sky_samp, hit.uv);
+    let tex = textureSample(sun_tex, sky_samp, face_uv(hit.local));
+    let shade = 0.6 + 0.4 * max(hit.normal.y, 0.0);
     let fade = smoothstep(-sky.sun_ang_radius - 0.03, -sky.sun_ang_radius + 0.03, sky.sun_dir.y);
+    // Fuera del disco (alpha 0) la cara es del color del sol; dentro, la textura.
     // Emisivo: se aclara por encima de 1 para dar un nucleo caliente.
-    return vec4<f32>(tex.rgb * 2.1, tex.a * fade);
+    let base = mix(sky.sun_color, tex.rgb, tex.a);
+    return vec4<f32>(base * (shade * 2.0 + 0.3), fade);
 }
 
 fn moon_body(rd: vec3<f32>) -> vec4<f32> {
@@ -135,11 +174,22 @@ fn moon_body(rd: vec3<f32>) -> vec4<f32> {
     if (hit.hit < 0.5) {
         return vec4<f32>(0.0);
     }
-    // La tira de fases es 8 x (16x16); elegimos el frame por `moon_phase`.
-    let frame = floor(sky.moon_phase);
-    let tex = textureSample(moon_tex, sky_samp, vec2<f32>((frame + hit.uv.x) / 8.0, hit.uv.y));
+    let shade = 0.7 + 0.3 * max(hit.normal.y, 0.0);
+    // Albedo lunar (crateres) en la cara del cubo.
+    let albedo = textureSample(moon_tex, sky_samp, face_uv(hit.local)).rgb;
+    // Fase: terminador a lo largo de la cara local (sobre el cubo).
+    let p = fract(sky.moon_phase / 8.0);
+    let pa = p * 2.0 * PI;
+    let lit = 0.5 * (1.0 - cos(pa));
+    var u = hit.local.x;
+    if (sin(pa) < 0.0) {
+        u = -u;
+    }
+    let term = 1.0 - 2.0 * lit;
+    let s = smoothstep(term - 0.25, term + 0.25, u);
+    let base = albedo * mix(0.10, 1.0, s) * shade;
     let fade = smoothstep(-sky.moon_ang_radius - 0.03, -sky.moon_ang_radius + 0.03, sky.moon_dir.y);
-    return vec4<f32>(tex.rgb, tex.a * fade);
+    return vec4<f32>(base, fade);
 }
 
 // Campo de estrellas determinista: cada celda de una rejilla esferica puede
@@ -182,16 +232,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let tgrad = smoothstep(0.0, 1.0, pow(h, sky.exponent));
     var col = mix(horizon, sky.zenith, tgrad);
 
-    // Halo solar: lobulo de Mie hacia adelante (Henyey-Greenstein, g < 1), que
-    // concentra la luz alrededor del sol y deja un halo calido cerca del horizonte.
+    // Halo solar: lobulo de Mie hacia adelante (Henyey-Greenstein, g < 1).
     let cos_sun = dot(dir, sky.sun_dir);
     let g = 0.76;
-    let mu = cos_sun;
-    let hg = (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
+    let hg = (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * cos_sun, 1.5));
     col += sky.sun_color * (hg * sky.sun_glow * 0.5);
 
-    // Cinturon de Venus: banda rosa sobre la sombra de la Tierra, en el lado
-    // opuesto al sol, poco despues del atardecer / antes del amanecer.
+    // Cinturon de Venus: banda rosa sobre la sombra de la Tierra, lado anti-sol.
     let anti = 1.0 - towards_sun;
     let band = exp(-pow((dir.y - 0.06) / 0.045, 2.0));
     col += vec3<f32>(0.85, 0.30, 0.55) * (band * sky.belt * anti * 0.35);
@@ -200,8 +247,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let above = smoothstep(-0.05, 0.2, dir.y);
     col += vec3<f32>(star_field(dir, sky.time) * sky.star_vis * above * 0.9);
 
-    // Cuerpos celestes: discos texturizados, con blending por alpha (fuera del
-    // disco se ve el cielo).
+    // Cuerpos celestes (cubos 3D texturizados).
     let sun = sun_body(dir);
     col = mix(col, sun.rgb, sun.a);
     let moon = moon_body(dir);

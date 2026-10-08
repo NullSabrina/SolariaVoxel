@@ -3406,6 +3406,32 @@ por esquinas de la huella: el chequeo del techo real + `headroom` ya cubre el ca
 336 tests; clippy limpio. Captura `screenshots/graph_preview_13371.png`.
 `FORMAT_VERSION` intacto (5).
 
+## v0.44.4 - Sol y luna como cubos con superficies nuevas
+
+### 2026-10-08 - Vuelta al cubo (ray-caja) con texturas por cara
+
+**Decision.** El sol y la luna vuelven a ser **cubos 3D** (interseccion rayo-caja
+orientada, sombreado por cara, giro propio), como en v0.31.0, pero con **texturas
+nuevas pensadas para un cubo** (no los discos 2D del sprite): `assets/sun.png`
+(superficie amarilla moteada emisiva) y `assets/moon.png` (superficie gris con
+**crateres**). La **fase lunar** se aplica como terminador analitico sobre el
+albedo del cubo (`moon_phase`), y las caras se mapean con `face_uv` (UV por eje
+dominante). Texturas reproducibles: `cargo run --example gen_celestial`; el shader
+tiene **fallback procedural** (superficies equivalentes en `render/sky.rs`).
+
+**Motivo.** El usuario prefirio el **cubo** (el billboard de sprite se veia muy
+pixelado) y pidio texturas propias del cubo (los discos eran para un sprite 2D).
+
+**Alternativas descartadas.** Mantener el billboard (descartado por el usuario).
+Reusar `moon_phases.png` (8 frames) en el cubo: mostraba el disco en cada cara
+("varias lunas"). Cubemap por cara: innecesario; una superficie por cara basta.
+
+**Consecuencia.** `render/sky.wgsl` (cubo + texturas + fase), `render/sky.rs`
+(`moon.png` 16x16, fallbacks de superficie), `examples/gen_celestial.rs`,
+`assets/sun.png`/`assets/moon.png`; se retira `moon_phases.png`. 336 tests; clippy
+limpio. Capturas `v0.44.4_{sun,moon}_cube_tex.png`.
+`GENERATOR_VERSION`/`FORMAT_VERSION` intactos (17/5).
+
 ## Plantilla para nuevas entradas
 
 ```

@@ -8,30 +8,26 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.44.3` — Worldgen con grafo (altura, densidad, clima) + C5/C6
+## Estado actual: `v0.44.4` — Sol y luna como cubos texturizados
 
-- **Decoración sin flotantes** (`v0.44.3`, C5): los árboles se apoyan en el techo
-  **sólido real** de la columna (una cueva bajo la superficie ya no deja el tronco
-  flotando), en ambos generadores; test de **5 semillas** sin flotantes.
-  `GENERATOR_VERSION → 17` (el relieve legacy cambia muy poco).
-- **Preview del grafo** (`v0.44.3`, C6): `cargo run --example graph_preview` exporta
-  un PNG con el mapa de altura + un corte vertical de densidad del grafo.
-- **Clima como canales del grafo** (`v0.44.2`, C4): temperatura y lluvia del grafo
-  eligen el bioma (`biomes::select`).
-- **Campo de densidad 3D** (`v0.44.1`, C2): retícula 4×4×4 + interpolación
-  trilineal; cuevas/túneles sin islas flotantes.
-- **Grafo + coexistencia** (`v0.44.0`, C1/C3): `GeneratorKind::{Legacy16, Graph}`
-  en `level.json` (sin migrar el binario). Grafo serializable a **JSON**. Mundos
-  nuevos: `SOLARIA_GENERATOR=graph`.
+- **Sol y luna = cubos 3D con texturas** (`v0.44.4`): vuelven a ser **cubos**
+  (intersección rayo-caja, sombreado por cara) pero con **superficies por cara**
+  nuevas (no discos 2D): sol amarillo moteado emisivo (`assets/sun.png`) y luna gris
+  con **cráteres** (`assets/moon.png`) + **fase** aplicada en el shader. Texturas
+  reproducibles con `cargo run --example gen_celestial`. Fallback procedural.
+- **Decoración sin flotantes** (`v0.44.3`, C5) y **preview del grafo** (C6).
+- **Grafo de densidad** (`v0.44.0`–`v0.44.2`, C1–C4): `GeneratorKind` en
+  `level.json` (coexistencia), densidad 3D en retícula 4×4×4 + interpolación,
+  clima (temperatura/lluvia) como canales del grafo. Mundos nuevos con
+  `SOLARIA_GENERATOR=graph`.
 - **Fix**: la luz de bloque no propaga a columnas no cargadas.
 - **Fuente con tildes** (`v0.43.3`), **Opciones/Controles** (`v0.43.1`/`v0.43.2`),
-  **mundos múltiples y pantallas** (`v0.42.0`), **astros texturizados** (`v0.35.0`),
-  **UI creativa** (`v0.41.0`), **distancia de vista** (`v0.33.0`) y
-  **cielo/atmosfera** (`v0.30`–`v0.31.1`).
-- **Pendiente honesto**: ríos/acuífero en el camino graph, toolkit nine-slice,
+  **mundos múltiples y pantallas** (`v0.42.0`), **UI creativa** (`v0.41.0`),
+  **distancia de vista** (`v0.33.0`) y **cielo/atmosfera** (`v0.30`–`v0.31.1`).
+- **Pendiente honesto**: ríos/acuífero en el camino graph; toolkit nine-slice;
   `sky_physical` opcional.
 
-`GENERATOR_VERSION = 17` (subió por C5) · `FORMAT_VERSION = 5`.
+`GENERATOR_VERSION = 17` · `FORMAT_VERSION = 5`.
 
 `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5).
 
@@ -167,6 +163,12 @@ Preview del **grafo de densidad** (altura + corte de densidad, offline):
 
 ```bash
 cargo run --release --example graph_preview -- 13371 384 4
+```
+
+Regenerar las **texturas del cubo** del sol/luna (`assets/sun.png`, `assets/moon.png`):
+
+```bash
+cargo run --example gen_celestial
 ```
 
 Capturas:
