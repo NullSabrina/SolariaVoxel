@@ -1,17 +1,15 @@
-//! Textura de la **interfaz** (hotbar e inventario).
+//! Textura de la **interfaz** (hotbar, inventario, botones, mirilla).
 //!
-//! El estilo sigue la referencia del usuario (opcion D, colores medidos del
-//! PNG): un marco de **madera** (`#4E351E`) con ranuras **hundidas** de tonos
-//! marrones (`#1C0B02/#2B190C/#352011/#311C0F`).
-//!
-//! La textura se **pinta en LibreSprite** (`assets/gui.png`, 256x160) y se carga
-//! con [`load_pixels`]; el procedural de [`build_pixels`] queda como fallback
-//! sin assets (mismos tonos, mismo layout de regiones).
+//! Estilo Minecraft: **bisel** de 1 px (luz arriba-izquierda, sombra
+//! abajo-derecha), ranuras hundidas y botones con 4 estados (normal/hover/
+//! pulsado/desactivado). El arte se **pinta en LibreSprite** (`assets/gui.png`,
+//! 256x256) con el script `tools/gen_gui.js`; el manifiesto de regiones vive en
+//! `assets/gui.json`. El procedural de [`build_pixels`] es el fallback sin assets.
 
 /// Ancho de la textura de la interfaz.
 pub const GUI_W: u32 = 256;
 /// Alto de la textura de la interfaz.
-pub const GUI_H: u32 = 160;
+pub const GUI_H: u32 = 256;
 
 /// Lado de una ranura, en pixels.
 pub const SLOT: u32 = 20;
@@ -39,6 +37,20 @@ pub const SLOT_REGION: Region = Region {
     w: SLOT,
     h: SLOT,
 };
+/// Ranura bajo el cursor (hover).
+pub const SLOT_HOVER: Region = Region {
+    x: 20,
+    y: 24,
+    w: SLOT,
+    h: SLOT,
+};
+/// Resalte de la ranura seleccionada.
+pub const SELECTION: Region = Region {
+    x: 40,
+    y: 24,
+    w: SLOT,
+    h: SLOT,
+};
 /// Fondo del panel de inventario.
 pub const PANEL: Region = Region {
     x: 0,
@@ -46,12 +58,33 @@ pub const PANEL: Region = Region {
     w: 200,
     h: 76,
 };
-/// Resalte de la ranura seleccionada (marco claro + tinte translucido).
-pub const SELECTION: Region = Region {
+/// Boton en estado normal.
+pub const BUTTON: Region = Region {
     x: 0,
-    y: 126,
-    w: SLOT,
-    h: SLOT,
+    y: 128,
+    w: 200,
+    h: 20,
+};
+/// Boton bajo el cursor.
+pub const BUTTON_HOVER: Region = Region {
+    x: 0,
+    y: 150,
+    w: 200,
+    h: 20,
+};
+/// Boton pulsado.
+pub const BUTTON_PRESSED: Region = Region {
+    x: 0,
+    y: 172,
+    w: 200,
+    h: 20,
+};
+/// Boton desactivado.
+pub const BUTTON_DISABLED: Region = Region {
+    x: 0,
+    y: 194,
+    w: 200,
+    h: 20,
 };
 /// Flecha de crafteo (rejilla -> resultado), estilo pergamino.
 pub const ARROW: Region = Region {
@@ -67,11 +100,25 @@ pub const DIM: Region = Region {
     w: 8,
     h: 8,
 };
+/// Mirilla (crosshair).
+pub const CROSSHAIR: Region = Region {
+    x: 204,
+    y: 90,
+    w: 15,
+    h: 15,
+};
+/// Pestana de categoria del inventario.
+pub const TAB: Region = Region {
+    x: 204,
+    y: 112,
+    w: 40,
+    h: 14,
+};
 
 /// Ruta de la textura de interfaz en disco (pintada en LibreSprite).
 pub const GUI_PATH: &str = "assets/gui.png";
 
-/// Carga `assets/gui.png` (RGBA8 256x160). Si no existe o no encaja, devuelve
+/// Carga `assets/gui.png` (RGBA8 256x256). Si no existe o no encaja, devuelve
 /// el procedural de [`build_pixels`].
 pub fn load_pixels() -> Vec<u8> {
     match crate::world::atlas::load_png_rgba(GUI_PATH, GUI_W, GUI_H) {
@@ -90,24 +137,35 @@ pub fn load_pixels() -> Vec<u8> {
 pub fn build_pixels() -> Vec<u8> {
     let mut px = vec![0u8; (GUI_W * GUI_H * 4) as usize];
 
-    // 9 ranuras en fila, con un marco de madera rodeandolas.
+    // Hotbar: marco + 9 ranuras.
+    bevel(&mut px, HOTBAR.x, HOTBAR.y, HOTBAR.w, HOTBAR.h, WOOD, BEVEL_LIGHT, DARK, None);
     for i in 0..9 {
-        draw_slot(&mut px, HOTBAR.x + 1 + i * SLOT, HOTBAR.y + 1);
+        let sx = HOTBAR.x + 1 + i * SLOT;
+        bevel(&mut px, sx, HOTBAR.y + 1, SLOT, SLOT, INNER, DARK, WOOD, Some(DARK));
     }
-    draw_hotbar_frame(&mut px);
-
-    // Ranura suelta.
-    draw_slot(&mut px, SLOT_REGION.x, SLOT_REGION.y);
-
-    // Panel del inventario: marco + interior.
-    draw_panel(&mut px);
-
-    // Resalte de la ranura seleccionada.
-    draw_selection(&mut px);
+    // Ranuras sueltas: normal, hover, seleccionada.
+    bevel(&mut px, SLOT_REGION.x, SLOT_REGION.y, SLOT, SLOT, INNER, DARK, WOOD, Some(DARK));
+    bevel(&mut px, SLOT_HOVER.x, SLOT_HOVER.y, SLOT, SLOT, SLOT_HOVER_FILL, DARK, WOOD, Some(DARK));
+    bevel(&mut px, SELECTION.x, SELECTION.y, SLOT, SLOT, SELECTION_FILL, [255, 248, 210, 255], [150, 130, 80, 255], Some(DARK));
+    // Panel de inventario.
+    bevel(&mut px, PANEL.x, PANEL.y, PANEL.w, PANEL.h, INNER, WOOD, DARK, Some(DARK));
+    // Botones: normal, hover, pulsado, desactivado.
+    let btn = [
+        (BUTTON, [110, 110, 110, 255], [168, 168, 168, 255], [52, 52, 52, 255]),
+        (BUTTON_HOVER, [126, 126, 150, 255], [190, 190, 210, 255], [60, 60, 74, 255]),
+        (BUTTON_PRESSED, [80, 80, 80, 255], [52, 52, 52, 255], [150, 150, 150, 255]),
+        (BUTTON_DISABLED, [64, 64, 64, 255], [96, 96, 96, 255], [44, 44, 44, 255]),
+    ];
+    for (r, base, light, dark) in btn {
+        bevel(&mut px, r.x, r.y, r.w, r.h, base, light, dark, Some([30, 30, 30, 255]));
+    }
+    // Pestana.
+    bevel(&mut px, TAB.x, TAB.y, TAB.w, TAB.h, [110, 110, 110, 255], [168, 168, 168, 255], [52, 52, 52, 255], Some([30, 30, 30, 255]));
 
     // Flecha de crafteo.
     draw_arrow(&mut px);
-
+    // Mirilla.
+    draw_crosshair(&mut px);
     // Atenuador de fondo.
     for y in 0..DIM.h {
         for x in 0..DIM.w {
@@ -115,6 +173,70 @@ pub fn build_pixels() -> Vec<u8> {
         }
     }
     px
+}
+
+const DARK: [u8; 4] = [13, 6, 0, 255];
+const INNER: [u8; 4] = [36, 18, 9, 255];
+const WOOD: [u8; 4] = [78, 53, 30, 255];
+const BEVEL_LIGHT: [u8; 4] = [96, 68, 40, 255];
+const SLOT_HOVER_FILL: [u8; 4] = [58, 36, 18, 255];
+const SELECTION_FILL: [u8; 4] = [240, 224, 160, 255];
+
+/// Rellena un rectangulo con `base` y le aplica el **bisel** de Minecraft:
+/// borde `light` arriba-izquierda, `dark` abajo-derecha y contorno `border`.
+#[allow(clippy::too_many_arguments)]
+fn bevel(
+    px: &mut [u8],
+    x0: u32,
+    y0: u32,
+    w: u32,
+    h: u32,
+    base: [u8; 4],
+    light: [u8; 4],
+    dark: [u8; 4],
+    border: Option<[u8; 4]>,
+) {
+    for y in 0..h {
+        for x in 0..w {
+            put(px, x0 + x, y0 + y, base);
+        }
+    }
+    // Contorno exterior (1 px).
+    if let Some(b) = border {
+        for x in 0..w {
+            put(px, x0 + x, y0, b);
+            put(px, x0 + x, y0 + h - 1, b);
+        }
+        for y in 0..h {
+            put(px, x0, y0 + y, b);
+            put(px, x0 + w - 1, y0 + y, b);
+        }
+    }
+    // Bisel interior (1 px): luz arriba-izquierda, sombra abajo-derecha.
+    if w >= 3 && h >= 3 {
+        for x in 1..w - 1 {
+            put(px, x0 + x, y0 + 1, light);
+            put(px, x0 + x, y0 + h - 2, dark);
+        }
+        for y in 1..h - 1 {
+            put(px, x0 + 1, y0 + y, light);
+            put(px, x0 + w - 2, y0 + y, dark);
+        }
+    }
+}
+
+/// Mirilla blanca con contorno oscuro (alto contraste sobre cualquier fondo).
+fn draw_crosshair(px: &mut [u8]) {
+    let (ox, oy) = (CROSSHAIR.x, CROSSHAIR.y);
+    let c = CROSSHAIR.w / 2;
+    for i in 3..=11 {
+        put(px, ox + c, oy + i, [0, 0, 0, 255]);
+        put(px, ox + i, oy + c, [0, 0, 0, 255]);
+    }
+    for i in 4..=10 {
+        put(px, ox + c, oy + i, [255, 255, 255, 255]);
+        put(px, ox + i, oy + c, [255, 255, 255, 255]);
+    }
 }
 
 /// Flecha de crafteo mirando a la derecha, en tonos pergamino sobre fondo
@@ -139,21 +261,6 @@ fn draw_arrow(px: &mut [u8]) {
     }
 }
 
-/// Resalte: tinte blanco translucido con un marco claro.
-fn draw_selection(px: &mut [u8]) {
-    for y in 0..SLOT {
-        for x in 0..SLOT {
-            let edge = x == 0 || y == 0 || x == SLOT - 1 || y == SLOT - 1;
-            let c = if edge {
-                [255, 245, 200, 200]
-            } else {
-                [255, 245, 200, 70]
-            };
-            put(px, SELECTION.x + x, SELECTION.y + y, c);
-        }
-    }
-}
-
 /// Escribe un pixel (ignora fuera de rango).
 fn put(px: &mut [u8], x: u32, y: u32, c: [u8; 4]) {
     if x >= GUI_W || y >= GUI_H {
@@ -161,65 +268,6 @@ fn put(px: &mut [u8], x: u32, y: u32, c: [u8; 4]) {
     }
     let i = ((y * GUI_W + x) * 4) as usize;
     px[i..i + 4].copy_from_slice(&c);
-}
-
-/// Dibuja una ranura hundida de `SLOT`x`SLOT` en `(ox, oy)`.
-///
-/// Replica la referencia D del usuario (medida del PNG): borde exterior
-/// `#1C0B02`, anillos concentricos `#2B190C` / `#352011` y centro `#311C0F`.
-fn draw_slot(px: &mut [u8], ox: u32, oy: u32) {
-    for y in 0..SLOT {
-        for x in 0..SLOT {
-            let d = x.min(y).min(SLOT - 1 - x).min(SLOT - 1 - y);
-            let c = match d {
-                0 => [28, 11, 2, 255],  // borde exterior oscuro
-                1 => [43, 25, 12, 255], // anillo 1
-                2 => [53, 32, 17, 255], // anillo 2
-                3 => [49, 28, 15, 255], // centro
-                _ => [53, 32, 17, 255], // interior: eco del anillo 2
-            };
-            put(px, ox + x, oy + y, c);
-        }
-    }
-}
-
-/// Marco de madera alrededor de la barra de la hotbar.
-///
-/// Madera de la referencia D: marco `#4E351E`, divisores `#593E23`, contorno
-/// oscuro `#1C0B02`.
-fn draw_hotbar_frame(px: &mut [u8]) {
-    let wood = [78, 53, 30, 255];
-    let trim = [28, 11, 2, 255];
-    for x in 0..HOTBAR.w {
-        put(px, HOTBAR.x + x, HOTBAR.y, trim); // fila superior
-        put(px, HOTBAR.x + x, HOTBAR.y + HOTBAR.h - 1, trim); // inferior
-    }
-    for y in 0..HOTBAR.h {
-        put(px, HOTBAR.x, HOTBAR.y + y, wood);
-        put(px, HOTBAR.x + HOTBAR.w - 1, HOTBAR.y + y, wood);
-    }
-}
-
-/// Fondo del panel de inventario (marco + interior). Misma madera que la
-/// hotbar (referencia D): marco `#4E351E`, contorno `#1C0B02`.
-fn draw_panel(px: &mut [u8]) {
-    let wood = [78, 53, 30, 255];
-    let dark = [28, 11, 2, 255];
-    let inner = [43, 25, 12, 255];
-    for y in 0..PANEL.h {
-        for x in 0..PANEL.w {
-            let edge = x == 0 || y == 0 || x == PANEL.w - 1 || y == PANEL.h - 1;
-            let near = x == 1 || y == 1 || x == PANEL.w - 2 || y == PANEL.h - 2;
-            let c = if edge {
-                dark
-            } else if near {
-                wood
-            } else {
-                inner
-            };
-            put(px, PANEL.x + x, PANEL.y + y, c);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -249,12 +297,23 @@ mod tests {
     }
 
     #[test]
+    fn los_botones_tienen_los_cuatro_estados() {
+        // Cada estado vive en una region distinta y del tamano esperado.
+        for r in [BUTTON, BUTTON_HOVER, BUTTON_PRESSED, BUTTON_DISABLED] {
+            assert_eq!(r.w, 200);
+            assert_eq!(r.h, 20);
+        }
+        assert_ne!(BUTTON.y, BUTTON_HOVER.y);
+        assert_ne!(BUTTON_HOVER.y, BUTTON_PRESSED.y);
+    }
+
+    #[test]
     fn el_png_cargado_coincide_con_el_layout() {
         // Si existe assets/gui.png debe medir GUI_W x GUI_H; si no existe, el
         // fallback procedural sigue valiendo (test de tamanos).
         if let Some(px) = crate::world::atlas::load_png_rgba(GUI_PATH, GUI_W, GUI_H) {
             assert_eq!(px.len(), (GUI_W * GUI_H * 4) as usize);
-            // La primera ranura del PNG debe ser opaca (marco D).
+            // La primera ranura del PNG debe ser opaca (marco).
             assert_eq!(px[3], 255);
         }
     }

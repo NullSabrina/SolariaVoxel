@@ -4219,6 +4219,50 @@ doble click, tope 64, 1-9, Q y el fuzz de invariante.
 de ranuras/botones, fuente con minusculas, y la rejilla de inventario survival
 (el estado ya la soporta; falta la UI).
 
+## v0.46.4 (MEGA PROMPT 3) - Fase E: arte de GUI en LibreSprite + manifiesto
+
+### 2026-10-08 - `gui.png` con bisel Minecraft, botones de 4 estados y `gui.json`
+
+**Decision.**
+- **`assets/gui.png` regenerado** (256x256) **en LibreSprite** con la gramatica de
+  Minecraft: **bisel** de 1 px (luz arriba-izquierda, sombra abajo-derecha),
+  ranuras (normal/hover/seleccionada), panel, **botones con 4 estados**
+  (normal/hover/pulsado/desactivado), pestana, flecha, mirilla (crosshair) y
+  atenuador. Fuente editable `assets/src/ui/gui.aseprite`. Script reproducible
+  `tools/gen_gui.js` (idempotente). Manifiesto `assets/gui.json` (regiones).
+- **`render/gui.rs`**: `GUI_H -> 256`; nuevas regiones (`SLOT_HOVER`,
+  `BUTTON`/`_HOVER`/`_PRESSED`/`_DISABLED`, `CROSSHAIR`, `TAB`); el fallback
+  procedural se reescribe con un helper `bevel` (mismo bisel que el PNG).
+
+**Flujo de LibreSprite (verificado).** No hay constructor `Sprite`; el documento
+se crea con **`app.open(png)`**; se dibuja con `app.activeImage.putPixel` +
+`app.pixelColor.rgba`; se guarda con `app.activeSprite.saveAs(path, true)`
+(`asCopy=true` obligatorio, si no abre el dialogo "Guardar como"). Ejecutado via
+el servidor MCP `libresprite_run_script`.
+
+**Motivo.** Seccion 5 del prompt (arte original en LibreSprite, primer entregable:
+`gui.aseprite` con ranuras/boton/panel) y seccion 2.5 (bisel, botones).
+
+**Pendiente dentro del bloque (honesto).**
+- **Fuente 8x8 con minusculas y sombra** desde `assets/font.png` (seccion 4.7): la
+  fuente actual sigue siendo la 5x7 **solo mayusculas** generada en codigo
+  (`render/font.rs`), con fallback. La sombra requiere un `tint` por quad
+  (seccion 4.6) que aun no existe en `UiQuad`. Se hara en la Fase F/G.
+- **Panoramica de titulo** y carga del manifiesto `gui.json` en runtime (hoy las
+  regiones son constantes de `gui.rs`; el JSON es el manifiesto exportado). Se
+  hara en la Fase F.
+
+**Alternativas descartadas.**
+- Copiar texturas de Mojang: prohibido; el arte es original (misma gramatica).
+- Escribir el manifiesto a mano: lo emite el script (`console.log`); se copia a
+  `gui.json`.
+
+**Consecuencia.** `assets/gui.png` (regenerado), `assets/gui.json`,
+`assets/src/ui/gui.aseprite`, `tools/gen_gui.js`, `render/gui.rs`,
+`assets/README.md`. **380 tests; 0 fallos**; clippy limpio. `Cargo.toml -> 0.46.4`.
+`FORMAT_VERSION` 6 / `GENERATOR_VERSION` 20 intactos. Captura
+`screenshots/ui_after_gui_art.png` (el juego carga el arte nuevo).
+
 ## Plantilla para nuevas entradas
 
 ```

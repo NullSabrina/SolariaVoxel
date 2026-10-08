@@ -5,7 +5,9 @@
 | Archivo | Tamano | Uso |
 | ------- | ------ | --- |
 | `atlas.png` | 64x80 | Atlas de texturas de bloques (4 columnas x 5 filas de tiles 16x16). Lo carga `world/atlas.rs`; si falta o cambia de tamano, el motor cae al atlas procedural. |
-| `gui.png` | 256x160 | Iconos de la interfaz 2D (hotbar / inventario). |
+| `gui.png` | 256x256 | Arte de interfaz 2D con **bisel** estilo Minecraft: hotbar, ranuras (normal/hover/seleccionada), panel, botones (normal/hover/pulsado/desactivado), pestana, flecha, mirilla y atenuador. Pintado en **LibreSprite**; regenerable con `tools/gen_gui.js`. Si falta, el motor cae al procedural de `render/gui.rs`. |
+| `gui.json` | - | Manifiesto de regiones de `gui.png` (coordenadas), emitido por `tools/gen_gui.js`. |
+| `src/ui/gui.aseprite` | - | Fuente editable en LibreSprite de `gui.png`. |
 | `torch_32.png` | 16x16 | Sprite fuente de la antorcha. |
 | `torch_sprite.png` | 16x16 | Sprite fuente alternativo de la antorcha. |
 | `paleta_master.gpl` | - | Paleta maestra de LibreSprite (documenta los colores del atlas). |
