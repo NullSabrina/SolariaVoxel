@@ -26,6 +26,7 @@ pub mod cells;
 pub mod config;
 pub mod decoration;
 pub mod graph;
+pub mod larion;
 pub mod math;
 pub mod trees;
 

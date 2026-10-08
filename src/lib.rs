@@ -10,6 +10,20 @@
 //! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
 //! escribimos y documentamos nosotros.
 //!
+//! ## v0.47.0 - Generador Larion (MEGA PROMPT 4)
+//!
+//! Tercer camino de generacion (`GeneratorKind::Larion`,
+//! `world/worldgen/larion/`): **continentalidad** con domain warping horizontal,
+//! **erosion** como campo continuo que escala el relieve, crestas
+//! multifractales, **densidad 3D en banda** (voladizos), clima en **bandas**
+//! latitudinales y **biomas multi-parametricos** con mezcla. Rango de altura
+//! `p99-p01` de 176..192, cumbres hasta ~294 y 7 biomas (ninguno > 38 %) sobre un
+//! area continental de 20480 bloques; ~1.44x el coste por columna del legacy.
+//! `Legacy16` y `Graph` **no cambian**. `GENERATOR_VERSION -> 21`;
+//! `LARION_CONFIG_VERSION = 1`; `Cargo.toml -> 0.47.0`; `FORMAT_VERSION` intacto
+//! (6). Detalle en `DECISIONS.md`, `docs/worldgen.md` y capturas
+//! `screenshots/larion_<seed>_*.png`.
+//!
 //! ## v0.45.0 - Terreno, biomas, arboles y hojas (MEGA PROMPT 1)
 //!
 //! Refactor del worldgen por fases: **bioma unico** desde `WorldGen` (retirado el

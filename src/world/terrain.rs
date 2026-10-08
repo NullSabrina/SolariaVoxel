@@ -13,7 +13,7 @@
 //! 5. **Cuevas/acuiferos** — [`crate::world::caves`] decide que celda se cava y
 //!    si nace llena de agua (FASE 6: cuevas jerarquicas).
 //!
-//! `GENERATOR_VERSION` va por 20 (MEGA PROMPT 1, Fases B/C/D).
+//! `GENERATOR_VERSION` va por 21 (MEGA PROMPT 4: generador Larion).
 //!
 //! [`TerrainSample`]: super::worldgen::TerrainSample
 
@@ -27,8 +27,9 @@ use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 use super::generator::GeneratorKind;
 use super::worldgen::decoration::{DecorationKind, Decorator};
 use super::worldgen::graph::{Graph, Program, default_density_graph, default_height_graph};
+use super::worldgen::larion::{LarionConfig, LarionGenerator, LarionSample};
 use super::worldgen::trees::{MARGIN, TreePlacer};
-use super::worldgen::{WorldGen, WorldGenConfig, biomes, math};
+use super::worldgen::{LandClass, LandformProfile, TerrainSample, WorldGen, WorldGenConfig, biomes, math};
 
 /// Altura media del terreno, en bloques (nivel del mar).
 pub const SEA_LEVEL: i32 = 64;
@@ -36,6 +37,11 @@ pub const SEA_LEVEL: i32 = 64;
 /// Altura minima/maxima del terreno (el `clamp` del relieve).
 pub const MIN_HEIGHT: i32 = 8;
 pub const MAX_HEIGHT: i32 = 200;
+
+/// Techo del terreno del generador **Larion** (seccion 5). El legacy conserva su
+/// `MAX_HEIGHT = 200` para no alterar los mundos guardados; Larion usa 300, que
+/// deja 84 bloques de margen bajo `WORLD_HEIGHT = 384`.
+pub const LARION_MAX_HEIGHT: i32 = 300;
 
 /// Los biomas del mundo (FASE 3: seleccionados por scoring en `worldgen::biomes`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -97,6 +103,8 @@ pub struct TerrainGenerator {
     /// Grafo de **densidad 3D** + programa (solo si `kind == Graph`): decide
     /// solido/aire con cuevas y voladizos.
     density_graph: Option<(Graph, Program)>,
+    /// Pipeline multi-capa de escala monumental (solo si `kind == Larion`).
+    larion: Option<LarionGenerator>,
 }
 
 impl TerrainGenerator {
@@ -124,6 +132,7 @@ impl TerrainGenerator {
         } else {
             (None, None)
         };
+        let larion = (kind == GeneratorKind::Larion).then(|| LarionGenerator::new(seed));
         Self {
             worldgen: WorldGen::new(seed),
             surface_detail: Perlin::new(mix(6)),
@@ -137,6 +146,7 @@ impl TerrainGenerator {
             kind,
             height_graph,
             density_graph,
+            larion,
         }
     }
 
@@ -171,13 +181,14 @@ impl TerrainGenerator {
     /// Clima efectivo de `(x, z)` -> `(temperatura, humedad)` en 0..1. Incluye la
     /// mezcla con el centro de la celda y el lapse de altitud (FASE 3).
     pub fn climate(&self, world_x: i32, world_z: i32) -> (f64, f64) {
-        let s = self.worldgen.sample(world_x as f64, world_z as f64);
+        let s = self.sample(world_x, world_z);
         (s.temperature as f64, s.humidity as f64)
     }
 
-    /// Bioma en `(x, z)` seleccionado por scoring (FASE 3).
+    /// Bioma en `(x, z)` seleccionado por scoring (FASE 3) o por el selector
+    /// multi-parametrico (Larion).
     pub fn biome_at(&self, world_x: i32, world_z: i32) -> Biome {
-        self.worldgen.sample(world_x as f64, world_z as f64).biome
+        self.sample(world_x, world_z).biome
     }
 
     /// Nivel del acuifero en `(x, z)`, en 30..56. Por debajo se llenan de agua
@@ -226,7 +237,43 @@ impl TerrainGenerator {
     /// Muestra geografica de una columna (continentalness, celda, costa,
     /// altura base). Es la interfaz publica de la FASE 1/2 para previews/tests.
     pub fn sample(&self, world_x: i32, world_z: i32) -> super::worldgen::TerrainSample {
-        self.worldgen.sample(world_x as f64, world_z as f64)
+        match self.kind {
+            GeneratorKind::Larion => {
+                let l = self.larion_sample(world_x, world_z);
+                terrain_sample_from_larion(&l)
+            }
+            _ => self.worldgen.sample(world_x as f64, world_z as f64),
+        }
+    }
+
+    /// Muestra Larion de una columna (solo valida si `kind == Larion`; en otro
+    /// caso devuelve la de legacy sintetizada).
+    fn larion_sample(&self, world_x: i32, world_z: i32) -> LarionSample {
+        match &self.larion {
+            Some(l) => l.sample(world_x as f64, world_z as f64),
+            None => {
+                let s = self.worldgen.sample(world_x as f64, world_z as f64);
+                LarionSample {
+                    height: s.base_height,
+                    continentalness: s.continentalness * 0.5 + 0.5,
+                    continental_raw: s.continentalness,
+                    erosion: 0.5,
+                    peaks: 0.0,
+                    temperature: s.temperature,
+                    humidity: s.humidity,
+                    mountain: s.mountain_mask,
+                    river_proximity: s.river_proximity,
+                    surface_water: s.surface_water,
+                    biome: s.biome,
+                    blend: super::worldgen::larion::BiomeBlend {
+                        primary: s.biome,
+                        secondary: s.biome,
+                        mix: 0.0,
+                    },
+                    ocean: s.land.is_ocean(),
+                }
+            }
+        }
     }
 
     /// ¿Se cava la celda `(x, y, z)` (cueva, seca o inundada)? Consulta **barata**
@@ -236,8 +283,9 @@ impl TerrainGenerator {
         if !self.has_caves(x, z) {
             return false;
         }
-        let s = self.worldgen.sample(x as f64, z as f64);
-        let height = (s.base_height.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT);
+        let s = self.sample(x, z);
+        let (lo, hi) = self.height_bounds();
+        let height = (s.base_height.round() as i32).clamp(lo, hi);
         let ctx = self.caves.context(x, z, s.mountain_mask);
         let aquifer = self.aquifer_level(x, z);
         !matches!(
@@ -246,25 +294,39 @@ impl TerrainGenerator {
         )
     }
 
+    /// Limites de altura del generador activo (Larion usa un techo mayor).
+    fn height_bounds(&self) -> (i32, i32) {
+        match self.kind {
+            GeneratorKind::Larion => (MIN_HEIGHT, LARION_MAX_HEIGHT),
+            _ => (MIN_HEIGHT, MAX_HEIGHT),
+        }
+    }
+
     /// Altura del terreno (numero de bloques solidos) en `(x, z)`.
     ///
     /// El relieve ya **no depende del bioma** (auditoria de worldgen #20): viene
     /// de la geografia continental + relieve macro + cordilleras + valles del
-    /// [`WorldGen`]. El bioma solo decide materiales y vegetacion.
+    /// [`WorldGen`] o del pipeline Larion. El bioma solo decide materiales y
+    /// vegetacion.
     pub fn height(&self, world_x: i32, world_z: i32) -> usize {
-        let h = self
-            .worldgen
-            .sample(world_x as f64, world_z as f64)
-            .base_height;
-        (h.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT) as usize
+        let h = match self.kind {
+            GeneratorKind::Larion => self.larion_sample(world_x, world_z).height,
+            _ => self
+                .worldgen
+                .sample(world_x as f64, world_z as f64)
+                .base_height,
+        };
+        let (lo, hi) = self.height_bounds();
+        (h.round() as i32).clamp(lo, hi) as usize
     }
 
     /// Altura de la **superficie de materiales** en `(x, z)`: la del grafo si el
-    /// generador es `Graph`, o la del `WorldGen` si es legacy. Es la que deciden
-    /// los materiales de superficie y la pendiente real.
+    /// generador es `Graph`, la del `WorldGen` si es legacy, o la de Larion. Es
+    /// la que deciden los materiales de superficie y la pendiente real.
     pub fn surface_height(&self, world_x: i32, world_z: i32) -> usize {
         match self.kind {
             GeneratorKind::Graph => self.graph_height(world_x, world_z),
+            GeneratorKind::Larion => self.height(world_x, world_z),
             GeneratorKind::Legacy16 => self.height(world_x, world_z),
         }
     }
@@ -320,6 +382,7 @@ impl TerrainGenerator {
         match self.kind {
             GeneratorKind::Legacy16 => self.generate_column_legacy(world_x, world_z),
             GeneratorKind::Graph => self.generate_column_graph(world_x, world_z),
+            GeneratorKind::Larion => self.generate_column_larion(world_x, world_z),
         }
     }
 
@@ -363,7 +426,9 @@ impl TerrainGenerator {
     /// cruza la frontera coinciden. Evita arboles flotando sobre cuevas.
     fn tree_base_supported(&self, wx: i32, ground: i32, wz: i32) -> bool {
         match self.kind {
-            GeneratorKind::Legacy16 => !self.cave_carve_at(wx, ground - 1, wz),
+            GeneratorKind::Legacy16 | GeneratorKind::Larion => {
+                !self.cave_carve_at(wx, ground - 1, wz)
+            }
             GeneratorKind::Graph => self.interpolated_density(wx, ground - 1, wz) > 0.0,
         }
     }
@@ -693,6 +758,236 @@ impl TerrainGenerator {
 
         column
     }
+
+    /// Genera una columna con el pipeline **Larion** (seccion 6.2): una rejilla
+    /// de campos 2D con padding (18x18) para altura y pendiente, densidad 3D
+    /// **solo en una banda** alrededor de `H`, materiales por pendiente/altura y
+    /// bioma mezclado, agua y la pasada de arboles con margen.
+    fn generate_column_larion(&self, world_x: i32, world_z: i32) -> Column {
+        let Some(larion) = self.larion.as_ref() else {
+            return self.generate_column_legacy(world_x, world_z);
+        };
+        let mut column = Column::empty();
+        let lcfg = *larion.config();
+        let cfg = self.worldgen.config();
+        let (lo, hi) = self.height_bounds();
+
+        const G: i32 = CHUNK_SIZE as i32;
+        let gw = (G + 2) as usize;
+        let mut grid: Vec<LarionSample> = Vec::with_capacity(gw * gw);
+        for gz in -1..=G {
+            for gx in -1..=G {
+                grid.push(larion.sample((world_x + gx) as f64, (world_z + gz) as f64));
+            }
+        }
+        let idx = |gx: i32, gz: i32| -> usize { ((gz + 1) as usize) * gw + (gx + 1) as usize };
+        let h_of = |s: &LarionSample| (s.height.round() as i32).clamp(lo, hi);
+        let slope_at = |gx: i32, gz: i32, ground: i32| -> i32 {
+            [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .map(|&(dx, dz)| (h_of(&grid[idx(gx + dx, gz + dz)]) - ground).abs())
+                .max()
+                .unwrap_or(0)
+        };
+
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let wx = world_x + x as i32;
+                let wz = world_z + z as i32;
+                let s = grid[idx(x as i32, z as i32)];
+                let height = h_of(&s);
+                let slope = slope_at(x as i32, z as i32, height);
+                let aquifer = self.aquifer_level(wx, wz);
+                let variant = self.surface_variant(wx, wz);
+                let has_caves = self.has_caves(wx, wz);
+                let caves_ctx = has_caves.then(|| self.caves.context(wx, wz, s.mountain));
+                let biome_mat = self.larion_material_biome(&s, wx, wz, &lcfg);
+
+                let band = lcfg.density_band.ceil() as i32;
+                let top_scan = (height + band + 1).clamp(0, WORLD_HEIGHT as i32);
+                let mut top_solid: Option<usize> = None;
+                for y in 0..top_scan as usize {
+                    if larion.density(wx, y as i32, wz, &s) <= 0.0 {
+                        continue;
+                    }
+                    if let Some(ctx) = &caves_ctx {
+                        match self.caves.carve(ctx, wx, y as i32, wz, height, aquifer) {
+                            Carve::Air => {
+                                if Self::is_lava_here(&self.caves, ctx, wx, y, wz, height, aquifer)
+                                {
+                                    column.set(x, y, z, Block::Lava);
+                                    column.set(x, y - 1, z, Block::Obsidian);
+                                }
+                                continue;
+                            }
+                            Carve::Water => {
+                                if Self::is_lava_here(&self.caves, ctx, wx, y, wz, height, aquifer)
+                                {
+                                    column.set(x, y, z, Block::Lava);
+                                    column.set(x, y - 1, z, Block::Obsidian);
+                                    continue;
+                                }
+                                column.set(x, y, z, Block::Water);
+                                top_solid = Some(y);
+                                continue;
+                            }
+                            Carve::None => {}
+                        }
+                    }
+                    let block = larion_surface_block(
+                        y,
+                        height as usize,
+                        biome_mat,
+                        variant,
+                        slope,
+                        cfg,
+                        s.temperature,
+                        lcfg.snow_temperature,
+                    );
+                    column.set(x, y, z, block);
+                    top_solid = Some(y);
+                }
+
+                // Agua (mar, rio o lago) por encima del techo solido real.
+                let water_top = s.surface_water.max(0.0).round() as usize;
+                let start = top_solid.map_or(0, |t| t + 1);
+                if water_top > start {
+                    for y in start..water_top.min(WORLD_HEIGHT) {
+                        if column.get(x, y, z) == Block::Air {
+                            column.set(x, y, z, Block::Water);
+                        }
+                    }
+                    column.push_water_surface(x, z, water_top.min(WORLD_HEIGHT) - 1);
+                }
+
+                // Decoracion de rocas.
+                if !s.ocean
+                    && (2..=13).contains(&x)
+                    && (2..=13).contains(&z)
+                    && top_solid.is_some()
+                    && self.decorator.decide(
+                        wx,
+                        wz,
+                        &terrain_sample_from_larion(&s),
+                        height,
+                        slope,
+                    ) == Some(DecorationKind::Boulder)
+                {
+                    let ground = top_solid.map_or(height as usize, |t| t + 1);
+                    place_boulder(&mut column, x, ground, z, variant);
+                }
+            }
+        }
+
+        // Pasada de arboles con margen (identica a la del legacy).
+        for gz in -MARGIN..CHUNK_SIZE as i32 + MARGIN {
+            for gx in -MARGIN..CHUNK_SIZE as i32 + MARGIN {
+                let wx = world_x + gx;
+                let wz = world_z + gz;
+                let plan = if (0..CHUNK_SIZE as i32).contains(&gx)
+                    && (0..CHUNK_SIZE as i32).contains(&gz)
+                {
+                    let s = grid[idx(gx, gz)];
+                    let ground = h_of(&s);
+                    let slope = slope_at(gx, gz, ground);
+                    self.trees.plan(wx, wz, s.biome, ground, slope)
+                } else if self.trees.maybe(wx, wz) {
+                    let s = self.larion_sample(wx, wz);
+                    let ground = (s.height.round() as i32).clamp(lo, hi);
+                    let slope = {
+                        [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                            .iter()
+                            .map(|&(dx, dz)| {
+                                (self.larion_sample(wx + dx, wz + dz).height.round() as i32 - ground)
+                                    .abs()
+                            })
+                            .max()
+                            .unwrap_or(0)
+                    };
+                    self.trees.plan(wx, wz, s.biome, ground, slope)
+                } else {
+                    None
+                };
+                if let Some(plan) = plan
+                    && self.tree_base_supported(plan.wx, plan.ground, plan.wz)
+                {
+                    self.trees.draw(&mut column, &plan, world_x, world_z);
+                }
+            }
+        }
+
+        column
+    }
+
+    /// Bioma cuyo material usa la capa superior, con mezcla organica en el borde
+    /// (seccion 7): si `mix` cae en la ventana y un hash **global** decide, se
+    /// usa el secundario.
+    fn larion_material_biome(
+        &self,
+        s: &LarionSample,
+        wx: i32,
+        wz: i32,
+        lcfg: &LarionConfig,
+    ) -> Biome {
+        let b = s.blend;
+        if b.primary == b.secondary {
+            return b.primary;
+        }
+        let within = (lcfg.biome_blend_lo..=lcfg.biome_blend_hi).contains(&b.mix);
+        if within && hash01(wx, wz) < b.mix {
+            b.secondary
+        } else {
+            b.primary
+        }
+    }
+}
+
+/// Sintetiza un [`TerrainSample`] a partir de una muestra Larion, para que la
+/// decoracion existente (que habla `TerrainSample`) siga funcionando sin cambios.
+fn terrain_sample_from_larion(l: &LarionSample) -> TerrainSample {
+    TerrainSample {
+        continentalness: l.continental_raw,
+        land: if l.ocean {
+            LandClass::Ocean
+        } else {
+            LandClass::Interior
+        },
+        cell_id: 0,
+        cell_edge: 1.0,
+        coast_factor: 0.0,
+        mountain_mask: l.mountain,
+        coast_roll: 0.0,
+        temperature: l.temperature,
+        humidity: l.humidity,
+        biome: l.biome,
+        base_height: l.height,
+        river_proximity: l.river_proximity,
+        surface_water: l.surface_water,
+        landform: LandformProfile::Rolling,
+    }
+}
+
+/// Material de superficie del camino Larion (seccion 7): roca expuesta en
+/// laderas y en cumbres altas; si no, el material del bioma resuelto.
+#[allow(clippy::too_many_arguments)]
+fn larion_surface_block(
+    y: usize,
+    height: usize,
+    biome: Biome,
+    variant: f64,
+    slope: i32,
+    cfg: &WorldGenConfig,
+    temperature: f32,
+    snow_temperature: f32,
+) -> Block {
+    if y + 1 == height && height > 200 {
+        return if temperature < snow_temperature {
+            Block::Snow
+        } else {
+            Block::Stone
+        };
+    }
+    surface_block(y, height, biome, variant, 0.0, slope, cfg)
 }
 
 /// Fuerza del **ecotono** en `cell_edge` (0 en la frontera de celda, ~1 en el
@@ -1613,5 +1908,203 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn el_generador_larion_produce_columna_solida_y_determinista() {
+        let g = TerrainGenerator::with_kind(13_371, GeneratorKind::Larion);
+        assert_eq!(g.kind(), GeneratorKind::Larion);
+        let a = g.generate_column(0, 0);
+        let b = g.generate_column(0, 0);
+        assert_eq!(hash_column(&a), hash_column(&b), "larion no determinista");
+        let solid = (0..WORLD_HEIGHT as i32).any(|y| a.get(8, y as usize, 8).is_solid());
+        assert!(solid, "la columna larion no tiene bloque solido");
+        // Larion difiere de legacy y graph.
+        assert_ne!(
+            hash_column(&g.generate_column(0, 0)),
+            hash_column(&TerrainGenerator::new(13_371).generate_column(0, 0))
+        );
+    }
+
+    #[test]
+    fn larion_llega_a_superar_los_200_bloques() {
+        let g = TerrainGenerator::with_kind(7, GeneratorKind::Larion);
+        let mut max_h = 0usize;
+        for i in -60..60 {
+            for j in -60..60 {
+                max_h = max_h.max(g.height(i * 100, j * 100));
+            }
+        }
+        assert!(max_h > 200, "larion no alcanza cordilleras: max {max_h}");
+        assert!(max_h <= LARION_MAX_HEIGHT as usize, "larion supera su techo");
+    }
+
+    #[test]
+    fn la_continuidad_entre_chunks_es_exacta() {
+        // La columna de cada chunk usa coordenadas GLOBALES (padding solo para la
+        // pendiente): el techo real no se desfasa del campo `H`, ni en el borde.
+        let g = TerrainGenerator::with_kind(13_371, GeneratorKind::Larion);
+        for (ox, oz) in [(0, 0), (CHUNK_SIZE as i32, 0), (0, -(CHUNK_SIZE as i32))] {
+            let col = g.generate_column(ox, oz);
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let wx = ox + x as i32;
+                    let wz = oz + z as i32;
+                    let expected = g.height(wx, wz) as i32;
+                    let top = (0..WORLD_HEIGHT)
+                        .rev()
+                        .find(|&y| {
+                            let b = col.get(x, y, z);
+                            b.is_solid() || b.is_liquid()
+                        })
+                        .expect("columna vacia");
+                    assert!(
+                        (top as i32 - expected).abs() <= 26,
+                        "desfase en ({wx},{wz}): top {top} vs H {expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_hay_agua_bajo_el_suelo_con_larion() {
+        let g = TerrainGenerator::with_kind(99, GeneratorKind::Larion);
+        for i in -40..40 {
+            for j in -40..40 {
+                let s = g.sample(i * 61, j * 61);
+                if s.surface_water > 0.0 {
+                    assert!(
+                        s.surface_water >= s.base_height,
+                        "agua por debajo del suelo: {} < {}",
+                        s.surface_water,
+                        s.base_height
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_hay_arboles_flotantes_con_larion() {
+        for seed in [1u32, 7, 13_371] {
+            let g = TerrainGenerator::with_kind(seed, GeneratorKind::Larion);
+            for cz in -2..2 {
+                for cx in -2..2 {
+                    let (ox, oz) = (cx * CHUNK_SIZE as i32, cz * CHUNK_SIZE as i32);
+                    let col = g.generate_column(ox, oz);
+                    if let Some((x, z, y)) = arbol_flotante(&col, ox, oz) {
+                        panic!("arbol flotante larion en ({x},{y},{z}) seed {seed}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn la_roca_aflora_en_pendientes_altas_con_larion() {
+        let g = TerrainGenerator::with_kind(7, GeneratorKind::Larion);
+        // Localiza la zona mas alta (las cordilleras estan lejos del origen).
+        let mut best = (0usize, 0i32, 0i32);
+        for i in 0..100 {
+            for j in 0..100 {
+                let (x, z) = (i * 60, j * 60);
+                let h = g.height(x, z);
+                if h > best.0 {
+                    best = (h, x, z);
+                }
+            }
+        }
+        let (_, bx, bz) = best;
+        assert!(bx != 0 || bz != 0, "no se encontro una zona elevada");
+        // Ventana de chunks alrededor de la cumbre.
+        let cx0 = (bx.div_euclid(CHUNK_SIZE as i32)) - 2;
+        let cz0 = (bz.div_euclid(CHUNK_SIZE as i32)) - 2;
+        let mut roca = 0;
+        let mut laderas = 0;
+        let mut blanda_en_ladera = 0;
+        for dz in 0..5 {
+            for dx in 0..5 {
+                let (ox, oz) = (
+                    (cx0 + dx) * CHUNK_SIZE as i32,
+                    (cz0 + dz) * CHUNK_SIZE as i32,
+                );
+                let col = g.generate_column(ox, oz);
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let (wx, wz) = (ox + x as i32, oz + z as i32);
+                        let slope = surface_slope(&g, wx, wz);
+                        if slope < 3 {
+                            continue;
+                        }
+                        laderas += 1;
+                        // Mira la banda de superficie: la roca puede quedar bajo un
+                        // voladizo o bajo el material de una copa.
+                        let h = g.height(wx, wz);
+                        let lo = h.saturating_sub(6);
+                        let hi = (h + 6).min(WORLD_HEIGHT - 1);
+                        let mut has_rock = false;
+                        let mut has_soft = false;
+                        for y in lo..=hi {
+                            match col.get(x, y, z) {
+                                Block::Stone | Block::Gravel => has_rock = true,
+                                Block::Grass
+                                | Block::Dirt
+                                | Block::CoarseDirt
+                                | Block::Sand
+                                | Block::Podzol
+                                | Block::Snow => has_soft = true,
+                                _ => {}
+                            }
+                        }
+                        if has_rock {
+                            roca += 1;
+                        } else if has_soft {
+                            blanda_en_ladera += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(laderas > 0, "no se encontraron laderas en la cumbre");
+        assert!(roca > 0, "la roca no aflora en laderas");
+        assert!(
+            blanda_en_ladera * 2 < laderas,
+            "demasiado material blando en laderas: {blanda_en_ladera}/{laderas}"
+        );
+    }
+
+    /// Coste por columna de Larion frente a legacy. Es un benchmark; se marca
+    /// `#[ignore]` para la CI rapida y se ejecuta a mano (`--ignored`).
+    #[test]
+    #[ignore = "benchmark dependiente de la maquina"]
+    fn el_coste_por_columna_no_supera_1_5x_legacy() {
+        use std::time::Instant;
+        let legacy = TerrainGenerator::new(13_371);
+        let larion = TerrainGenerator::with_kind(13_371, GeneratorKind::Larion);
+        let n = 24;
+        let warm = |g: &TerrainGenerator| {
+            for i in 0..8 {
+                std::hint::black_box(g.generate_column(i * 16, i * 16));
+            }
+        };
+        warm(&legacy);
+        warm(&larion);
+        let time = |g: &TerrainGenerator| {
+            let t = Instant::now();
+            for i in 0..n {
+                std::hint::black_box(g.generate_column(i * 16, 0));
+            }
+            t.elapsed().as_secs_f64() / n as f64
+        };
+        let t_legacy = time(&legacy);
+        let t_larion = time(&larion);
+        let ratio = t_larion / t_legacy;
+        println!(
+            "[bench] larion {:.3} ms/col vs legacy {:.3} ms/col (x{ratio:.2})",
+            t_larion * 1000.0,
+            t_legacy * 1000.0
+        );
+        assert!(ratio <= 1.5, "larion es {ratio:.2}x legacy (> 1.5x)");
     }
 }

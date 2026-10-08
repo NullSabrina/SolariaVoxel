@@ -36,6 +36,7 @@ Column (24 secciones de 16^3 + luz de cielo / luz de bloque)
 | `worldgen/decoration.rs` | `DecorationRule` (reglas) + `Decorator`: **rocas** en laderas altas. |
 | `worldgen/trees.rs` | `TreePlacer` (Fase D): **4 especies** con copa procedimental y colocacion por **coordenada global** con margen. |
 | `worldgen/mod.rs` | `WorldGen`, `TerrainSample`, `LandClass`, seeds y ensamblado de altura/clima/hidrologia. |
+| `worldgen/larion/` | **Generador Larion** (MEGA PROMPT 4): pipeline multi-capa de escala monumental. Ver seccion propia. |
 | `world/terrain.rs` | Convierte el `TerrainSample` a bloques; superficie, cuevas, `Biome`. |
 | `world/caves.rs` | Cuevas 3D (spaghetti/cheese/pillar) con densidad por profundidad. |
 
@@ -87,8 +88,53 @@ Escenas demo del motor: `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_RIVER`,
 - `GENERATOR_VERSION` (resultado del mundo) y `FORMAT_VERSION` (binario) son
   **independientes**. Cambiar el mundo sube `GENERATOR_VERSION`; cambiar el
   guardado sube `FORMAT_VERSION` con migrador + test.
-- Actual: `GENERATOR_VERSION = 20`, `FORMAT_VERSION = 5`,
-  `WORLDGEN_CONFIG_VERSION = 4`.
+- Actual: `GENERATOR_VERSION = 21`, `FORMAT_VERSION = 6`,
+  `WORLDGEN_CONFIG_VERSION = 4`, `LARION_CONFIG_VERSION = 1`.
+
+## Generador Larion (MEGA PROMPT 4)
+
+Tercer camino de generacion (`GeneratorKind::Larion`, `level.json`), que **no
+toca** `Legacy16` ni `Graph`. Coordenadas de mundo → `LarionSample` es una
+funcion **pura** de `(seed, x, z)`. Modulos en `world/worldgen/larion/`:
+
+| Modulo | Responsabilidad |
+| ------ | --------------- |
+| `larion/noise.rs` | `ScalarField2D` (trait), `Fractal2D`, `Ridged2D`, `Fractal3D`, `Warp2D` sobre `OpenSimplex` gradiente. |
+| `larion/spline.rs` | `Spline` monotona (Fritsch-Carlson), exacta en nodos y con **extrapolacion constante**. |
+| `larion/config.rs` | `LarionConfig` versionada + validacion + `LARION_CONFIG_VERSION`. |
+| `larion/climate.rs` | `ClimatePoint` (vector de 5 parametros). |
+| `larion/erosion.rs` | Campo de erosion -> amplitud de relieve, curvas de detalle y de crestas. |
+| `larion/height.rs` | `compose_height` (puro) y `LarionSample`. |
+| `larion/density.rs` | Densidad 3D **en banda** (`|y-H| < band`) para voladizos. |
+| `larion/biome.rs` | `BiomeSelector` multi-parametrico + `BiomeBlend`. |
+| `larion/rivers.rs` | Cauces sinuosos; profundidad creciente en montana. |
+
+Pipeline (seccion 4 del prompt):
+
+1. **Domain warping horizontal** (solo X/Z) sobre las coordenadas.
+2. **Continentalidad** (`Fbm`, ~1/4000) -> spline `[-1,1] -> altura`.
+3. **Erosion** (campo continuo) escala `relief_amplitude = lerp(MAX, MIN, erosion)`.
+4. **Crestas** `RidgedMulti` (curva de normalizacion propia) + macro + valles `(1-|n|)^p`.
+5. **Densidad 3D en banda** alrededor de `H` (voladizos solo en montana joven).
+6. **Clima en bandas**: temperatura latitudinal (eje Z) + ruido + lapse; humedad con
+   sesgo costero simetrico.
+7. **Biomas** por distancia ponderada a 7 nodos (continuo, sin Voronoi).
+8. **Rios** con warp propio; `depth = base * lerp(1, 2.5, mountain)`.
+
+Materiales (seccion 7): roca en laderas (`rock_slope`) y cumbres `> 200`
+(`Stone`/`Snow` segun temperatura); transicion de bioma por `BiomeBlend` + hash
+global. Techos: `LARION_MAX_HEIGHT = 300` (el legacy conserva 200).
+
+Medido (`examples/larion_preview.rs`, area de 20480 bloques): rango
+`p99-p01 = 176..192`, cumbres `> 200` (hasta ~294), 7 biomas y ninguno > 38 %.
+Coste: ~1.44x legacy por columna (`cargo test --release -- --ignored
+el_coste_por_columna`).
+
+```bash
+cargo run --release --example larion_preview -- <seed> <px> <bloques_por_px> <layer>
+cargo run --release --example larion_preview -- 13371 512 40 height
+cargo run --release --example larion_preview -- 13371 512 6 density
+```
 
 ## Bioma unico y superficie (MEGA PROMPT 1, Fases B/C)
 

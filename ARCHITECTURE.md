@@ -141,6 +141,20 @@ TerrainGenerator
 - El shader hace **cutout** (descarta `alpha < 0.5`): asi la antorcha y las
   hojas muestran su fondo transparente sin blending ni ordenar triangulos.
 
+### Los tres generadores
+
+`GeneratorKind` (guardado en `level.json`, no en el binario) elige el camino sin
+migrar el formato:
+
+- **`Legacy16`**: por etapas (`worldgen/mod.rs`), el de los mundos existentes.
+- **`Graph`**: grafo de densidad data-driven (`worldgen/graph.rs`).
+- **`Larion`** (`world/worldgen/larion/`): pipeline multi-capa de escala
+  monumental — continentalidad con **domain warping horizontal**, **erosion** que
+  decide la forma del relieve, crestas multifractales, **densidad 3D en banda**
+  para voladizos, clima en **bandas** latitudinales y biomas
+  multi-parametricos. No altera los otros dos caminos.
+  `SOLARIA_GENERATOR=larion` crea mundos nuevos con ese generador.
+
 ## Versionado del mundo
 
 `world::save` implementa el esquema que pide la guia (seccion 5):

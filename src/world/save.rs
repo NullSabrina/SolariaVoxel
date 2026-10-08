@@ -84,7 +84,17 @@ pub const FORMAT_VERSION: u32 = 6;
 /// * v17: **decoracion sin flotantes** (Parte C, C5): los arboles se apoyan en el
 ///   techo **solido real** de la columna (una cueva bajo la superficie ya no deja
 ///   el tronco flotando), en ambos generadores.
-pub const GENERATOR_VERSION: u32 = 20;
+/// * v18: **bioma unico y ecotonos** (MEGA PROMPT 1, Fase B): un solo `biome_at`
+///   (WorldGen) para los tres caminos y transiciones de material por ruido.
+/// * v19: **superficie por pendiente** (Fase C): roca en laderas, sedimento en
+///   valles y pendiente real en el camino graph.
+/// * v20: **arboles procedimentales** (Fase D): 4 especies, copa procedural y
+///   colocacion con margen entre chunks.
+/// * v21: **generador Larion** (MEGA PROMPT 4): tercer camino de generacion
+///   (continentalidad con domain warping horizontal, erosion que decide la forma,
+///   crestas multifractales, densidad 3D en banda, clima en bandas, rios sinuosos
+///   y biomas multi-parametricos). `Legacy16` y `Graph` **no cambian**.
+pub const GENERATOR_VERSION: u32 = 21;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";

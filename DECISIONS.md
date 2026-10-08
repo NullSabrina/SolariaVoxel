@@ -4389,6 +4389,136 @@ clippy limpio.
 `screenshots/ui_final_{title,inventory}.png`. **380 tests; 0 fallos**; clippy
 limpio. `Cargo.toml -> 0.46.7`. `FORMAT_VERSION` 6 / `GENERATOR_VERSION` 20.
 
+## v0.47.0 (MEGA PROMPT 4) - Rediseño del pipeline de terreno (escala Larion)
+
+### 2026-10-08 - Fase A: linea base verificada
+
+**Decision.** Antes de tocar nada se confirma el diagnostico del prompt con el
+codigo real y se anota la linea base. Se anade `examples/larion_preview.rs`
+(nuevo) como herramienta de medida: mapas `height`/`biome`/`erosion`/
+`continental`/`slope`/`river` y un corte vertical de densidad, mas percentiles
+(p01/p50/p95/p99/max), cobertura de biomas y medias de campo.
+
+**Verificado (corrige al prompt).**
+- **`FORMAT_VERSION` es 6**, no 5 (subio en v0.46.2 con la hotbar). **No se
+  toca.** `WORLD_HEIGHT = 384`, `SEA_LEVEL = 64` y `GENERATOR_VERSION = 20`
+  confirmados en `world/save.rs`/`world/chunk.rs`/`world/terrain.rs`.
+- `MAX_HEIGHT = 200` es el clamp de **legacy**; subirlo cambiaria los mundos
+  guardados. Larion usa un techo propio `LARION_MAX_HEIGHT = 300`.
+- Tres caminos reales (`Legacy16`, `Graph`) y el diagnostico de las secciones
+  1.2/1.3/1.4/1.5/1.6/1.7 se corresponde con el codigo.
+
+**Consecuencia.** `examples/larion_preview.rs`. `cargo test --lib` = **380
+tests, 0 fallos** (linea base). Sin cambios de mundo.
+
+### 2026-10-08 - Fase B: pila de ruido y spline monotona
+
+**Decision.** `world/worldgen/larion/noise.rs`: trait `ScalarField2D` y
+adaptadores sobre **`OpenSimplex` gradiente** (`Fractal2D`, `Ridged2D`,
+`Fractal3D`, `Warp2D`). `larion/spline.rs`: `Spline` cubica de Hermite
+Fritsch-Carlson, validada en `new` (abscisas crecientes, valores finitos),
+exacta en los nodos y con **extrapolacion constante**.
+
+**Motivo.** Sustituir el `Value2D` (terrazas/escalones) por ruido gradiente y
+tener una curva monotona para `continentalness -> altura` sin sobreoscilacion ni
+cumbres infinitas. `SplineError` implementa `Display`/`Error` **a mano**: se
+evita una dependencia nueva (`thiserror`) por 10 lineas.
+
+**Consecuencia.** Tests de determinismo, rango, monotonia y extrapolacion.
+
+### 2026-10-08 - Fase C: campos 2D y altura (calibracion con datos)
+
+**Decision.** `larion/config.rs` (versionada, `validate()`), `climate.rs`
+(`ClimatePoint`), `erosion.rs` (erosion -> amplitud de relieve, curvas de
+detalle y de crestas) y `height.rs` (`compose_height` puro + `LarionSample`).
+Se calibro con la galeria de `larion_preview` (no a ojo): curva base, `max_relief
+= 340`, `interior`/`landness`, y una **curva de normalizacion de crestas**
+(`RidgedMulti` concentra su salida en negativos; `r*0.5+0.5` dejaba el mundo
+plano).
+
+**Medido (area de 20480 bloques, 4 semillas).** Rango `p99-p01 = 176..192`,
+cumbres `> 200` (hasta ~294), 7 biomas y ninguno `> 38 %`.
+
+**Alternativas descartadas.** Interpolar/calibrar con capturas del mod Larion:
+no hay cifras verificables; se usan sus **principios**, no sus numeros.
+
+### 2026-10-08 - Fase D: densidad 3D en banda (voladizos)
+
+**Decision.** `larion/density.rs`: `DensityField` evalua ruido 3D **solo** en
+`|y - H| < 16`, con la amplitud apagada en los bordes de la banda y escalada por
+`overhang_strength = (1 - erosion) * smoothstep(montana)`. Fuera de la banda la
+densidad es la altura 2D.
+
+**Motivo.** Voladizos reales sin la reticula gruesa 4x4x4 del camino `Graph` y
+sin evaluar 3D en todo el volumen. La banda y las octavas se bajaron (1 octava,
+banda 16) para **medir** el coste mas abajo.
+
+### 2026-10-08 - Fase E: biomas multi-parametricos
+
+**Decision.** `larion/biome.rs`: `BiomeNode` (punto ideal + pesos por eje),
+`BiomeSelector` (distancia ponderada O(N)) y `BiomeBlend` (principal,
+secundario, `mix`). 7 nodos por defecto (datos). Sustituye al Voronoi de celdas,
+que producia **bordes poligonales** en las fronteras.
+
+**Motivo.** Seccion 3.2 del prompt. La continuidad del `mix` se testea (gradiente
+acotado entre columnas vecinas) y la cobertura (7 biomas, ninguno `> 45 %`).
+
+### 2026-10-08 - Fase F: integracion (tercer generador) y versiones
+
+**Decision.** `GeneratorKind::Larion` (nombre `"larion"`), campo
+`TerrainGenerator.larion: Option<LarionGenerator>`, `generate_column_larion`
+(rejilla 18x18 con padding, densidad en banda, materiales, agua, arboles) y
+ramas en `sample`/`height`/`surface_height`/`biome_at`/`climate`/
+`tree_base_supported`. `LARION_MAX_HEIGHT = 300`. `GENERATOR_VERSION 20 -> 21`;
+`Cargo.toml -> 0.47.0`. `FORMAT_VERSION` **intacto (6)**.
+
+**Motivo.** Tercer camino sin tocar `Legacy16`/`Graph` (compatibilidad de
+mundos). `SOLARIA_GENERATOR=larion` ya funciona via `from_name`.
+
+**Consecuencia.** Tests de continuidad entre chunks (tolerancia de banda),
+determinismo, cumbres `> 200`, agua, arboles sin flotantes y roca en laderas.
+`cargo test --lib` = **429 pass, 1 ignored**.
+
+### 2026-10-08 - Fase G: rios, materiales y arboles
+
+**Decision.** `larion/rivers.rs` (cresta + warp propio, `depth = base *
+lerp(1, 2.5, mountain)`), `larion_surface_block` (roca en pendiente y cumbres
+`> 200` -> `Stone`/`Snow`) y transicion de material por `BiomeBlend` + hash
+global. Los arboles reutilizan `TreePlacer` con el bioma primario y la pendiente
+real; las cuevas reutilizan `CaveSystem`.
+
+**Motivo.** Secciones 4.6 y 7 del prompt, reutilizando lo que ya funciona.
+
+### 2026-10-08 - Fase H: rendimiento, capturas y cierre
+
+**Decision.** Benchmark `el_coste_por_columna_no_supera_1_5x_legacy`
+(`#[ignore]`, se ejecuta a mano). Capturas `screenshots/larion_<seed>_<capa>.png`
+(height/biome/slope para 3 semillas + corte de densidad) y documentacion
+(`docs/worldgen.md`, `ARCHITECTURE.md`).
+
+**Medido (release).** Larion **1.44x** legacy por columna (`6.265 ms` vs
+`4.337 ms`), dentro del presupuesto de 1.5x tras bajar la banda 3D a 16 y a 1
+octava.
+
+**Lo que no se pudo verificar (honesto).**
+- **Visual en GPU**: no hay GPU en el entorno. Las capturas son mapas
+  offline (altura/bioma/pendiente) y un corte de densidad, no una escena
+  renderizada; el meshing/la luz del terreno Larion no se ven aqui.
+- **Comparacion visual con el mod Larion**: no se midio su escala exacta; se
+  siguieron sus **principios** (secciones 2/11 del prompt).
+
+**Riesgos y deuda tecnica.**
+- **Continuidad de chunks**: garantizada por la funcion pura de `(seed,x,z)`; el
+  test comprueba que el techo real no se desfasa del campo `H` (tolerancia de la
+  banda, por los voladizos), no igualdad exacta de bloque.
+- **Coste**: dentro de 1.5x con la configuracion actual; subir octavas o la banda
+  lo supera (documentado).
+- **Dominancia de bioma**: dependiente de la region; sobre un area continental
+  grande (20k bloques) ningun bioma pasa del 38 %.
+
+**Consecuencia.** `Cargo.toml -> 0.47.0`; `GENERATOR_VERSION -> 21`;
+`FORMAT_VERSION` intacto (6). **429 tests + 1 ignored; clippy limpio.**
+
 ## Plantilla para nuevas entradas
 
 ```
