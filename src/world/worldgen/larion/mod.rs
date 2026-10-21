@@ -110,11 +110,7 @@ impl LarionGenerator {
             valley: Fractal2D::new(s(5), 2, config.valley_scale),
             macro_relief: Fractal2D::new(s(6), 2, config.macro_scale),
             detail: Fractal2D::new(s(7), config.detail_octaves, config.detail_scale),
-            temperature: Fractal2D::new(
-                s(8),
-                config.temperature_octaves,
-                config.temperature_scale,
-            ),
+            temperature: Fractal2D::new(s(8), config.temperature_octaves, config.temperature_scale),
             humidity: Fractal2D::new(s(9), config.humidity_octaves, config.humidity_scale),
             river_ridge: Fractal2D::new(s(10), 1, config.river_scale),
             river_warp: Fractal2D::new(s(11), 2, config.river_warp_scale),
@@ -158,13 +154,8 @@ impl LarionGenerator {
     /// Densidad 3D en unidad de bloque global. Positivo = solido.
     #[inline]
     pub fn density(&self, x: i32, y: i32, z: i32, sample: &LarionSample) -> f32 {
-        self.density.density(
-            x,
-            y,
-            z,
-            sample.height,
-            Self::overhang_strength(sample),
-        )
+        self.density
+            .density(x, y, z, sample.height, Self::overhang_strength(sample))
     }
 
     /// Muestrea la columna `(x, z)`. Punto de entrada unico del generador.
@@ -274,7 +265,11 @@ impl LarionGenerator {
         let n = self.temperature.sample(x as f64, z as f64) as f32 * 0.5 + 0.5;
         let raw = band * 0.7 + n * 0.3;
         let contraste = math::saturate(0.5 + (raw - 0.5) * cfg.climate_contrast);
-        let alt = math::smoothstep(cfg.sea_level, cfg.max_height, composed.height.max(cfg.sea_level));
+        let alt = math::smoothstep(
+            cfg.sea_level,
+            cfg.max_height,
+            composed.height.max(cfg.sea_level),
+        );
         (contraste - cfg.altitude_lapse_rate * alt).clamp(0.0, 1.0)
     }
 

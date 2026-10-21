@@ -533,15 +533,7 @@ mod tests {
         player.on_ground = true;
         let mut max_feet = 0.0f32;
         for _ in 0..90 {
-            player.update(
-                &mut camera,
-                corridor,
-                0.0,
-                false,
-                true,
-                false,
-                1.0 / 60.0,
-            );
+            player.update(&mut camera, corridor, 0.0, false, true, false, 1.0 / 60.0);
             max_feet = max_feet.max(camera.position.y - EYE_HEIGHT);
         }
         assert!(

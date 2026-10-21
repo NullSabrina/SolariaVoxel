@@ -45,7 +45,11 @@ mod shader_tests {
             ("highlight", include_str!("highlight.wgsl")),
         ] {
             let parsed = wgpu::naga::front::wgsl::parse_str(src);
-            assert!(parsed.is_ok(), "shader {name} no compila: {:?}", parsed.err());
+            assert!(
+                parsed.is_ok(),
+                "shader {name} no compila: {:?}",
+                parsed.err()
+            );
         }
     }
 }

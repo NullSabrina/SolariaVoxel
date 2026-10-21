@@ -32,7 +32,9 @@ impl fmt::Display for SplineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SplineError::TooFewPoints => write!(f, "la spline necesita al menos 2 puntos"),
-            SplineError::NotIncreasing => write!(f, "las abscisas deben ser estrictamente crecientes"),
+            SplineError::NotIncreasing => {
+                write!(f, "las abscisas deben ser estrictamente crecientes")
+            }
             SplineError::NotFinite => write!(f, "las coordenadas de la spline deben ser finitas"),
         }
     }
@@ -159,7 +161,14 @@ mod tests {
     use super::*;
 
     fn spline_creciente() -> Spline {
-        Spline::new(&[(-1.0, 10.0), (-0.2, 30.0), (0.0, 64.0), (0.5, 120.0), (1.0, 210.0)]).unwrap()
+        Spline::new(&[
+            (-1.0, 10.0),
+            (-0.2, 30.0),
+            (0.0, 64.0),
+            (0.5, 120.0),
+            (1.0, 210.0),
+        ])
+        .unwrap()
     }
 
     #[test]
@@ -178,7 +187,13 @@ mod tests {
     #[test]
     fn la_spline_es_exacta_en_los_nodos() {
         let s = spline_creciente();
-        for &(x, y) in &[(-1.0, 10.0), (-0.2, 30.0), (0.0, 64.0), (0.5, 120.0), (1.0, 210.0)] {
+        for &(x, y) in &[
+            (-1.0, 10.0),
+            (-0.2, 30.0),
+            (0.0, 64.0),
+            (0.5, 120.0),
+            (1.0, 210.0),
+        ] {
             assert!((s.eval(x) - y).abs() < 1e-4, "nodo {x}: {}", s.eval(x));
         }
     }

@@ -90,6 +90,30 @@ fn bench_fluid_tick() {
 }
 
 #[test]
+fn bench_memory_r12() {
+    // Memoria CPU en el radio de render por defecto (12): 441 columnas.
+    use crate::world::memory::mib;
+    let mut world = World::new(SEED, 12, vec![]);
+    let t = Instant::now();
+    world.update_streaming([8.0, 74.0, 8.0]);
+    let load_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let m = world.memory_report();
+    let total = m.total_bytes();
+    println!(
+        "[bench] memoria R12: {} col | {:.1} MB CPU | {:.0} KB/col | carga {:.0} ms | bloques {:.1} cielo {:.1} bloque {:.1} fluido {:.1} struct {:.1}",
+        m.columns,
+        mib(total),
+        total as f32 / m.columns.max(1) as f32 / 1024.0,
+        load_ms,
+        mib(m.blocks_bytes),
+        mib(m.skylight_bytes),
+        mib(m.blocklight_bytes),
+        mib(m.fluid_bytes),
+        mib(m.struct_overhead_bytes),
+    );
+}
+
+#[test]
 fn bench_save_load_column() {
     let generator = TerrainGenerator::new(SEED);
     let column = generator.generate_column(0, 0);

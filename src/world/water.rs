@@ -25,8 +25,9 @@
 //! rapido (ver `WATER_PERIOD` en `engine::app`), pero las reglas son las mismas.
 //!
 //! Fuera del alcance (documentado): presion hacia arriba (vasos comunicantes),
-//! evaporacion y **lava** (bloques/texturas aparte). Los bordes de chunk no
-//! cargados se saltan (`in_bounds`).
+//! evaporacion y **lava** (bloques/texturas aparte). Una celda que toca una
+//! columna **no cargada** no se recalcula: se congela (`is_loaded`), porque un
+//! vecino desconocido **no** es lo mismo que un vecino seco (P1-6).
 
 use std::collections::VecDeque;
 
@@ -132,6 +133,25 @@ pub trait FluidGrid {
     fn is_solid(&self, p: [i32; 3]) -> bool;
     fn fluid(&self, p: [i32; 3]) -> Fluid;
     fn set_fluid(&mut self, p: [i32; 3], f: Fluid);
+
+    /// ¿La columna de `p` esta cargada? Por defecto equivale a `in_bounds`.
+    ///
+    /// Se usa para distinguir "no hay agua" de "no tenemos datos": una celda
+    /// junto a una columna descargada no se recalcula (se congela) en vez de
+    /// secarse (P1-6). Las rejillas de test lo sobreescriben para simular
+    /// columnas descargadas; `World` usa el valor por defecto (`in_bounds`).
+    fn is_loaded(&self, p: [i32; 3]) -> bool {
+        self.in_bounds(p)
+    }
+}
+
+/// ¿Algun vecino **horizontal** vive en una columna no cargada? En ese caso no
+/// se puede recalcular el nivel sin inventar datos.
+fn touches_unknown_column<G: FluidGrid + ?Sized>(grid: &G, p: [i32; 3]) -> bool {
+    H_DIRS.iter().any(|d| {
+        let n = [p[0] + d[0], p[1], p[2] + d[2]];
+        !grid.is_loaded(n)
+    })
 }
 
 /// Los 4 vecinos horizontales.
@@ -228,7 +248,8 @@ fn spread<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3], level: u8) -> bool {
     let mut changed = false;
     for d in H_DIRS {
         let n = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
-        if !grid.in_bounds(n) || grid.is_solid(n) {
+        // No se escribe agua hacia una columna sin cargar (se pierde al descargar).
+        if !grid.in_bounds(n) || !grid.is_loaded(n) || grid.is_solid(n) {
             continue;
         }
         let nf = grid.fluid(n);
@@ -245,6 +266,11 @@ fn spread<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3], level: u8) -> bool {
 pub fn step_cell<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
     let cur = grid.fluid(p);
     if !cur.is_water() {
+        return false;
+    }
+    // P1-6: sin datos de una columna vecina el agua **no** se seca; se congela
+    // hasta que la columna se cargue (entonces `wake_column_water` la encola).
+    if touches_unknown_column(grid, p) {
         return false;
     }
     let mut changed = false;
@@ -372,6 +398,50 @@ mod tests {
         fn set_fluid(&mut self, p: [i32; 3], f: Fluid) {
             self.set(p, f);
         }
+    }
+
+    /// Rejilla con la mitad izquierda "no cargada": sirve para probar que el
+    /// borde no se trata como seco.
+    struct EdgeGrid {
+        cells: HashMap<[i32; 3], Fluid>,
+    }
+
+    impl FluidGrid for EdgeGrid {
+        fn in_bounds(&self, p: [i32; 3]) -> bool {
+            (1..16).contains(&p[1]) && p[0].abs() < 16 && p[2].abs() < 16
+        }
+        fn is_loaded(&self, p: [i32; 3]) -> bool {
+            p[0] >= 0
+        }
+        fn is_solid(&self, p: [i32; 3]) -> bool {
+            p[1] <= 0
+        }
+        fn fluid(&self, p: [i32; 3]) -> Fluid {
+            *self.cells.get(&p).unwrap_or(&Fluid::None)
+        }
+        fn set_fluid(&mut self, p: [i32; 3], f: Fluid) {
+            if f == Fluid::None {
+                self.cells.remove(&p);
+            } else {
+                self.cells.insert(p, f);
+            }
+        }
+    }
+
+    #[test]
+    fn el_agua_en_el_borde_no_se_seca_si_el_vecino_no_esta_cargado() {
+        // P1-6: sin datos de la columna vecina, la celda se congela; antes
+        // `in_bounds == false` se interpretaba como "seco" y el agua desaparecia.
+        let mut g = EdgeGrid {
+            cells: HashMap::new(),
+        };
+        g.set_fluid([0, 1, 0], Fluid::Flow(5));
+        assert!(!step_cell(&mut g, [0, 1, 0]), "la celda debe congelarse");
+        assert_eq!(
+            g.fluid([0, 1, 0]),
+            Fluid::Flow(5),
+            "el agua del borde no debe secarse"
+        );
     }
 
     /// Un "tick" de test: procesa todas las celdas con agua (mas de una pasada

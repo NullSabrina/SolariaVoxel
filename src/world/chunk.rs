@@ -102,6 +102,10 @@ pub struct Column {
     /// condicion "fuente" no se guarda: se infiere (`Block::Water` con flujo 0).
     /// Indice `(y * CHUNK_SIZE + z) * CHUNK_SIZE + x`, como la luz.
     fluid: Option<Box<[u8]>>,
+    /// **Cache perezosa de celdas con flujo** (indice plano local). Evita
+    /// re-escanear 98 304 celdas al re-despertar el agua en cada cruce de chunk
+    /// (P1-8). Se mantiene al dia en [`Column::set_flow`].
+    flow_cells: Option<Vec<u32>>,
     /// **Cache perezosa de emisores** de luz: `(indice local, nivel)`. Evita
     /// re-escanear las 24 secciones en cada `World::recompute_block_light` (el
     /// barrido de emisores era el grueso del coste al cruzar de chunk). Se
@@ -123,6 +127,7 @@ impl Column {
             block_light: None,
             surface: [0; CHUNK_SIZE * CHUNK_SIZE],
             fluid: None,
+            flow_cells: None,
             emitters: None,
             water_surface: Vec::new(),
         }
@@ -264,6 +269,7 @@ impl Column {
     pub fn set_flow(&mut self, x: usize, y: usize, z: usize, level: u8) {
         let level = level.min(MAX_LEVEL);
         let idx = Self::light_index(x, y, z);
+        let old = self.flow_at(x, y, z);
         match &mut self.fluid {
             Some(buf) => Self::write_nibble(buf, idx, level),
             None if level != 0 => {
@@ -273,6 +279,48 @@ impl Column {
             }
             None => {}
         }
+        // Mantiene al dia la cache de celdas con flujo (si ya se construyo).
+        if level != old
+            && let Some(cells) = self.flow_cells.as_mut()
+        {
+            let idx = idx as u32;
+            if level == 0 {
+                cells.retain(|&c| c != idx);
+            } else if old == 0 {
+                cells.push(idx);
+            }
+        }
+    }
+
+    /// Celdas con **flujo** de la columna, como indices planos locales. Cache
+    /// perezosa: la primera llamada escanea una vez y luego se mantiene al dia.
+    pub fn flow_cells(&mut self) -> &[u32] {
+        if self.flow_cells.is_none() {
+            let mut cells = Vec::new();
+            if let Some(buf) = self.fluid.as_deref() {
+                for (i, &byte) in buf.iter().enumerate() {
+                    if byte & 0x0F != 0 {
+                        cells.push((i * 2) as u32);
+                    }
+                    if byte >> 4 != 0 {
+                        cells.push((i * 2 + 1) as u32);
+                    }
+                }
+            }
+            self.flow_cells = Some(cells);
+        }
+        self.flow_cells.as_deref().unwrap_or(&[])
+    }
+
+    /// `(x, y, z)` locales de un indice plano de [`Column::flow_cells`].
+    #[inline]
+    pub fn cell_of_index(idx: u32) -> (usize, usize, usize) {
+        let idx = idx as usize;
+        (
+            idx % CHUNK_SIZE,
+            idx / (CHUNK_SIZE * CHUNK_SIZE),
+            (idx / CHUNK_SIZE) % CHUNK_SIZE,
+        )
     }
 
     /// ¿La columna reservo ya su almacen de flujo? Sirve para saber si merece la
@@ -691,6 +739,29 @@ mod tests {
         column.set_flow(2, 5, 7, 0);
         assert_eq!(column.flow_at(2, 5, 7), 0);
         assert_eq!(column.flow_at(3, 5, 7), MAX_LEVEL);
+    }
+
+    #[test]
+    fn la_cache_de_celdas_con_flujo_se_mantiene_al_dia() {
+        // P1-8: indice de celdas con flujo sin re-escanear la columna.
+        let mut column = Column::empty();
+        assert!(column.flow_cells().is_empty());
+        column.set_flow(1, 2, 3, 5);
+        column.set_flow(4, 2, 3, 0); // nivel 0: no entra
+        assert_eq!(
+            column.flow_cells(),
+            &[Column::light_index(1, 2, 3) as u32],
+            "solo la celda con flujo"
+        );
+        // Cambiar el nivel no duplica la entrada; ponerlo a 0 la quita.
+        column.set_flow(1, 2, 3, 7);
+        assert_eq!(column.flow_cells().len(), 1);
+        column.set_flow(1, 2, 3, 0);
+        assert!(column.flow_cells().is_empty());
+        // Si la cache se construye despues de escribir, tambien es correcta.
+        let mut other = Column::empty();
+        other.set_flow(5, 6, 7, 3);
+        assert_eq!(other.flow_cells(), &[Column::light_index(5, 6, 7) as u32]);
     }
 
     #[test]

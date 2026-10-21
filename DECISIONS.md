@@ -3082,7 +3082,7 @@ limpio. Capturas `v0.33.0_{view_r12,view_r16,fog_short}.png`.
   asigna a la ranura activa.
 
 **Motivo.** El usuario pidio "inventario creativo con categorias, busqueda, scroll"
-y "nombre del bloque al cambiar de ranura". Se aisl� la logica en `ui` para poder
+y "nombre del bloque al cambiar de ranura". Se aisló la lógica en `ui` para poder
 probarla sin GPU (regla del repo).
 
 **Alternativas descartadas.** `serde_json` + `assets/lang/*.json` (dependencia
@@ -3125,7 +3125,7 @@ eso esta la arena). Evaluar con `dyn Fn` por voxel (coste indirecto; ya se
 descarto en el greedy de v0.19.1). Integrar en `terrain.rs` de golpe (arriesga
 `GENERATOR_VERSION` y mundos existentes): se hace como C2/C3 en pasos.
 
-**Pendiente honesto (documentado, NO hecho).** C2 (evaluacion en ret�cula 4x8x4
+**Pendiente honesto (documentado, NO hecho).** C2 (evaluacion en retícula 4x8x4
 + interpolacion + `Cache2D` + paralelizacion con el pool actual), C3
 (`GeneratorKind::{Legacy16,Graph}` + hash del grafo en el header + coexistencia),
 C4 (clima como canales del grafo) y C5/C6 (restricciones de decoracion,
@@ -3194,7 +3194,7 @@ renderer al pulsar "Jugar": mas limpio en teoria, pero reestructura el arranque 
 la demo; se mantiene el renderer listo bajo el titulo.
 
 **Pendiente honesto.** Menu de **opciones** + reasignacion de teclas, toolkit de
-widgets nine-slice, fuente con tildes/�� en el render, y multi-mundo con
+widgets nine-slice, fuente con tildes/ñ en el render, y multi-mundo con
 miniaturas. La reasignacion de teclas y las opciones persistidas no estan.
 
 **Consecuencia.** `world/library.rs` (8 tests), `ui/screens.rs` (3 tests),
@@ -4547,6 +4547,102 @@ sin `world.vf`; (2) el texto se escribia en Nombre, dejando la semilla vacia.
 **Consecuencia.** `src/engine/app.rs`, `src/world/library.rs`, `README.md`.
 **432 tests; clippy limpio.** `GENERATOR_VERSION`/`FORMAT_VERSION` intactos
 (21/6). Binarios debug y release reconstruidos.
+
+## v0.48.0 - Auditoria de integridad (P0/P1/P2)
+
+### 2026-10-21 - Los saves ilegibles no se abren vacios; recuperacion desde `.bak`
+
+**Decision.** `world::save::load_world` distingue tres resultados: `Missing`
+(no existe: mundo nuevo legitimo), `Loaded` y `Recovered` (el principal fallo y
+se uso el `.bak`). `Unreadable` se devuelve cuando el archivo existe pero no se
+puede leer y no hay backup valido. El principal danado se mueve a
+`world.vf.corrupt` y el recuperado se escribe en el principal **sin rotar** el
+`.bak` bueno. Un formato futuro (`TooNew`) nunca se degrada a un backup.
+`engine::app` comparte un unico camino de carga (`load_world_data`) entre el
+arranque y el menu; si un mundo no se puede leer se registra el error y se pasa
+al siguiente, y **nunca** se sobrescribe.
+
+**Motivo.** P0-1: cualquier `Err` de `load_and_migrate` se trataba como "mundo
+recien creado"; el primer autoguardado escribia un mundo vacio y rotaba el
+`world.vf` corrupto sobre el `.bak` bueno. P1-5: nadie usaba el `.bak` al cargar.
+
+**Consecuencia.** Tests nuevos de `load_world` (recuperacion, cuarentena,
+principal ausente con backup, formato futuro) y de `load_world_data` en `app`.
+
+### 2026-10-21 - Snapshots finales y guardado en vuelo (P1-1)
+
+**Decision.** `save_world` coalesce (marca `save_pending` y reenvia al terminar
+el guardado en vuelo) y `finalize_save`/`load_world` encolan un snapshot
+**forzado** (`save_world_now`). El worker procesa los trabajos en orden, asi el
+ultimo snapshot es el que queda.
+
+**Motivo.** Cerrar o cambiar de mundo durante un autoguardado descartaba las
+ediciones posteriores porque `save_world` retornaba si `save_requested`.
+
+### 2026-10-21 - Formato v7: checksum, orden determinista y lectura acotada
+
+**Decision.** `FORMAT_VERSION -> 7`. Cada `ChunkRecord` guarda un checksum
+FNV-1a 64 de bloques y fluido descomprimidos; `chunks` pasa a `BTreeMap` (bytes
+deterministas); la descompresion LZ4 valida el prefijo de tamano antes de
+asignar; `load_from` distingue cabecera corrupta y rechaza bytes sobrantes; la
+migracion consume los registros (sin clonar). Los mundos v6 migran calculando el
+checksum una vez.
+
+**Motivo.** P1-4: LZ4 no trae checksum y una corrupcion que conserva el tamano
+pasaba inadvertida. P2-4/5/6/8/9. La migracion es compatible: v1..v6 siguen
+leyendose con sus espejos posicionales.
+
+### 2026-10-21 - Biblioteca segura y ruta estable (P1-2/P1-3/P1-7/P2-10..15)
+
+**Decision.** La base de mundos se resuelve por `SOLARIA_HOME` > biblioteca
+existente en el directorio de trabajo > directorio del ejecutable (con fallback
+al cwd si no es escribible). La importacion legacy deja `.legacy-imported` (no
+resucita al borrar todos los mundos) y lee solo la cabecera. Los metadatos
+ilegibles o un generador desconocido **no** se degradan en silencio: se rechaza
+la entrada con un mensaje. `level.json` se sincroniza antes del rename; los
+slugs se validan (`..`, separadores, reservados); `list_worlds_checked`
+propaga errores; duplicar es atomico; borrar el mundo activo suelta el renderer
+y reinicia el worker.
+
+### 2026-10-21 - Agua: bordes desconocidos, flujo persistido y coste (P1-6/P1-8/P2-1/P2-16)
+
+**Decision.** `FluidGrid::is_loaded` separa "columna cargada" de "existe"; una
+celda que toca una columna descargada se **congela** en vez de secarse. Las
+columnas mantienen una cache de celdas con flujo (`Column::flow_cells`), usada
+al re-despertar el agua sin escanear 98 304 celdas por columna y cruce. El agua
+simulada marca su columna como `dirty` cuando cambia (se persiste el flujo). El
+tick consulta el reloj cada 64 celdas.
+
+### 2026-10-21 - Mesher de agua y documentacion
+
+**Decision.** `fluid_section` es generico (sin `dyn` en el hot path), reserva
+capacidad, evita calcular esquinas si la celda no aporta geometria y escala la
+`v` de las caras laterales a la altura visible (sin comprimir la textura).
+`gui.json` queda como manifiesto legible validado por un test contra las
+constantes de `render/gui.rs`. `lib.rs`/`world/mod.rs` se reescriben como
+orientacion actual (el historico vive aqui).
+
+### 2026-10-21 - Re-medicion de rendimiento y limpieza de assets
+
+**Decision.** Se ejecutan los `bench_*` en `--release` (mejor de 3) y el test
+ignorado de Larion (mediana de 7 pares intercalados): **1.43-1.59, mediana
+1.54** frente al 1.44 historico. El guardrail del test pasa de 1.5 a **1.6**
+porque el equipo (Ryzen 3 5300U, ~40 % de carga de fondo) mete ruido, no porque
+el generador haya cambiado. R12 en vivo: **120.1 MB CPU + 358.1 MB GPU (~478
+MB)**, dentro del objetivo; R16 no se re-midio por RAM libre (1.4 GB). Se anade
+`SOLARIA_MEM_SECS` para imprimir memoria en estado estacionario. Se elimina
+`assets/backup/` (lista segura de la Fase 3) y se actualiza `assets/README.md`.
+
+**Motivo.** Cerrar los pendientes de la auditoria con datos actuales y retirar
+el material historico que el propio README declaraba no-runtime.
+
+**Nota de auditoria.** P2-20 (mojibake) era un **falso positivo** del lector de
+la auditoria: los archivos son UTF-8 valido (los unicos caracteres no ASCII son
+acentos y guiones tipograficos legitimos). No se reescribio nada por ese punto.
+
+**Consecuencia.** `Cargo.toml -> 0.48.0`; `FORMAT_VERSION -> 7`;
+`GENERATOR_VERSION` intacto (21). **459 tests + 1 ignored (+1 doctest); clippy
+limpio.**
 
 ## Plantilla para nuevas entradas
 

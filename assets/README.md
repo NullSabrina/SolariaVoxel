@@ -6,8 +6,8 @@
 | ------- | ------ | --- |
 | `atlas.png` | 64x80 | Atlas de texturas de bloques (4 columnas x 5 filas de tiles 16x16). Lo carga `world/atlas.rs`; si falta o cambia de tamano, el motor cae al atlas procedural. |
 | `gui.png` | 256x256 | Arte de interfaz 2D con **bisel** estilo Minecraft: hotbar, ranuras (normal/hover/seleccionada), panel, botones (normal/hover/pulsado/desactivado), pestana, flecha, mirilla y atenuador. Pintado en **LibreSprite**; regenerable con `tools/gen_gui.js`. Si falta, el motor cae al procedural de `render/gui.rs`. |
-| `gui.json` | - | Manifiesto de regiones de `gui.png` (coordenadas), emitido por `tools/gen_gui.js`. |
-| `src/ui/gui.aseprite` | - | Fuente editable en LibreSprite de `gui.png`. |
+| `gui.json` | - | Manifiesto **legible** de regiones de `gui.png`. La fuente de verdad son las constantes de `src/render/gui.rs`; un test exige que coincidan. |
+| `src/ui/gui.aseprite` | - | **Salida generada** por `tools/gen_gui.js` (no versionada). No es una fuente requerida: el arte editable se repinta con el script. |
 | `torch_32.png` | 16x16 | Sprite fuente de la antorcha. |
 | `torch_sprite.png` | 16x16 | Sprite fuente alternativo de la antorcha. |
 | `paleta_master.gpl` | - | Paleta maestra de LibreSprite (documenta los colores del atlas). |
@@ -32,11 +32,18 @@ color/forma.
 
 - `gen_atlas_final.py` — regenera `atlas.png` byte-identico.
 - `gen_atlas_medieval.py` — variante medieval del atlas.
+- `gen_gui.js` — repinta `gui.png` desde LibreSprite y guarda una copia
+  `assets/src/ui/gui.aseprite` (salida generada, no versionada).
 - `screenshot.ps1` — captura la ventana del ejecutable en ejecucion.
 
-## `backup/`
+## Procedencia y licencia
 
-Copias historicas de arte que **no** carga el motor: variantes anteriores del
-atlas y de los sprites de la antorcha (`*_pre28`, `*_med`), los mapas de atlas en
-texto y el `.bbmodel` previo. Se conservan por trazabilidad; si no hacen falta,
-se pueden borrar sin afectar al motor.
+Salvo que se indique lo contrario, **todos** los recursos de `assets/` son
+originales del proyecto: se pintaron en LibreSprite, se modelaron en Blockbench
+o los generan los scripts de `tools/`. No se ha incorporado arte de terceros.
+Se distribuyen bajo la misma licencia dual que el codigo (`MIT OR
+Apache-2.0`); las fuentes `.aseprite`/`.bbmodel` antiguas conservadas son
+material historico del propio proyecto.
+
+El material historico que no usa el runtime (`assets/backup/`) se retiro en
+v0.48.0; queda en el historial de Git si hace falta consultarlo.

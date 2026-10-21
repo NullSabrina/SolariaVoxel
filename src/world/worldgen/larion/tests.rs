@@ -76,7 +76,10 @@ fn stats_altura(seed: u32, pixels: i32, step: i32) -> (Vec<i32>, i64, i64) {
     let mut max = i32::MIN;
     for py in 0..pixels {
         for px in 0..pixels {
-            let h = g.sample((px * step) as f64, (py * step) as f64).height.round() as i32;
+            let h = g
+                .sample((px * step) as f64, (py * step) as f64)
+                .height
+                .round() as i32;
             heights.push(h);
             max = max.max(h);
         }

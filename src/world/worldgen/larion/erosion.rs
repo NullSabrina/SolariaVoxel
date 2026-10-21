@@ -62,7 +62,12 @@ pub fn peak_term(cfg: &LarionConfig, peaks01: f32, relief_amp: f32) -> f32 {
 /// crestas (`peak_attenuation` cerca de 1 apaga el valle) para que las montanas
 /// no queden cortadas por un valle que las cruza.
 #[inline]
-pub fn valley_term(cfg: &LarionConfig, valley_raw: f32, peak_attenuation: f32, landness: f32) -> f32 {
+pub fn valley_term(
+    cfg: &LarionConfig,
+    valley_raw: f32,
+    peak_attenuation: f32,
+    landness: f32,
+) -> f32 {
     let v = 1.0 - math::saturate(valley_raw.abs());
     let valley = v.powf(cfg.valley_power);
     valley * cfg.valley_amplitude * landness * (1.0 - math::saturate(peak_attenuation))

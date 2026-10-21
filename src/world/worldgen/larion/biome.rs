@@ -163,10 +163,22 @@ mod tests {
     #[test]
     fn casos_representativos() {
         let s = BiomeSelector::with_defaults();
-        assert_eq!(s.select(&point(0.9, 0.1, 0.7, 0.8, 0.2)).primary, Biome::Desert);
-        assert_eq!(s.select(&point(0.6, 0.95, 0.5, 1.0, 0.1)).primary, Biome::Swamp);
-        assert_eq!(s.select(&point(0.05, 0.35, 0.8, 0.3, 0.6)).primary, Biome::Tundra);
-        assert_eq!(s.select(&point(0.55, 0.75, 0.85, 0.4, 0.5)).primary, Biome::Forest);
+        assert_eq!(
+            s.select(&point(0.9, 0.1, 0.7, 0.8, 0.2)).primary,
+            Biome::Desert
+        );
+        assert_eq!(
+            s.select(&point(0.6, 0.95, 0.5, 1.0, 0.1)).primary,
+            Biome::Swamp
+        );
+        assert_eq!(
+            s.select(&point(0.05, 0.35, 0.8, 0.3, 0.6)).primary,
+            Biome::Tundra
+        );
+        assert_eq!(
+            s.select(&point(0.55, 0.75, 0.85, 0.4, 0.5)).primary,
+            Biome::Forest
+        );
     }
 
     #[test]
@@ -189,7 +201,11 @@ mod tests {
                 let t = i as f32 / 39.0;
                 let h = j as f32 / 39.0;
                 let b = s.select(&point(t, h, 0.6, 0.5, 0.4));
-                assert!((0.0..=0.5).contains(&b.mix), "mix fuera de rango: {}", b.mix);
+                assert!(
+                    (0.0..=0.5).contains(&b.mix),
+                    "mix fuera de rango: {}",
+                    b.mix
+                );
             }
         }
     }

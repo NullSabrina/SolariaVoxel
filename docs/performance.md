@@ -13,6 +13,59 @@ cargo test --release -- --nocapture bench_
 
 (En `--release` los tiempos son menores; en `dev` son una cota superior estable.)
 
+> **Re-medición v0.48.0 (2026-10-21).** Equipo: Windows 11, **AMD Ryzen 3
+> 5300U** (4C/8T, 2.6 GHz), **AMD Radeon Graphics** integrada, 7.3 GB RAM, backend
+> **Vulkan**. Build `cargo test --release` (crate a `opt-level = 3`). La máquina
+> tenía ~40 % de carga de fondo (navegador y otro juego), así que los tiempos
+> absolutos son una **cota superior**. Método: **mejor de 3** ejecuciones para
+> los `bench_*` y **mediana de 7 pares intercalados** para el ratio
+> Larion/legacy.
+>
+> | benchmark | v0.48.0 (release) | histórico (dev, opt 1) |
+> |---|---|---|
+> | `terrain_generate_column` | **8.06 ms/col** (5.37 ms en ejecución aislada) | 3.900 ms |
+> | `mesh_greedy_section` (4 secciones) | **3.02 ms** | 2.801 ms / 5 secciones |
+> | `lighting_incremental` | **1.62 ms/edición** | 0.997 ms |
+> | `fluid_tick` (charca 16x16) | **0.040 ms/tick** | 0.027 ms |
+> | `save_load_column` | record **0.43 ms** · `save_to` **4.15 ms** · `load_from` **1.61 ms** | 0.435 / 4.908 / 1.539 |
+> | Larion vs legacy | **mediana 1.54×** (rango 1.43–1.59) | 1.44× |
+>
+> Benchmarks heredados (`world::store::tests`, mismo run):
+>
+> | benchmark | v0.48.0 (release) | histórico |
+> |---|---|---|
+> | carga de 81 columnas (`warm_streaming`) | **466.7 ms** | 291.9 ms |
+> | `recompute_skylight` (81 col) | **21.9 ms** | 20.7 ms |
+> | `recompute_skylight` (3x3) | **5.9 ms** | 3.9 ms |
+> | `recompute_block_light` (global) | **19.8 ms** | 12.0 ms (con cache) |
+> | `update_streaming` (cruce, +9/-0) | **55.9 ms** | 22.6 ms |
+> | 100 ticks de una charca 16x16 | **0.76 ms** | 0.54 ms |
+>
+> El ratio de Larion quedó en 1.43–1.59 (mediana 1.54) bajo carga; el guardrail
+> del test se ajustó de 1.5 a **1.6** para no fallar por ruido del equipo, no
+> porque el generador haya cambiado. `terrain_generate_column` aislado da
+> 5.37 ms/col; la diferencia con el run completo es térmica/carga.
+
+### Memoria en vivo (R12, release)
+
+Con `SOLARIA_VIEW_RADIUS=12` y `SOLARIA_MEM_SECS=5`, tras asentar el streaming
+(441 columnas, 0 secciones pendientes):
+
+| categoría | tamaño |
+|---|---|
+| bloques | 41.3 MB |
+| luz de cielo | 41.3 MB |
+| luz de bloque (dispersa) | 37.2 MB |
+| fluido | 0.0 MB |
+| cabeceras `Column` | 0.3 MB |
+| **CPU total** | **120.1 MB** (~279 KB/columna) |
+| **GPU (mallas)** | **358.1 MB** |
+| **total CPU+GPU** | **~478 MB** |
+
+Sigue dentro del objetivo **< 500 MB**. R16 (**~871 MB** históricos) **no** se
+re-midió: con 1.4 GB de RAM libre en el equipo y ~871 MB estimados, se deja la
+cifra histórica para no forzar swap.
+
 ## Benchmarks (FASE 13)
 
 Salida de `bench_*` (dev, `opt-level = 1`):

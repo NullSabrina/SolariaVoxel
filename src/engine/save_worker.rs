@@ -134,6 +134,26 @@ mod tests {
     }
 
     #[test]
+    fn el_ultimo_trabajo_encolado_es_el_que_queda() {
+        // P1-1: el worker procesa en orden; un snapshot final forzado gana al
+        // que estaba en vuelo.
+        let path = temp_path("order");
+        let _ = std::fs::remove_file(&path);
+        let mut first = WorldSave::new(1, 0);
+        first.player_pos = [1.0, 2.0, 3.0];
+        let mut second = WorldSave::new(1, 0);
+        second.player_pos = [4.0, 5.0, 6.0];
+        let mut worker = SaveWorker::spawn();
+        assert!(worker.request(first, path.clone()));
+        assert!(worker.request(second, path.clone()));
+        worker.join();
+        let loaded = WorldSave::load_from(&path).unwrap();
+        assert_eq!(loaded.player_pos, [4.0, 5.0, 6.0]);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("vf.bak"));
+    }
+
+    #[test]
     fn el_worker_reporta_error_de_ruta() {
         // Guardar dentro de un archivo (el "directorio" es un fichero) falla.
         let blocker = temp_path("blocker");

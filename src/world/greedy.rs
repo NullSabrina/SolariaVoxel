@@ -588,7 +588,10 @@ mod tests {
             };
             mask_value(&query, &light, Face::PosX, 0, 0, 0)
         };
-        assert!(leaf_face(Block::Air).is_some(), "hoja contra aire debe verse");
+        assert!(
+            leaf_face(Block::Air).is_some(),
+            "hoja contra aire debe verse"
+        );
         assert!(leaf_face(Block::Stone).is_none(), "hoja contra solido no");
         assert!(leaf_face(Block::Water).is_none(), "hoja contra agua no");
         assert!(leaf_face(Block::Leaves).is_none(), "hoja contra hoja no");

@@ -88,12 +88,20 @@ pub struct App {
     world_saved: bool,
     /// Hay un guardado en segundo plano pedido y sin confirmar.
     save_requested: bool,
+    /// Se pidio guardar mientras habia otro en vuelo: se reenvia al terminar
+    /// (P1-1: no perder las ediciones posteriores).
+    save_pending: bool,
     /// El guardado final ya se hizo (evita el doble cierre CloseRequested+exiting).
     save_finalized: bool,
     /// Hilo de guardado en segundo plano.
     save_worker: Option<super::save_worker::SaveWorker>,
     /// Acumulador para el autoguardado periodico.
     autosave_timer: f32,
+    /// Intervalo del informe de memoria por consola (`SOLARIA_MEM_SECS`). `0` =
+    /// desactivado; sirve para medir el estado estacionario del streaming.
+    mem_report_secs: f32,
+    /// Acumulador del informe de memoria.
+    mem_report_timer: f32,
     /// Marca de tiempo del frame anterior, para calcular el `dt`.
     last_frame: Option<Instant>,
     /// Acumuladores para mostrar los FPS en el titulo de la ventana.
@@ -187,6 +195,95 @@ fn generator_kind_from_env() -> crate::world::GeneratorKind {
     std::env::var("SOLARIA_GENERATOR")
         .map(|s| crate::world::GeneratorKind::from_name(&s))
         .unwrap_or_default()
+}
+
+/// Datos necesarios para arrancar un mundo. Lo usan **tanto** el arranque como
+/// [`App::load_world`] para que no divergan (P2-21).
+struct LoadedWorld {
+    slug: String,
+    seed: u32,
+    restored: Vec<(crate::world::ChunkPos, crate::world::ChunkRecord)>,
+    header: crate::world::WorldHeader,
+    player_pos: [f32; 3],
+    hotbar: Vec<(u8, u8)>,
+    kind: crate::world::GeneratorKind,
+}
+
+/// Una posicion guardada fuera del mundo (p. ej. de un arranque anterior con
+/// columnas sin cargar) no debe dejar al jugador cayendo: se usa el spawn.
+fn sane_player_pos(p: [f32; 3]) -> [f32; 3] {
+    if p[1] < 0.0 || p[1] >= crate::world::WORLD_HEIGHT as f32 {
+        crate::world::save::DEFAULT_PLAYER_POS
+    } else {
+        p
+    }
+}
+
+/// Carga la identidad y el estado de un mundo aplicando la politica de
+/// recuperacion. Devuelve `Err` (sin inventar un mundo vacio) si el archivo
+/// existe pero es ilegible o si los metadatos no permiten conocer semilla o
+/// generador (P0-1 / P1-7).
+fn load_world_data(base: &std::path::Path, slug: &str) -> Result<LoadedWorld, String> {
+    use crate::world::save::{WorldLoad, load_world};
+
+    let dir = crate::world::library::saves_dir(base).join(slug);
+    let meta = crate::world::library::load_meta(&dir).ok_or_else(|| {
+        format!(
+            "'{slug}' no tiene level.json legible: no se puede determinar su semilla/generador (no se sobrescribe)"
+        )
+    })?;
+    let kind =
+        crate::world::GeneratorKind::try_from_name(&meta.generator_kind).ok_or_else(|| {
+            format!(
+                "'{slug}' tiene un generador desconocido ({:?}); no se degrada en silencio",
+                meta.generator_kind
+            )
+        })?;
+
+    let path = active_world_path(base, slug);
+    let (save, recovered) = match load_world(&path) {
+        WorldLoad::Missing => {
+            // Mundo recien creado: solo `level.json`, sin `world.vf` todavia.
+            println!(
+                "[world] '{}' sin world.vf; se inicia con semilla {} ({})",
+                slug,
+                meta.seed,
+                kind.name()
+            );
+            return Ok(LoadedWorld {
+                slug: slug.to_string(),
+                seed: meta.seed,
+                restored: Vec::new(),
+                header: crate::world::WorldHeader::new(meta.seed, meta.created_at),
+                player_pos: crate::world::save::DEFAULT_PLAYER_POS,
+                hotbar: crate::world::save::default_hotbar(),
+                kind,
+            });
+        }
+        WorldLoad::Loaded(save) => (save, false),
+        WorldLoad::Recovered(save) => (save, true),
+        WorldLoad::Unreadable(e) => {
+            return Err(format!(
+                "'{slug}' existe pero no se puede leer ({e}); no se sobrescribira"
+            ));
+        }
+    };
+    if recovered {
+        eprintln!(
+            "[world] '{slug}': el principal era ilegible; recuperado desde world.vf.bak (el danado queda en world.vf.corrupt)"
+        );
+    }
+    let seed = save.header.seed;
+    let header = save.header;
+    Ok(LoadedWorld {
+        slug: slug.to_string(),
+        seed,
+        restored: save.chunks.iter().map(|(p, r)| (*p, r.clone())).collect(),
+        header,
+        player_pos: sane_player_pos(save.player_pos),
+        hotbar: save.hotbar,
+        kind,
+    })
 }
 
 /// Semilla de un mundo nuevo a partir del texto introducido. Si el campo esta
@@ -432,6 +529,15 @@ impl App {
         // pausa): si no, `save_requested` se queda atascado y no se vuelve a guardar.
         self.poll_save();
 
+        // Informe periodico de memoria (diagnostico / benchmark de streaming).
+        if self.mem_report_secs > 0.0 && self.renderer.is_some() {
+            self.mem_report_timer += frame_dt;
+            if self.mem_report_timer >= self.mem_report_secs {
+                self.mem_report_timer = 0.0;
+                self.print_memory_report();
+            }
+        }
+
         // Nombre del bloque sobre la hotbar: aparece al cambiar de ranura y se
         // desvanece (a los ~2 s desaparece).
         if let Some((b, t)) = self.hotbar_toast {
@@ -589,8 +695,17 @@ impl App {
     /// para el autoguardado como para el cierre.
     fn save_world(&mut self) {
         if self.save_requested {
+            // Ya hay uno en vuelo: no se descarta la peticion; al terminar se
+            // reenvia un snapshot con el estado mas reciente (P1-1).
+            self.save_pending = true;
             return;
         }
+        self.save_world_now();
+    }
+
+    /// Encola un snapshot **aunque** haya otro guardado en vuelo. Como el worker
+    /// procesa los trabajos en orden, el ultimo snapshot es el que queda.
+    fn save_world_now(&mut self) {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -640,6 +755,41 @@ impl App {
                 Err(e) => eprintln!("[world] fallo el guardado (se reintentara): {e}"),
             }
         }
+        // P1-1: si se pidio guardar mientras habia otro en vuelo, se reenvia
+        // ahora con el estado actual (no se pierde la edicion posterior).
+        if !self.save_requested && self.save_pending {
+            self.save_pending = false;
+            if self.renderer.is_some() {
+                self.save_world_now();
+            }
+        }
+    }
+
+    /// Imprime el informe de memoria CPU/GPU (arranque y `SOLARIA_MEM_SECS`).
+    fn print_memory_report(&self) {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        use crate::world::memory::mib;
+        let m = renderer.world_memory();
+        println!(
+            "[mem] mundo: {} col | bloques {:.1} MB | cielo {:.1} MB | bloque {:.1} MB | fluido {:.1} MB | struct {:.1} MB | editados {} ({:.1} MB) | cola agua {} celdas",
+            m.columns,
+            mib(m.blocks_bytes),
+            mib(m.skylight_bytes),
+            mib(m.blocklight_bytes),
+            mib(m.fluid_bytes),
+            mib(m.struct_overhead_bytes),
+            m.modified_chunks,
+            mib(m.modified_bytes),
+            m.water_queue_cells,
+        );
+        println!(
+            "[mem] render: {} col con malla | GPU {:.1} MB | {} secciones pendientes",
+            renderer.mesh_columns(),
+            mib(renderer.gpu_mesh_bytes() as usize),
+            renderer.pending_mesh_sections(),
+        );
     }
 
     /// Cierre: pide el guardado, **espera** al hilo y recoge el resultado (para
@@ -649,7 +799,12 @@ impl App {
             return;
         }
         self.save_finalized = true;
-        self.save_world();
+        // Snapshot final **forzado**: si habia un guardado en vuelo, el worker
+        // escribe primero el antiguo y despues este; `join` espera a ambos.
+        self.save_pending = false;
+        if self.renderer.is_some() {
+            self.save_world_now();
+        }
         if let Some(worker) = self.save_worker.as_mut() {
             worker.join();
         }
@@ -1232,11 +1387,8 @@ impl App {
         }
         for (i, cell) in self.hotbar_cells(win_w, win_h).iter().enumerate() {
             if inside(cell) {
-                self.inventory.press(
-                    Some(crate::ui::SlotRef::hotbar(i)),
-                    button,
-                    shift,
-                );
+                self.inventory
+                    .press(Some(crate::ui::SlotRef::hotbar(i)), button, shift);
                 return;
             }
         }
@@ -1255,8 +1407,7 @@ impl App {
         for (i, cell) in self.hotbar_cells(win_w, win_h).iter().enumerate() {
             let [sx, sy, w, h] = *cell;
             if mx >= sx && mx < sx + w && my >= sy && my < sy + h {
-                self.inventory
-                    .drag_enter(crate::ui::SlotRef::hotbar(i));
+                self.inventory.drag_enter(crate::ui::SlotRef::hotbar(i));
                 return;
             }
         }
@@ -1372,67 +1523,28 @@ impl App {
     fn load_world(&mut self, slug: String) {
         // Guarda el mundo actual en segundo plano (con su ruta) antes de cambiar;
         // el worker seguira vivo y escribira el mundo anterior mientras cargamos.
+        // Es un snapshot **forzado**: aunque haya otro guardado en vuelo, el
+        // ultimo estado no se pierde (P1-1).
         if self.renderer.is_some() {
-            self.save_world();
+            self.save_world_now();
         }
         let base = self.world_base.clone();
-        let path = active_world_path(&base, &slug);
-        let (seed, restored, header, player_pos, hotbar) = match crate::world::load_and_migrate(&path) {
-            Ok(save) => {
-                let restored = save
-                    .chunks
-                    .iter()
-                    .map(|(pos, rec)| (*pos, rec.clone()))
-                    .collect();
-                (save.header.seed, restored, save.header, save.player_pos, save.hotbar)
-            }
+        let data = match load_world_data(&base, &slug) {
+            Ok(data) => data,
             Err(e) => {
-                // Un mundo **recien creado** solo tiene `level.json` (aun no hay
-                // `world.vf`). Antes esto rechazaba la entrada y hacia imposible
-                // jugar un mundo nuevo; ahora se arranca con la **semilla y el
-                // generador de sus metadatos**.
-                let dir = crate::world::library::saves_dir(&base).join(&slug);
-                match crate::world::library::load_meta(&dir) {
-                    Some(meta) => {
-                        println!(
-                            "[world] '{}' sin world.vf ({e}); se inicia con semilla {}",
-                            slug, meta.seed
-                        );
-                        (
-                            meta.seed,
-                            Vec::new(),
-                            crate::world::WorldHeader::new(meta.seed, now_unix()),
-                            crate::world::save::DEFAULT_PLAYER_POS,
-                            crate::world::save::default_hotbar(),
-                        )
-                    }
-                    None => {
-                        eprintln!("[world] no se pudo cargar '{slug}': {e}");
-                        return;
-                    }
-                }
+                eprintln!("[world] {e}");
+                return;
             }
         };
-        let player_pos =
-            if player_pos[1] < 0.0 || player_pos[1] >= crate::world::WORLD_HEIGHT as f32 {
-                crate::world::save::DEFAULT_PLAYER_POS
-            } else {
-                player_pos
-            };
         let Some(window) = self.window.clone() else {
             return;
         };
-        // Tipo de generador del mundo que se va a cargar (de sus metadatos).
-        let kind =
-            crate::world::library::load_meta(&crate::world::library::saves_dir(&base).join(&slug))
-                .map(|m| crate::world::GeneratorKind::from_name(&m.generator_kind))
-                .unwrap_or_default();
         match Renderer::new(
             window,
-            seed,
-            restored,
+            data.seed,
+            data.restored,
             self.options.view_settings().with_env_overrides(),
-            kind,
+            data.kind,
         ) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
@@ -1440,13 +1552,20 @@ impl App {
                 return;
             }
         }
-        self.seed = seed;
-        self.world_header = header;
-        self.set_hotbar_from_save(&hotbar);
-        self.world_slug = slug;
+        self.seed = data.seed;
+        self.world_header = data.header;
+        self.set_hotbar_from_save(&data.hotbar);
+        self.world_slug = data.slug;
+        // El snapshot pendiente del mundo anterior ya no aplica al actual.
+        self.save_pending = false;
         if let Some(renderer) = self.renderer.as_mut() {
-            renderer.warm_streaming(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
+            renderer.warm_streaming(Vec3::new(
+                data.player_pos[0],
+                data.player_pos[1],
+                data.player_pos[2],
+            ));
         }
+        let player_pos = data.player_pos;
         let mut camera = Camera::new(Vec3::new(player_pos[0], player_pos[1], player_pos[2]));
         camera.pitch_deg = -12.0;
         camera.fov_y_deg = self.options.fov_deg;
@@ -1588,7 +1707,24 @@ impl App {
     fn menu_action(&mut self, i: usize) {
         if let Some(slug) = self.confirm_delete.clone() {
             if i == 0 {
-                let _ = crate::world::library::delete_world(&self.world_base, &slug);
+                if slug == self.world_slug {
+                    // P2-15: no dejar el autoguardado reintentando contra una
+                    // carpeta borrada. Se suelta el mundo activo y se espera al
+                    // worker (que puede estar escribiendo) antes de borrar.
+                    self.renderer = None;
+                    self.camera = None;
+                    if let Some(worker) = self.save_worker.as_mut() {
+                        worker.join();
+                    }
+                    self.save_worker = Some(super::save_worker::SaveWorker::spawn());
+                    self.world_slug.clear();
+                    self.save_pending = false;
+                    self.save_requested = false;
+                    self.save_finalized = false;
+                }
+                if let Err(e) = crate::world::library::delete_world(&self.world_base, &slug) {
+                    eprintln!("[world] no se pudo borrar '{slug}': {e}");
+                }
             }
             self.confirm_delete = None;
             self.reload_worlds();
@@ -1632,11 +1768,26 @@ impl App {
                     }
                     3 => {
                         if let Some(w) = sel {
-                            let _ = crate::world::library::duplicate_world(
+                            // P2-12: si se duplica el mundo activo, primero se
+                            // vuelca y se espera al worker; si no, la copia
+                            // podria leer un `world.vf` a medio escribir.
+                            if w.slug == self.world_slug && self.renderer.is_some() {
+                                self.save_world_now();
+                                if let Some(worker) = self.save_worker.as_mut() {
+                                    worker.join();
+                                }
+                                self.save_worker = Some(super::save_worker::SaveWorker::spawn());
+                                self.save_requested = false;
+                                self.save_pending = false;
+                                self.world_saved = true;
+                            }
+                            if let Err(e) = crate::world::library::duplicate_world(
                                 &self.world_base,
                                 &w.slug,
                                 now_unix(),
-                            );
+                            ) {
+                                eprintln!("[world] no se pudo duplicar '{}': {e}", w.slug);
+                            }
                             self.reload_worlds();
                         }
                     }
@@ -2056,10 +2207,26 @@ impl App {
             if i == focus {
                 // Marco de foco (1 px por dentro).
                 let border = region_uv(gui::SELECTION);
-                quads.push(UiQuad { rect: [rect[0], rect[1], rect[2], 1.0], uv: border, layer: -1 });
-                quads.push(UiQuad { rect: [rect[0], rect[1] + rect[3] - 1.0, rect[2], 1.0], uv: border, layer: -1 });
-                quads.push(UiQuad { rect: [rect[0], rect[1], 1.0, rect[3]], uv: border, layer: -1 });
-                quads.push(UiQuad { rect: [rect[0] + rect[2] - 1.0, rect[1], 1.0, rect[3]], uv: border, layer: -1 });
+                quads.push(UiQuad {
+                    rect: [rect[0], rect[1], rect[2], 1.0],
+                    uv: border,
+                    layer: -1,
+                });
+                quads.push(UiQuad {
+                    rect: [rect[0], rect[1] + rect[3] - 1.0, rect[2], 1.0],
+                    uv: border,
+                    layer: -1,
+                });
+                quads.push(UiQuad {
+                    rect: [rect[0], rect[1], 1.0, rect[3]],
+                    uv: border,
+                    layer: -1,
+                });
+                quads.push(UiQuad {
+                    rect: [rect[0] + rect[2] - 1.0, rect[1], 1.0, rect[3]],
+                    uv: border,
+                    layer: -1,
+                });
             }
             let lw = font::text_width(label, UI_SCALE);
             quads.extend(font::text_quads(
@@ -2154,8 +2321,19 @@ impl ApplicationHandler for App {
         // elegir el mundo mas reciente. Si no hay ninguno, se crea uno.
         let base = crate::world::library::base_dir_from_env();
         let now = now_unix();
-        let _ = crate::world::library::import_legacy(&base, now);
-        let mut worlds = crate::world::library::list_worlds(&base);
+        if let Err(e) = crate::world::library::import_legacy(&base, now) {
+            eprintln!("[world] no se pudo importar el mundo legado: {e}");
+        }
+        // P2-11: un fallo de listado no debe confundirse con "biblioteca vacia"
+        // (eso crearia un mundo nuevo sobre una biblioteca que si existe).
+        let mut worlds = match crate::world::library::list_worlds_checked(&base) {
+            Ok(worlds) => worlds,
+            Err(e) => {
+                eprintln!("[world] no se pudo listar la biblioteca: {e}");
+                event_loop.exit();
+                return;
+            }
+        };
         if worlds.is_empty() {
             match crate::world::library::create_world_kind(
                 &base,
@@ -2178,67 +2356,70 @@ impl ApplicationHandler for App {
         } else {
             crate::ui::Lang::Es
         };
-        if let Some(first) = self.worlds.first() {
-            self.world_slug = first.slug.clone();
-        }
-        let path = active_world_path(&base, &self.world_slug);
 
-        // Cargamos el mundo de disco si existe (semilla + chunks editados + pos).
-        let (seed, restored, header, player_pos, hotbar) = match crate::world::load_and_migrate(&path) {
-            Ok(save) => {
-                let restored: Vec<_> = save
-                    .chunks
-                    .iter()
-                    .map(|(pos, rec)| (*pos, rec.clone()))
-                    .collect();
-                println!(
-                    "[world] mundo cargado: semilla {} | formato v{} | {} chunks | jugador en {:?}",
-                    save.header.seed,
-                    save.header.format_version,
-                    save.chunks.len(),
-                    save.player_pos
-                );
-                (save.header.seed, restored, save.header, save.player_pos, save.hotbar)
+        // P0-1: cargar el mundo **mas reciente que se pueda leer**. Un archivo
+        // ilegible nunca se convierte en un mundo vacio: se registra el error y
+        // se pasa al siguiente. Si ninguno se puede leer, se crea uno nuevo.
+        let mut loaded: Option<LoadedWorld> = None;
+        for w in &self.worlds {
+            match load_world_data(&base, &w.slug) {
+                Ok(data) => {
+                    loaded = Some(data);
+                    break;
+                }
+                Err(e) => eprintln!("[world] {e}"),
             }
-            Err(e) => {
-                // Mundo sin `world.vf` (recien creado): usar la semilla de sus
-                // metadatos, no una fija. Antes toda partida caia en 13371.
-                let meta = crate::world::library::load_meta(
-                    &crate::world::library::saves_dir(&base).join(&self.world_slug),
-                );
-                let seed = meta.as_ref().map(|m| m.seed).unwrap_or(13_371);
-                println!("[world] sin mundo previo ({e}); se inicia la semilla {seed}");
-                (
-                    seed,
-                    Vec::new(),
-                    crate::world::WorldHeader::new(seed, now_unix()),
-                    crate::world::save::DEFAULT_PLAYER_POS,
-                    crate::world::save::default_hotbar(),
-                )
+        }
+        let data = match loaded {
+            Some(data) => data,
+            None => {
+                let entry = match crate::world::library::create_world_kind(
+                    &base,
+                    "Mundo nuevo",
+                    13_371,
+                    now,
+                    generator_kind_from_env().name(),
+                ) {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        eprintln!("[world] no se pudo crear el mundo inicial: {e}");
+                        event_loop.exit();
+                        return;
+                    }
+                };
+                self.worlds.push(entry.clone());
+                match load_world_data(&base, &entry.slug) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        eprintln!("[world] no se pudo cargar el mundo nuevo: {e}");
+                        event_loop.exit();
+                        return;
+                    }
+                }
             }
         };
-        // Saneamiento: una posicion guardada fuera del mundo (p.ej. de un
-        // arranque anterior con columnas sin cargar que poso al jugador en el
-        // techo) no debe dejarlo cayendo. Si no es valida, se usa el spawn.
-        let player_pos =
-            if player_pos[1] < 0.0 || player_pos[1] >= crate::world::WORLD_HEIGHT as f32 {
-                crate::world::save::DEFAULT_PLAYER_POS
-            } else {
-                player_pos
-            };
-
-        // Tipo de generador del mundo activo (de sus metadatos `level.json`).
-        let kind = self
+        println!(
+            "[world] mundo listo: '{}' | semilla {} | formato v{} | {} chunks restaurados | generador {}",
+            data.slug,
+            data.seed,
+            data.header.format_version,
+            data.restored.len(),
+            data.kind.name()
+        );
+        self.world_slug = data.slug.clone();
+        // Si el mundo mas reciente no se pudo leer y se cargo otro, el selector
+        // debe resaltar el que esta activo, no el primero de la lista.
+        self.world_sel = self
             .worlds
-            .first()
-            .map(|w| crate::world::GeneratorKind::from_name(&w.meta.generator_kind))
-            .unwrap_or_default();
+            .iter()
+            .position(|w| w.slug == data.slug)
+            .unwrap_or(0);
         match Renderer::new(
             window.clone(),
-            seed,
-            restored,
+            data.seed,
+            data.restored,
             self.options.view_settings().with_env_overrides(),
-            kind,
+            data.kind,
         ) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
@@ -2247,9 +2428,10 @@ impl ApplicationHandler for App {
                 return;
             }
         }
-        self.seed = seed;
-        self.world_header = header;
-        self.set_hotbar_from_save(&hotbar);
+        self.seed = data.seed;
+        self.world_header = data.header;
+        self.set_hotbar_from_save(&data.hotbar);
+        let player_pos = data.player_pos;
         // Hora inicial y velocidad del dia por entorno (fuera del modo demo).
         let start_time = std::env::var("SOLARIA_TIME")
             .ok()
@@ -2266,6 +2448,11 @@ impl ApplicationHandler for App {
         }
         // Presupuesto de fluidos configurable por entorno.
         self.fluid_budget = crate::world::FluidBudget::from_env();
+        // Informe periodico de memoria (0 = solo el del arranque).
+        self.mem_report_secs = std::env::var("SOLARIA_MEM_SECS")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.0);
         println!(
             "[world] presupuesto de fluidos: {} celdas / {:.1} ms por tick",
             self.fluid_budget.cells, self.fluid_budget.ms
@@ -2319,28 +2506,7 @@ impl ApplicationHandler for App {
         self.camera = Some(camera);
 
         // Informe de memoria por categorias (FASE 10): medir antes de optimizar.
-        if let Some(renderer) = self.renderer.as_ref() {
-            use crate::world::memory::mib;
-            let m = renderer.world_memory();
-            println!(
-                "[mem] mundo: {} col | bloques {:.1} MB | cielo {:.1} MB | bloque {:.1} MB | fluido {:.1} MB | struct {:.1} MB | editados {} ({:.1} MB) | cola agua {} celdas",
-                m.columns,
-                mib(m.blocks_bytes),
-                mib(m.skylight_bytes),
-                mib(m.blocklight_bytes),
-                mib(m.fluid_bytes),
-                mib(m.struct_overhead_bytes),
-                m.modified_chunks,
-                mib(m.modified_bytes),
-                m.water_queue_cells,
-            );
-            println!(
-                "[mem] render: {} col con malla | GPU {:.1} MB | {} secciones pendientes",
-                renderer.mesh_columns(),
-                mib(renderer.gpu_mesh_bytes() as usize),
-                renderer.pending_mesh_sections(),
-            );
-        }
+        self.print_memory_report();
 
         // Modo demo (SOLARIA_DEMO=1): escena fija para las capturas. La camara
         // queda congelada (ver `Self::demo`), asi la vista no se mueve antes de
@@ -2846,6 +3012,7 @@ impl ApplicationHandler for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::WorldSave;
 
     #[test]
     fn el_timestep_fijo_da_pasos_constantes() {
@@ -2917,7 +3084,107 @@ mod tests {
         app.submit_create_or_rename();
         let worlds = crate::world::library::list_worlds(&base);
         assert_eq!(worlds.len(), 1, "deberia haber un mundo");
-        assert_eq!(worlds[0].meta.seed, 4242, "la semilla escrita debe ir al mundo");
+        assert_eq!(
+            worlds[0].meta.seed, 4242,
+            "la semilla escrita debe ir al mundo"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn temp_app_base(tag: &str) -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "solaria_app_{tag}_{}_{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    #[test]
+    fn un_mundo_corrupto_con_backup_se_recupera_en_el_flujo_de_app() {
+        // P0-1 + P1-5: entrar a un mundo con el principal corrupto no debe
+        // abrirlo vacio; se recupera el `.bak` y se conserva.
+        let base = temp_app_base("recover");
+        let entry =
+            crate::world::library::create_world_kind(&base, "Test", 42, 1, "larion").unwrap();
+        let path = active_world_path(&base, &entry.slug);
+        let mut save = WorldSave::new(42, 1);
+        save.set_chunk(
+            crate::world::ChunkPos::new(0, 0),
+            crate::world::ChunkRecord::from_column(&crate::world::Column::empty()),
+        );
+        save.save_to(&path).unwrap();
+        save.save_to(&path).unwrap();
+        std::fs::write(&path, b"\x00\x01\x02").unwrap();
+
+        let data = load_world_data(&base, &entry.slug).expect("debe recuperarse");
+        assert_eq!(data.seed, 42);
+        assert_eq!(data.kind, crate::world::GeneratorKind::Larion);
+        assert_eq!(data.restored.len(), 1);
+        // El principal ya es valido y el backup bueno sigue ahi.
+        assert!(
+            crate::world::save::WorldSave::load_from(&path).is_ok(),
+            "el principal se restauro"
+        );
+        assert!(path.with_extension("vf.bak").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn un_mundo_ilegible_sin_backup_no_se_sobrescribe() {
+        // P0-1: si no hay backup, se rechaza la entrada y el archivo **no** se
+        // toca (antes se interpretaba como mundo nuevo y se sobrescribia).
+        let base = temp_app_base("unreadable");
+        let entry =
+            crate::world::library::create_world_kind(&base, "Roto", 7, 1, "legacy16").unwrap();
+        let path = active_world_path(&base, &entry.slug);
+        std::fs::write(&path, b"\x00\x01\x02").unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert!(load_world_data(&base, &entry.slug).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before, "no se sobrescribe");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn sin_metadatos_no_se_inventa_semilla_ni_generador() {
+        // P1-7: no degradar en silencio a legacy16/semilla 0.
+        let base = temp_app_base("nometa");
+        let entry =
+            crate::world::library::create_world_kind(&base, "Sin meta", 9, 1, "graph").unwrap();
+        let dir = crate::world::library::saves_dir(&base).join(&entry.slug);
+        let _ = std::fs::remove_file(dir.join(crate::world::library::LEVEL_FILE));
+        let _ =
+            std::fs::remove_file(dir.join(format!("{}.bak", crate::world::library::LEVEL_FILE)));
+        assert!(load_world_data(&base, &entry.slug).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn un_generador_desconocido_no_se_degrada_en_silencio() {
+        let base = temp_app_base("badgen");
+        let entry =
+            crate::world::library::create_world_kind(&base, "Generador", 9, 1, "legacy16").unwrap();
+        let dir = crate::world::library::saves_dir(&base).join(&entry.slug);
+        let meta = crate::world::library::load_meta(&dir).unwrap();
+        let mut meta = meta;
+        meta.generator_kind = "inventado".into();
+        crate::world::library::save_meta(&dir, &meta).unwrap();
+        assert!(load_world_data(&base, &entry.slug).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn un_mundo_recien_creado_usa_semilla_y_generador_de_sus_metadatos() {
+        let base = temp_app_base("fresh");
+        let entry =
+            crate::world::library::create_world_kind(&base, "Nuevo", 123_456, 1, "larion").unwrap();
+        assert!(!active_world_path(&base, &entry.slug).exists());
+        let data = load_world_data(&base, &entry.slug).unwrap();
+        assert_eq!(data.seed, 123_456);
+        assert_eq!(data.kind, crate::world::GeneratorKind::Larion);
+        assert!(data.restored.is_empty());
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -150,7 +150,10 @@ fn escenario_fuente_sobre_suelo() {
         processed,
         pending
     );
-    println!("  nivel en y=1 a lo largo de +X (d=0..9): {}", axis.join(","));
+    println!(
+        "  nivel en y=1 a lo largo de +X (d=0..9): {}",
+        axis.join(",")
+    );
     let mut per_y = String::new();
     for y in 1..=10 {
         per_y.push_str(&format!(" y{y}:{}", g.at_height(y)));
@@ -253,7 +256,12 @@ fn escenario_lago_cerrado() {
         processed,
         pending
     );
-    println!("  celdas por altura: y1:{} y2:{} y3:{}", g.at_height(1), g.at_height(2), g.at_height(3));
+    println!(
+        "  celdas por altura: y1:{} y2:{} y3:{}",
+        g.at_height(1),
+        g.at_height(2),
+        g.at_height(3)
+    );
     println!();
 }
 
@@ -267,9 +275,7 @@ fn escenario_retroceso() {
     g.set([0, 1, 0], Fluid::None);
     let (ticks_dry, processed, pending) = settle(&mut g, BUDGET, 5_000);
     println!("== Retroceso (quitar la fuente) ==");
-    println!(
-        "  tras llenar: celdas={after_full} (ticks={ticks_full})"
-    );
+    println!("  tras llenar: celdas={after_full} (ticks={ticks_full})");
     println!(
         "  tras quitar la fuente: celdas={}  ticks={}  procesadas={}  pendientes={}",
         g.total(),

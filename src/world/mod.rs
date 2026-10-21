@@ -1,14 +1,21 @@
 //! # Modulo `world` — el mundo de voxeles
 //!
-//! Un mundo de voxeles es, en el fondo, una rejilla 3D de bloques. Aqui vive:
+//! Responsabilidades y limites:
 //!
-//! * [`block`] — que tipos de bloque existen y como se texturizan.
-//! * [`chunk`] — un trozo cubico de mundo de 16x16x16 bloques.
-//! * [`atlas`] — la textura que contiene todos los bloques y su layout.
-//! * [`mesher`] — convierte un chunk en geometria (vertices + indices).
+//! * **Datos**: [`block`]/[`registry`] (ids y metadata), [`chunk`] (columnas
+//!   16x16x384 con luz y flujo), [`atlas`] (texturas).
+//! * **Generacion**: [`terrain`] y [`worldgen`] (legacy16, graph y larion),
+//!   [`caves`] y [`streaming`]/[`store`] para cargar y descargar columnas.
+//! * **Geometria**: [`greedy`]/[`mesher`] para solidos, [`fluid_mesher`] para el
+//!   agua y [`mesh_snapshot`] para meshear en hilos.
+//! * **Simulacion**: [`water`] (modelo fuente -> distancia) y [`physics`] de
+//!   entidades fuera de este modulo.
+//! * **Persistencia**: [`save`] (formato binario versionado, migradores y
+//!   recuperacion) y [`library`] (mundos multiples con `level.json`).
 //!
-//! De momento hay UN chunk estatico en el origen. En v0.3.x llegaran los mundos
-//! de varios chunks y la generacion procedural de verdad.
+//! Invariantes clave: el generador es determinista por `(seed, x, z)`; una
+//! columna es la unidad de carga/guardado; fuera del radio cargado no se
+//! simula agua ni se escribe. Ver `ARCHITECTURE.md`.
 
 pub mod atlas;
 #[cfg(test)]
@@ -36,9 +43,9 @@ pub mod water;
 pub mod worldgen;
 
 pub use block::{Block, Face};
-pub use item::ItemStack;
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, Column, SECTION_COUNT, WORLD_HEIGHT};
 pub use generator::GeneratorKind;
+pub use item::ItemStack;
 pub use library::{WorldEntry, WorldMeta, seed_from_text};
 pub use memory::WorldMemory;
 pub use mesher::{SectionMesh, mesh_column, mesh_section};

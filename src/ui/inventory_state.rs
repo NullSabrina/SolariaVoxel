@@ -515,7 +515,11 @@ mod tests {
         inv.press(Some(SlotRef::main(0)), Button::Left, false);
         inv.release();
         assert_eq!(inv.get(SlotRef::main(0)).unwrap().count, 64);
-        assert_eq!(inv.cursor().unwrap().count, 6, "el resto queda en el cursor");
+        assert_eq!(
+            inv.cursor().unwrap().count,
+            6,
+            "el resto queda en el cursor"
+        );
     }
 
     #[test]
@@ -548,12 +552,18 @@ mod tests {
         let mut rng = Rng(0x1234_5678_9abc_def0);
         for i in 0..HOTBAR_SLOTS {
             if rng.below(2) == 0 {
-                inv.set(SlotRef::hotbar(i), Some(stack(blocks[rng.below(4)], 1 + rng.below(64) as u8)));
+                inv.set(
+                    SlotRef::hotbar(i),
+                    Some(stack(blocks[rng.below(4)], 1 + rng.below(64) as u8)),
+                );
             }
         }
         for i in 0..MAIN_SLOTS {
             if rng.below(3) == 0 {
-                inv.set(SlotRef::main(i), Some(stack(blocks[rng.below(4)], 1 + rng.below(64) as u8)));
+                inv.set(
+                    SlotRef::main(i),
+                    Some(stack(blocks[rng.below(4)], 1 + rng.below(64) as u8)),
+                );
             }
         }
         inv.set_cursor(Some(stack(blocks[0], 30)));
@@ -561,10 +571,25 @@ mod tests {
         let before: Vec<u32> = blocks.iter().map(|&b| inv.total(b)).collect();
         for _ in 0..2000 {
             inv.tick(0.05);
-            let zone = if rng.below(2) == 0 { Zone::Hotbar } else { Zone::Main };
-            let n = if zone == Zone::Hotbar { HOTBAR_SLOTS } else { MAIN_SLOTS };
-            let slot = SlotRef { zone, index: rng.below(n) };
-            let button = if rng.below(2) == 0 { Button::Left } else { Button::Right };
+            let zone = if rng.below(2) == 0 {
+                Zone::Hotbar
+            } else {
+                Zone::Main
+            };
+            let n = if zone == Zone::Hotbar {
+                HOTBAR_SLOTS
+            } else {
+                MAIN_SLOTS
+            };
+            let slot = SlotRef {
+                zone,
+                index: rng.below(n),
+            };
+            let button = if rng.below(2) == 0 {
+                Button::Left
+            } else {
+                Button::Right
+            };
             match rng.below(4) {
                 0 => {
                     inv.press(Some(slot), button, false);
@@ -587,7 +612,10 @@ mod tests {
                 _ => inv.number_key(slot, rng.below(HOTBAR_SLOTS)),
             }
             // Tras cada paso, ningun stack supera 64.
-            for r in (0..HOTBAR_SLOTS).map(SlotRef::hotbar).chain((0..MAIN_SLOTS).map(SlotRef::main)) {
+            for r in (0..HOTBAR_SLOTS)
+                .map(SlotRef::hotbar)
+                .chain((0..MAIN_SLOTS).map(SlotRef::main))
+            {
                 if let Some(s) = inv.get(r) {
                     assert!(s.count <= ItemStack::MAX, "stack > 64 en {r:?}");
                 }

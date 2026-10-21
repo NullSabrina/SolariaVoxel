@@ -19,8 +19,8 @@
 //! rota el anterior a `world.vf.bak` y se renombra el temporal al definitivo.
 //! El archivo principal nunca queda truncado por una escritura a medias.
 
-use std::collections::HashMap;
-use std::io::Write;
+use std::collections::{BTreeMap, HashMap};
+use std::io::{Read, Write};
 use std::path::Path;
 
 use bincode::config::standard;
@@ -47,7 +47,13 @@ pub const LEGACY_TERRAIN_Y0: u32 = 64;
 ///   (`fluid`), para que el agua que fluye no vuelva a fuente al recargar. Un
 ///   registro v4 migra con `fluid` vacio = todo `Water` es fuente (comportamiento
 ///   anterior, sin perdida de datos).
-pub const FORMAT_VERSION: u32 = 6;
+/// * v6: `WorldSave` guarda la **hotbar** como stacks.
+/// * v7: `ChunkRecord` guarda un **checksum** (FNV-1a 64) de los bloques y del
+///   fluido **descomprimidos**. LZ4 no trae checksum: una corrupcion que
+///   conserva el tamano pasaba inadvertida. Los mundos v6 migran calculando el
+///   checksum una vez. Ademas el mapa de chunks se serializa ordenado
+///   (`BTreeMap`), asi dos guardados del mismo estado dan bytes identicos.
+pub const FORMAT_VERSION: u32 = 7;
 
 /// Version actual del generador de terreno.
 ///
@@ -103,7 +109,7 @@ pub const MAGIC: [u8; 4] = *b"VFWD";
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Posicion de un chunk en el mundo, en coordenadas de chunk (no de bloque).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Encode, Decode)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
@@ -172,6 +178,25 @@ pub struct ChunkRecord {
     pub blocks: Vec<u8>,
     /// Niveles de flujo del agua (comprimidos con LZ4 si `compressed`).
     pub fluid: Vec<u8>,
+    /// FNV-1a 64 de los bloques **descomprimidos** (desde v7). `0` = sin
+    /// verificar (registros antiguos: la migracion lo calcula).
+    pub checksum: u64,
+    /// FNV-1a 64 del fluido **descomprimido** (desde v7). `0` si no hay fluido.
+    pub fluid_checksum: u64,
+}
+
+/// Layout de `ChunkRecord` en el formato **v6**: igual que el actual pero **sin
+/// checksums**. Bincode es posicional: leer un v6 con el layout v7 tomaria los
+/// bytes siguientes como checksum y desalinearia el archivo.
+#[derive(Clone, Debug, Encode, Decode)]
+struct ChunkRecordV6 {
+    format_version: u32,
+    generator_version: u32,
+    compressed: bool,
+    y0: u32,
+    height: u32,
+    blocks: Vec<u8>,
+    fluid: Vec<u8>,
 }
 
 /// Layout de `ChunkRecord` en el formato **v1**: una seccion de 4096 bytes
@@ -213,21 +238,27 @@ impl ChunkRecord {
     /// comprime con LZ4. El campo `fluid` queda **vacio** si la columna no tiene
     /// agua que fluya (el caso normal: un oceano entero son fuentes).
     pub fn from_column(column: &Column) -> Self {
+        // P2-2: `has_flow_storage` se consulta una vez (no por celda) y los
+        // buffers se reservan de antemano.
+        let has_flow = column.has_flow_storage();
         let mut raw = Vec::with_capacity(COLUMN_VOLUME);
-        let mut fluid = Vec::new();
-        if column.has_flow_storage() {
-            fluid.reserve(COLUMN_VOLUME);
-        }
+        let mut fluid = if has_flow {
+            Vec::with_capacity(COLUMN_VOLUME)
+        } else {
+            Vec::new()
+        };
         for y in 0..WORLD_HEIGHT {
             for z in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
                     raw.push(column.get(x, y, z).id());
-                    if column.has_flow_storage() {
+                    if has_flow {
                         fluid.push(column.flow_at(x, y, z));
                     }
                 }
             }
         }
+        let checksum = fnv1a64(&raw);
+        let fluid_checksum = if fluid.is_empty() { 0 } else { fnv1a64(&fluid) };
         Self {
             format_version: FORMAT_VERSION,
             generator_version: GENERATOR_VERSION,
@@ -243,6 +274,8 @@ impl ChunkRecord {
             } else {
                 lz4_flex::compress_prepend_size(&fluid)
             },
+            checksum,
+            fluid_checksum,
         }
     }
 
@@ -251,42 +284,92 @@ impl ChunkRecord {
         self.height as usize * CHUNK_SIZE * CHUNK_SIZE
     }
 
+    /// Decodifica y valida los bloques: tamano esperado **y** checksum. `None`
+    /// si el payload esta corrupto.
+    fn decode_blocks(&self) -> Option<Vec<u8>> {
+        let expected = self.raw_len();
+        let raw = if self.compressed {
+            // P2-4: se acota la longitud declarada **antes** de asignar.
+            lz4_decompress_checked(&self.blocks, expected)?
+        } else {
+            if self.blocks.len() != expected {
+                return None;
+            }
+            self.blocks.clone()
+        };
+        if raw.len() != expected {
+            return None;
+        }
+        // `0` = registro antiguo sin checksum; el resto debe coincidir.
+        if self.checksum != 0 && fnv1a64(&raw) != self.checksum {
+            return None;
+        }
+        Some(raw)
+    }
+
+    /// Decodifica y valida los niveles de flujo. `None` si el payload esta
+    /// corrupto; vacio si la columna no guardo fluidos (oceano: todo fuentes).
+    fn decode_fluid(&self) -> Option<Vec<u8>> {
+        if self.fluid.is_empty() {
+            // Sin payload no puede haber checksum: un valor distinto de 0 es
+            // metadata corrupta.
+            return (self.fluid_checksum == 0).then(Vec::new);
+        }
+        let expected = self.raw_len();
+        let raw = if self.compressed {
+            lz4_decompress_checked(&self.fluid, expected)?
+        } else {
+            if self.fluid.len() != expected {
+                return None;
+            }
+            self.fluid.clone()
+        };
+        if raw.len() != expected {
+            return None;
+        }
+        if self.fluid_checksum != 0 && fnv1a64(&raw) != self.fluid_checksum {
+            return None;
+        }
+        Some(raw)
+    }
+
     /// Bloques sin comprimir. `Vec::new()` si el payload esta corrupto (lo
     /// detecta [`ChunkRecord::is_corrupt`]).
     pub fn decompressed_blocks(&self) -> Vec<u8> {
-        if self.compressed {
-            lz4_flex::decompress_size_prepended(&self.blocks).unwrap_or_default()
-        } else {
-            self.blocks.clone()
-        }
+        self.decode_blocks().unwrap_or_default()
     }
 
     /// Niveles de flujo sin comprimir. Vacio si la columna no guardo fluidos
     /// (oceano: todo fuentes) o si el payload esta corrupto.
     pub fn decompressed_fluid(&self) -> Vec<u8> {
-        if self.fluid.is_empty() {
-            return Vec::new();
-        }
-        if self.compressed {
-            lz4_flex::decompress_size_prepended(&self.fluid).unwrap_or_default()
-        } else {
-            self.fluid.clone()
-        }
+        self.decode_fluid().unwrap_or_default()
     }
 
-    /// ¿El payload no decodifica al tamano esperado? (chunk corrupto). El campo
-    /// `fluid` solo se valida si el registro lo trae; vacio es valido.
+    /// ¿El payload no decodifica al tamano esperado o no cuadra su checksum?
+    /// (chunk corrupto). El campo `fluid` solo se valida si el registro lo trae;
+    /// vacio es valido.
     pub fn is_corrupt(&self) -> bool {
         // Rango vertical valido: si `y0 + height` se sale del mundo, `apply_record`
         // recortaria y **descartaria ediciones en silencio**; mejor rechazarlo.
         let (y0, h) = (self.y0 as usize, self.height as usize);
-        if h == 0 || y0 > WORLD_HEIGHT || y0 + h > WORLD_HEIGHT {
+        if h == 0 || y0 >= WORLD_HEIGHT || y0 + h > WORLD_HEIGHT {
             return true;
         }
-        if self.decompressed_blocks().len() != self.raw_len() {
+        if self.decode_blocks().is_none() {
             return true;
         }
-        !self.fluid.is_empty() && self.decompressed_fluid().len() != self.raw_len()
+        self.decode_fluid().is_none()
+    }
+
+    /// Recalcula los checksums a partir del payload actual (si decodifica).
+    fn recompute_checksums(&mut self) {
+        if let Some(blocks) = self.decode_blocks() {
+            self.checksum = fnv1a64(&blocks);
+        }
+        self.fluid_checksum = match self.decode_fluid() {
+            Some(fluid) if !fluid.is_empty() => fnv1a64(&fluid),
+            _ => 0,
+        };
     }
 
     /// Ratio de compresion (`raw / compressed`). 1.0 = no comprime.
@@ -317,6 +400,7 @@ impl ChunkRecord {
             }
             self.compressed = true;
         }
+        self.recompute_checksums();
         self.format_version = 2;
     }
 }
@@ -325,8 +409,9 @@ impl ChunkRecord {
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct WorldSave {
     pub header: WorldHeader,
-    /// Columnas modificadas, indexadas por su posicion.
-    pub chunks: HashMap<ChunkPos, ChunkRecord>,
+    /// Columnas modificadas, indexadas por su posicion. `BTreeMap` (v7) para que
+    /// el archivo sea **determinista**: el mismo estado produce los mismos bytes.
+    pub chunks: BTreeMap<ChunkPos, ChunkRecord>,
     /// Posicion del jugador (guardado completo). Desde el formato v3.
     pub player_pos: [f32; 3],
     /// Hotbar como stacks `(id_de_bloque, cantidad)`. Desde el formato v6.
@@ -346,12 +431,21 @@ pub fn default_hotbar() -> Vec<(u8, u8)> {
         .collect()
 }
 
-/// Espejo del `WorldSave` **v5**: sin hotbar.
+/// Espejo del `WorldSave` **v5**: sin hotbar y con registros sin checksum.
 #[derive(Encode, Decode)]
 struct WorldSaveV5 {
     header: WorldHeader,
-    chunks: HashMap<ChunkPos, ChunkRecord>,
+    chunks: HashMap<ChunkPos, ChunkRecordV6>,
     player_pos: [f32; 3],
+}
+
+/// Espejo del `WorldSave` **v6**: con hotbar, sin checksums.
+#[derive(Encode, Decode)]
+struct WorldSaveV6 {
+    header: WorldHeader,
+    chunks: HashMap<ChunkPos, ChunkRecordV6>,
+    player_pos: [f32; 3],
+    hotbar: Vec<(u8, u8)>,
 }
 
 /// Espejo del `WorldSave` **v3**: mismo `player_pos` pero con los `ChunkRecord`
@@ -397,6 +491,8 @@ fn upgrade_v3_record(old: ChunkRecordV3) -> ChunkRecord {
         height: CHUNK_SIZE as u32,
         blocks: old.blocks,
         fluid: Vec::new(),
+        checksum: 0,
+        fluid_checksum: 0,
     }
 }
 
@@ -411,6 +507,8 @@ fn upgrade_v1_record(old: ChunkRecordV1) -> ChunkRecord {
         height: CHUNK_SIZE as u32,
         blocks: old.blocks,
         fluid: Vec::new(),
+        checksum: 0,
+        fluid_checksum: 0,
     }
 }
 
@@ -426,14 +524,35 @@ fn upgrade_v4_record(old: ChunkRecordV4) -> ChunkRecord {
         height: old.height,
         blocks: old.blocks,
         fluid: Vec::new(),
+        checksum: 0,
+        fluid_checksum: 0,
     }
+}
+
+/// Convierte un registro v6 (sin checksum) al v7. El checksum se calcula una
+/// sola vez descomprimiendo el payload; si no decodifica, queda `0` y la
+/// validacion de carga lo rechazara como chunk corrupto.
+fn upgrade_v6_record(old: ChunkRecordV6) -> ChunkRecord {
+    let mut record = ChunkRecord {
+        format_version: 6,
+        generator_version: old.generator_version,
+        compressed: old.compressed,
+        y0: old.y0,
+        height: old.height,
+        blocks: old.blocks,
+        fluid: old.fluid,
+        checksum: 0,
+        fluid_checksum: 0,
+    };
+    record.recompute_checksums();
+    record
 }
 
 impl WorldSave {
     pub fn new(seed: u32, created_at: u64) -> Self {
         Self {
             header: WorldHeader::new(seed, created_at),
-            chunks: HashMap::new(),
+            chunks: BTreeMap::new(),
             player_pos: DEFAULT_PLAYER_POS,
             hotbar: default_hotbar(),
         }
@@ -463,6 +582,9 @@ impl WorldSave {
             std::fs::rename(path, &bak)?;
         }
         std::fs::rename(&tmp, path)?;
+        // P2-7: durabilidad de los `rename` (best-effort; en Windows no se puede
+        // abrir un directorio con `std`, asi que solo aplica en Unix).
+        sync_dir(path);
         Ok(())
     }
 
@@ -473,35 +595,66 @@ impl WorldSave {
     pub fn load_from(path: &Path) -> Result<Self, SaveError> {
         let bytes = std::fs::read(path)?;
         // Espiamos solo la cabecera (esta al principio) para conocer la version.
-        let version = bincode::decode_from_slice::<WorldHeader, _>(&bytes, standard())
-            .map(|(h, _)| h.format_version)
-            .unwrap_or(0);
+        // P2-5: una cabecera ilegible es su propio error, no `NoMigration { 0 }`.
+        let (header, _) = bincode::decode_from_slice::<WorldHeader, _>(&bytes, standard())
+            .map_err(|_| SaveError::CorruptHeader)?;
+        let version = header.format_version;
         if version > FORMAT_VERSION {
             return Err(SaveError::TooNew {
                 format: version,
                 supported: FORMAT_VERSION,
             });
         }
+        // P2-6: exige que el decodificador consuma **todo** el archivo (detecta
+        // basura al final / truncamientos que la parte util ocultaria).
+        macro_rules! decode_exact {
+            ($ty:ty) => {{
+                let (value, used) = bincode::decode_from_slice::<$ty, _>(&bytes, standard())?;
+                if used != bytes.len() {
+                    return Err(SaveError::TrailingBytes {
+                        used,
+                        len: bytes.len(),
+                    });
+                }
+                value
+            }};
+        }
         match version {
+            7 => Ok(decode_exact!(WorldSave)),
             6 => {
-                let (save, _) = bincode::decode_from_slice::<WorldSave, _>(&bytes, standard())?;
-                Ok(save)
+                let v6 = decode_exact!(WorldSaveV6);
+                let mut header = v6.header;
+                header.format_version = 6;
+                Ok(WorldSave {
+                    header,
+                    chunks: v6
+                        .chunks
+                        .into_iter()
+                        .map(|(p, r)| (p, upgrade_v6_record(r)))
+                        .collect(),
+                    player_pos: v6.player_pos,
+                    hotbar: v6.hotbar,
+                })
             }
             5 => {
                 // v5 no guardaba hotbar: se le da la por defecto (pila llena), sin
                 // perder nada del mundo (bloques/posicion se conservan).
-                let (v5, _) = bincode::decode_from_slice::<WorldSaveV5, _>(&bytes, standard())?;
+                let v5 = decode_exact!(WorldSaveV5);
                 let mut header = v5.header;
                 header.format_version = 5;
                 Ok(WorldSave {
                     header,
-                    chunks: v5.chunks,
+                    chunks: v5
+                        .chunks
+                        .into_iter()
+                        .map(|(p, r)| (p, upgrade_v6_record(r)))
+                        .collect(),
                     player_pos: v5.player_pos,
                     hotbar: default_hotbar(),
                 })
             }
             4 => {
-                let (v4, _) = bincode::decode_from_slice::<WorldSaveV4, _>(&bytes, standard())?;
+                let v4 = decode_exact!(WorldSaveV4);
                 let mut header = v4.header;
                 header.format_version = 4;
                 Ok(WorldSave {
@@ -516,7 +669,7 @@ impl WorldSave {
                 })
             }
             3 => {
-                let (v3, _) = bincode::decode_from_slice::<WorldSaveV3, _>(&bytes, standard())?;
+                let v3 = decode_exact!(WorldSaveV3);
                 let mut header = v3.header;
                 header.format_version = 3;
                 Ok(WorldSave {
@@ -531,7 +684,7 @@ impl WorldSave {
                 })
             }
             2 => {
-                let (v2, _): (WorldSaveV2, usize) = bincode::decode_from_slice(&bytes, standard())?;
+                let v2 = decode_exact!(WorldSaveV2);
                 let mut header = v2.header;
                 header.format_version = 2;
                 Ok(WorldSave {
@@ -547,7 +700,7 @@ impl WorldSave {
             }
             // v1: bloques sin comprimir, sin flag `compressed` ni `player_pos`.
             1 => {
-                let (v1, _): (WorldSaveV1, usize) = bincode::decode_from_slice(&bytes, standard())?;
+                let v1 = decode_exact!(WorldSaveV1);
                 let mut header = v1.header;
                 header.format_version = 1;
                 Ok(WorldSave {
@@ -567,6 +720,27 @@ impl WorldSave {
             }),
         }
     }
+
+    /// Lee **solo la cabecera** (sin descomprimir el mundo). Util para importar
+    /// un mundo legado sin pagar la carga completa (P2-14).
+    pub fn peek_header(path: &Path) -> Result<WorldHeader, SaveError> {
+        let mut file = std::fs::File::open(path)?;
+        let mut buf = [0u8; 512];
+        let mut len = 0usize;
+        while len < buf.len() {
+            let n = file.read(&mut buf[len..])?;
+            if n == 0 {
+                break;
+            }
+            len += n;
+        }
+        let (header, _) = bincode::decode_from_slice::<WorldHeader, _>(&buf[..len], standard())
+            .map_err(|_| SaveError::CorruptHeader)?;
+        if !header.is_valid() {
+            return Err(SaveError::BadMagic(header.magic));
+        }
+        Ok(header)
+    }
 }
 
 /// `path` con un sufijo extra (`world.vf` -> `world.vf.tmp`).
@@ -576,12 +750,141 @@ fn with_suffix(path: &Path, suffix: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(os)
 }
 
+/// Descomprime un payload LZ4 con prefijo de tamano **acotado**: si el prefijo
+/// no coincide con `expected`, no se reserva ni se descomprime nada (P2-4).
+fn lz4_decompress_checked(payload: &[u8], expected: usize) -> Option<Vec<u8>> {
+    let prefix: [u8; 4] = payload.get(..4)?.try_into().ok()?;
+    if u32::from_le_bytes(prefix) as usize != expected {
+        return None;
+    }
+    let out = lz4_flex::decompress_size_prepended(payload).ok()?;
+    (out.len() == expected).then_some(out)
+}
+
+/// FNV-1a de 64 bits: checksum estable, rapido y sin dependencias. No es
+/// criptografico; basta para detectar corrupcion de datos.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// `fsync` del directorio que contiene `path` (durabilidad de los `rename`).
+/// Best-effort y solo en Unix: Windows no permite abrir un directorio con `std`.
+fn sync_dir(path: &Path) {
+    #[cfg(unix)]
+    {
+        if let Some(dir) = path.parent()
+            && let Ok(file) = std::fs::File::open(dir)
+        {
+            let _ = file.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+/// Resultado de cargar un mundo de disco, distinguiendo "no existe" (mundo
+/// nuevo legitimo) de "existe pero no se puede leer" (no se debe sobrescribir).
+#[derive(Debug)]
+pub enum WorldLoad {
+    /// No hay archivo principal ni backup: mundo nuevo.
+    Missing,
+    /// Se cargo el archivo principal.
+    Loaded(WorldSave),
+    /// El principal fallo y se recupero el `.bak`. El principal corrupto queda
+    /// en `world.vf.corrupt` y el principal ya contiene la copia recuperada.
+    Recovered(WorldSave),
+    /// El archivo existe pero no se puede leer y no hay backup valido. **No** se
+    /// debe tratar como mundo vacio ni sobrescribir.
+    Unreadable(SaveError),
+}
+
+/// Carga un mundo aplicando la politica de recuperacion (P0-1 + P1-5):
+///
+/// 1. Si el principal no existe pero hay `.bak`, se restaura desde el backup.
+/// 2. Si el principal carga, se usa.
+/// 3. Si el principal existe pero falla (decode/corrupto/ids/migracion), se
+///    intenta el `.bak`. Si vale, se **cuarentena** el principal danado
+///    (`world.vf.corrupt`) y se reescribe el principal con la copia recuperada,
+///    conservando el `.bak`.
+/// 4. Un formato **futuro** (`TooNew`) nunca se degrada a un backup: se
+///    devuelve `Unreadable` para no perder datos de una version mas nueva.
+pub fn load_world(path: &Path) -> WorldLoad {
+    let bak = with_suffix(path, ".bak");
+    if !path.exists() {
+        if bak.exists() {
+            // Hay backup: el mundo existia. Si el backup tampoco se puede leer,
+            // **no** es un mundo nuevo (no se debe sobrescribir).
+            match load_and_migrate(&bak) {
+                Ok(save) => {
+                    if save_to_keeping_backup(&save, path).is_ok() {
+                        return WorldLoad::Recovered(save);
+                    }
+                    return WorldLoad::Unreadable(SaveError::Io(std::io::Error::other(
+                        "no se pudo restaurar el backup",
+                    )));
+                }
+                Err(err) => return WorldLoad::Unreadable(err),
+            }
+        }
+        return WorldLoad::Missing;
+    }
+    match load_and_migrate(path) {
+        Ok(save) => WorldLoad::Loaded(save),
+        Err(err) => {
+            if matches!(err, SaveError::TooNew { .. }) {
+                return WorldLoad::Unreadable(err);
+            }
+            if let Ok(save) = load_and_migrate(&bak) {
+                // Cuarentena del principal danado + reescritura del recuperado.
+                let corrupt = with_suffix(path, ".corrupt");
+                let _ = std::fs::remove_file(&corrupt);
+                if std::fs::rename(path, &corrupt).is_ok()
+                    && save_to_keeping_backup(&save, path).is_ok()
+                {
+                    return WorldLoad::Recovered(save);
+                }
+            }
+            WorldLoad::Unreadable(err)
+        }
+    }
+}
+
+/// Escribe `save` en `path` **sin rotar** el `.bak` existente (no lo pisa con el
+/// archivo danado que acabamos de recuperar).
+fn save_to_keeping_backup(save: &WorldSave, path: &Path) -> Result<(), SaveError> {
+    let bytes = bincode::encode_to_vec(save, standard())?;
+    let tmp = with_suffix(path, ".tmp");
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    sync_dir(path);
+    Ok(())
+}
+
 /// Errores de guardado/carga.
 #[derive(Debug)]
 pub enum SaveError {
     Io(std::io::Error),
     Decode(bincode::error::DecodeError),
     Encode(bincode::error::EncodeError),
+    /// La cabecera no se puede decodificar (archivo truncado o que no es un
+    /// mundo). Antes se enmascaraba como `NoMigration { from: 0 }` (P2-5).
+    CorruptHeader,
+    /// El archivo decodifica pero quedan bytes sin consumir al final (P2-6).
+    TrailingBytes {
+        used: usize,
+        len: usize,
+    },
     BadMagic([u8; 4]),
     TooNew {
         format: u32,
@@ -608,6 +911,16 @@ impl std::fmt::Display for SaveError {
             SaveError::Io(e) => write!(f, "error de E/S: {e}"),
             SaveError::Decode(e) => write!(f, "no se pudo decodificar el mundo: {e}"),
             SaveError::Encode(e) => write!(f, "no se pudo codificar el mundo: {e}"),
+            SaveError::CorruptHeader => {
+                write!(
+                    f,
+                    "la cabecera del mundo esta corrupta o el archivo no es un mundo"
+                )
+            }
+            SaveError::TrailingBytes { used, len } => write!(
+                f,
+                "el archivo tiene {len} bytes pero solo {used} se decodifican (basura al final)"
+            ),
             SaveError::BadMagic(m) => {
                 write!(f, "el archivo no es un mundo de Solaria (magic {m:?})")
             }
@@ -653,8 +966,9 @@ impl From<bincode::error::EncodeError> for SaveError {
 pub trait WorldMigrator {
     fn from_version(&self) -> u32;
     fn to_version(&self) -> u32;
-    fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
-        chunk.clone()
+    /// Consume el registro (P2-8: evita clonar ~98 KB por paso de migracion).
+    fn migrate_chunk(&self, chunk: ChunkRecord) -> ChunkRecord {
+        chunk
     }
 }
 
@@ -668,11 +982,10 @@ impl WorldMigrator for V1ToV2 {
     fn to_version(&self) -> u32 {
         2
     }
-    fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
-        let mut record = chunk.clone();
-        record.compressed = false;
-        record.migrate_to_v2();
-        record
+    fn migrate_chunk(&self, mut chunk: ChunkRecord) -> ChunkRecord {
+        chunk.compressed = false;
+        chunk.migrate_to_v2();
+        chunk
     }
 }
 
@@ -699,8 +1012,7 @@ impl WorldMigrator for V3ToV4 {
     fn to_version(&self) -> u32 {
         4
     }
-    fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
-        let mut r = chunk.clone();
+    fn migrate_chunk(&self, mut r: ChunkRecord) -> ChunkRecord {
         if r.height == 0 {
             r.y0 = LEGACY_TERRAIN_Y0;
             r.height = CHUNK_SIZE as u32;
@@ -722,9 +1034,9 @@ impl WorldMigrator for V4ToV5 {
     fn to_version(&self) -> u32 {
         5
     }
-    fn migrate_chunk(&self, chunk: &ChunkRecord) -> ChunkRecord {
-        let mut r = chunk.clone();
+    fn migrate_chunk(&self, mut r: ChunkRecord) -> ChunkRecord {
         r.fluid = Vec::new();
+        r.fluid_checksum = 0;
         r.format_version = 5;
         r
     }
@@ -743,6 +1055,28 @@ impl WorldMigrator for V5ToV6 {
     }
 }
 
+/// Migrador v6 -> v7: anade los **checksums** de bloques y fluido. Se calculan
+/// una vez a partir del payload descomprimido.
+pub struct V6ToV7;
+
+impl WorldMigrator for V6ToV7 {
+    fn from_version(&self) -> u32 {
+        6
+    }
+    fn to_version(&self) -> u32 {
+        7
+    }
+    fn migrate_chunk(&self, mut r: ChunkRecord) -> ChunkRecord {
+        // `load_from` ya calculo el checksum al adaptar el layout v6; no se
+        // descomprime dos veces.
+        if r.checksum == 0 {
+            r.recompute_checksums();
+        }
+        r.format_version = 7;
+        r
+    }
+}
+
 /// Cadena de migradores.
 #[derive(Default)]
 pub struct MigrationChain {
@@ -758,6 +1092,7 @@ impl MigrationChain {
                 Box::new(V3ToV4),
                 Box::new(V4ToV5),
                 Box::new(V5ToV6),
+                Box::new(V6ToV7),
             ],
         }
     }
@@ -787,10 +1122,15 @@ impl MigrationChain {
                 });
             };
             let to = migrator.to_version();
-            for record in save.chunks.values_mut() {
-                *record = migrator.migrate_chunk(record);
+            // Movemos los registros fuera del mapa (sin clonar) y los reinsertamos.
+            let old = std::mem::take(&mut save.chunks);
+            let mut migrated = BTreeMap::new();
+            for (pos, record) in old {
+                let mut record = migrator.migrate_chunk(record);
                 record.format_version = to;
+                migrated.insert(pos, record);
             }
+            save.chunks = migrated;
             save.header.format_version = to;
             from = to;
         }
@@ -807,14 +1147,28 @@ pub fn load_and_migrate(path: &Path) -> Result<WorldSave, SaveError> {
     }
     let save = MigrationChain::with_builtins().migrate(save)?;
     for (pos, record) in &save.chunks {
-        if record.is_corrupt() {
-            return Err(SaveError::CorruptChunk { x: pos.x, z: pos.z });
-        }
-        if let Some(id) = record.first_unknown_id() {
-            return Err(SaveError::UnknownBlock { id });
-        }
+        validate_record(*pos, record)?;
     }
     Ok(save)
+}
+
+/// Valida un registro **una sola vez** (P2-3): decodifica bloques y fluido, y
+/// busca ids desconocidos sobre el mismo buffer ya descomprimido.
+fn validate_record(pos: ChunkPos, record: &ChunkRecord) -> Result<(), SaveError> {
+    let (y0, h) = (record.y0 as usize, record.height as usize);
+    if h == 0 || y0 >= WORLD_HEIGHT || y0 + h > WORLD_HEIGHT {
+        return Err(SaveError::CorruptChunk { x: pos.x, z: pos.z });
+    }
+    let Some(blocks) = record.decode_blocks() else {
+        return Err(SaveError::CorruptChunk { x: pos.x, z: pos.z });
+    };
+    if let Some(id) = blocks.into_iter().find(|&id| !Block::is_known_id(id)) {
+        return Err(SaveError::UnknownBlock { id });
+    }
+    if record.decode_fluid().is_none() {
+        return Err(SaveError::CorruptChunk { x: pos.x, z: pos.z });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -862,11 +1216,7 @@ mod tests {
     #[test]
     fn roundtrip_guarda_y_carga_la_hotbar() {
         let mut save = WorldSave::new(9, 1);
-        save.hotbar = vec![
-            (Block::Dirt.id(), 3),
-            (0, 0),
-            (Block::Stone.id(), 64),
-        ];
+        save.hotbar = vec![(Block::Dirt.id(), 3), (0, 0), (Block::Stone.id(), 64)];
         let path = temp_path("hotbar_roundtrip");
         save.save_to(&path).unwrap();
         let loaded = WorldSave::load_from(&path).unwrap();
@@ -995,6 +1345,8 @@ mod tests {
             height: WORLD_HEIGHT as u32,
             blocks: lz4_flex::compress_prepend_size(&raw),
             fluid: Vec::new(),
+            checksum: fnv1a64(&raw),
+            fluid_checksum: 0,
         };
         assert_eq!(record.first_unknown_id(), Some(200));
         assert!(!Block::is_known_id(200));
@@ -1015,6 +1367,8 @@ mod tests {
             height: WORLD_HEIGHT as u32,
             blocks: vec![1, 2, 3, 4], // LZ4 invalido
             fluid: Vec::new(),
+            checksum: 0,
+            fluid_checksum: 0,
         };
         assert!(record.is_corrupt());
     }
@@ -1266,6 +1620,213 @@ mod tests {
     }
 
     #[test]
+    fn el_checksum_detecta_corrupcion_que_conserva_el_tamano() {
+        // P1-4: LZ4 no trae checksum. Alterar el payload **descomprimido** y
+        // recomprimirlo da un tamano correcto pero datos distintos: debe fallar.
+        let mut raw = vec![Block::Stone.id(); COLUMN_VOLUME];
+        raw[100] = Block::Dirt.id();
+        let mut record = ChunkRecord {
+            format_version: FORMAT_VERSION,
+            generator_version: GENERATOR_VERSION,
+            compressed: true,
+            y0: 0,
+            height: WORLD_HEIGHT as u32,
+            blocks: lz4_flex::compress_prepend_size(&raw),
+            fluid: Vec::new(),
+            checksum: fnv1a64(&raw),
+            fluid_checksum: 0,
+        };
+        assert!(!record.is_corrupt(), "el original es valido");
+        raw[100] = Block::Planks.id();
+        record.blocks = lz4_flex::compress_prepend_size(&raw);
+        assert!(record.is_corrupt(), "el checksum debe detectar el cambio");
+    }
+
+    #[test]
+    fn un_prefijo_de_tamano_absurdo_se_rechaza_sin_descomprimir() {
+        // P2-4: un prefijo que pide gigabytes no debe asignarse.
+        let record = ChunkRecord {
+            format_version: FORMAT_VERSION,
+            generator_version: GENERATOR_VERSION,
+            compressed: true,
+            y0: 0,
+            height: WORLD_HEIGHT as u32,
+            blocks: vec![0xFF, 0xFF, 0xFF, 0xFF, 0, 1, 2],
+            fluid: Vec::new(),
+            checksum: 0,
+            fluid_checksum: 0,
+        };
+        assert!(record.is_corrupt());
+    }
+
+    #[test]
+    fn los_bytes_sobrantes_se_rechazan() {
+        // P2-6: un archivo con basura al final no debe aceptarse en silencio.
+        let path = temp_path("trailing");
+        cleanup(&path);
+        let save = WorldSave::new(7, 1);
+        save.save_to(&path).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes.extend_from_slice(b"basura");
+        std::fs::write(&path, &bytes).unwrap();
+        let err = WorldSave::load_from(&path).unwrap_err();
+        cleanup(&path);
+        assert!(matches!(err, SaveError::TrailingBytes { .. }), "{err}");
+    }
+
+    #[test]
+    fn una_cabecera_corrupta_es_su_propio_error() {
+        // P2-5: no debe reportarse como "no hay migrador de v0".
+        let path = temp_path("bad_header");
+        cleanup(&path);
+        std::fs::write(&path, b"\x00\x01\x02").unwrap();
+        let err = WorldSave::load_from(&path).unwrap_err();
+        cleanup(&path);
+        assert!(matches!(err, SaveError::CorruptHeader), "{err}");
+    }
+
+    #[test]
+    fn el_guardado_es_determinista() {
+        // P2-9: el mismo estado produce exactamente los mismos bytes.
+        let mut a = WorldSave::new(7, 1);
+        let mut b = WorldSave::new(7, 1);
+        let rec = ChunkRecord::from_column(&Column::empty());
+        a.set_chunk(ChunkPos::new(1, 2), rec.clone());
+        a.set_chunk(ChunkPos::new(-3, 4), rec.clone());
+        b.set_chunk(ChunkPos::new(-3, 4), rec.clone());
+        b.set_chunk(ChunkPos::new(1, 2), rec);
+        assert_eq!(
+            bincode::encode_to_vec(&a, standard()).unwrap(),
+            bincode::encode_to_vec(&b, standard()).unwrap()
+        );
+    }
+
+    #[test]
+    fn se_recupera_del_bak_si_el_principal_esta_corrupto() {
+        // P0-1 + P1-5: el principal corrupto se cuarentena y el .bak se usa.
+        let path = temp_path("recover");
+        cleanup(&path);
+        let _ = std::fs::remove_file(with_suffix(&path, ".corrupt"));
+        let mut column = Column::empty();
+        column.set(1, 2, 3, Block::Stone);
+        let mut save = WorldSave::new(7, 0);
+        save.set_chunk(ChunkPos::new(0, 0), ChunkRecord::from_column(&column));
+        save.save_to(&path).unwrap();
+        save.player_pos = [1.0, 2.0, 3.0];
+        save.save_to(&path).unwrap();
+        let bak = with_suffix(&path, ".bak");
+        assert!(bak.exists());
+        std::fs::write(&path, b"\x00\x01\x02").unwrap();
+
+        match load_world(&path) {
+            WorldLoad::Recovered(save) => {
+                assert!(save.chunks.contains_key(&ChunkPos::new(0, 0)));
+            }
+            other => panic!("se esperaba Recovered, {other:?}"),
+        }
+        // El .bak bueno sigue existiendo y el principal ya es valido.
+        assert!(bak.exists(), "el .bak bueno no debe destruirse");
+        assert!(with_suffix(&path, ".corrupt").exists(), "cuarentena");
+        assert!(load_and_migrate(&path).is_ok(), "el principal se restauro");
+        cleanup(&path);
+        let _ = std::fs::remove_file(with_suffix(&path, ".corrupt"));
+    }
+
+    #[test]
+    fn sin_principal_pero_con_bak_se_recupera() {
+        // Ventana de crash entre los dos `rename` de `save_to` (P2-7).
+        let path = temp_path("recover_missing");
+        cleanup(&path);
+        let save = WorldSave::new(7, 0);
+        save.save_to(&path).unwrap();
+        save.clone().save_to(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(load_world(&path), WorldLoad::Recovered(_)));
+        assert!(load_and_migrate(&path).is_ok());
+        cleanup(&path);
+    }
+
+    #[test]
+    fn sin_principal_y_con_backup_ilegible_no_es_un_mundo_nuevo() {
+        // Si existe un `.bak`, el mundo existio: un backup tambien ilegible no
+        // debe abrirse como mundo vacio (P0-1).
+        let path = temp_path("missing_bad_bak");
+        cleanup(&path);
+        std::fs::write(with_suffix(&path, ".bak"), b"\x00\x01\x02").unwrap();
+        assert!(matches!(
+            load_world(&path),
+            WorldLoad::Unreadable(SaveError::CorruptHeader)
+        ));
+        cleanup(&path);
+    }
+
+    #[test]
+    fn un_mundo_inexistente_es_missing() {
+        let path = temp_path("missing");
+        cleanup(&path);
+        assert!(matches!(load_world(&path), WorldLoad::Missing));
+    }
+
+    #[test]
+    fn un_formato_futuro_no_se_degrada_a_un_backup() {
+        let path = temp_path("future");
+        cleanup(&path);
+        let save = WorldSave::new(7, 0);
+        save.save_to(&path).unwrap();
+        save.clone().save_to(&path).unwrap();
+        let bak = with_suffix(&path, ".bak");
+        assert!(bak.exists());
+        // Principal "del futuro" (cabecera valida, formato desconocido); el
+        // .bak sigue siendo valido y no debe usarse para degradarlo.
+        let mut future = WorldSave::new(7, 0);
+        future.header.format_version = FORMAT_VERSION + 5;
+        std::fs::write(&path, bincode::encode_to_vec(&future, standard()).unwrap()).unwrap();
+        match load_world(&path) {
+            WorldLoad::Unreadable(SaveError::TooNew { .. }) => {}
+            other => panic!("se esperaba Unreadable(TooNew), {other:?}"),
+        }
+        assert!(bak.exists(), "el backup no se toca");
+        cleanup(&path);
+    }
+
+    #[test]
+    fn un_mundo_v6_se_migra_y_calcula_checksum() {
+        let mut raw = vec![Block::Air.id(); COLUMN_VOLUME];
+        raw[3] = Block::Stone.id();
+        let v6 = WorldSaveV6 {
+            header: {
+                let mut h = WorldHeader::new(7, 1);
+                h.format_version = 6;
+                h
+            },
+            chunks: HashMap::from([(
+                ChunkPos::new(0, 0),
+                ChunkRecordV6 {
+                    format_version: 6,
+                    generator_version: GENERATOR_VERSION,
+                    compressed: true,
+                    y0: 0,
+                    height: WORLD_HEIGHT as u32,
+                    blocks: lz4_flex::compress_prepend_size(&raw),
+                    fluid: Vec::new(),
+                },
+            )]),
+            player_pos: DEFAULT_PLAYER_POS,
+            hotbar: default_hotbar(),
+        };
+        let bytes = bincode::encode_to_vec(&v6, standard()).unwrap();
+        let path = temp_path("v6_migrate");
+        std::fs::write(&path, &bytes).unwrap();
+        let loaded = load_and_migrate(&path).unwrap();
+        cleanup(&path);
+        assert_eq!(loaded.header.format_version, FORMAT_VERSION);
+        let record = &loaded.chunks[&ChunkPos::new(0, 0)];
+        assert_ne!(record.checksum, 0, "se calcula el checksum al migrar");
+        assert!(!record.is_corrupt());
+        assert_eq!(record.decompressed_blocks()[3], Block::Stone.id());
+    }
+
+    #[test]
     fn el_header_actual_es_el_formato_actual() {
         let save = WorldSave::new(1, 0);
         assert_eq!(save.header.format_version, FORMAT_VERSION);
@@ -1327,8 +1888,7 @@ mod tests {
             fn to_version(&self) -> u32 {
                 1
             }
-            fn migrate_chunk(&self, record: &ChunkRecord) -> ChunkRecord {
-                let mut r = record.clone();
+            fn migrate_chunk(&self, mut r: ChunkRecord) -> ChunkRecord {
                 r.format_version = self.to_version();
                 r
             }

@@ -20,12 +20,20 @@ pub enum GeneratorKind {
 }
 
 impl GeneratorKind {
-    /// Desde el nombre guardado en `level.json` (desconocido -> `Legacy16`).
+    /// Desde el nombre guardado en `level.json`. Un nombre desconocido cae en
+    /// `Legacy16` (compatibilidad con metadatos antiguos); para detectar
+    /// metadatos invalidos sin degradar en silencio usa [`Self::try_from_name`].
     pub fn from_name(name: &str) -> Self {
+        Self::try_from_name(name).unwrap_or_default()
+    }
+
+    /// Igual que [`Self::from_name`] pero distingue un nombre desconocido.
+    pub fn try_from_name(name: &str) -> Option<Self> {
         match name {
-            "graph" => GeneratorKind::Graph,
-            "larion" => GeneratorKind::Larion,
-            _ => GeneratorKind::Legacy16,
+            "legacy16" => Some(GeneratorKind::Legacy16),
+            "graph" => Some(GeneratorKind::Graph),
+            "larion" => Some(GeneratorKind::Larion),
+            _ => None,
         }
     }
 

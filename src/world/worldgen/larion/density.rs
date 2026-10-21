@@ -78,8 +78,7 @@ mod tests {
         let mut distintos = 0;
         for x in 0..40 {
             for z in 0..40 {
-                if (f.density(x, 80, z, 80.0, 0.0) - f.density(x, 80, z, 80.0, 1.0)).abs() > 1e-4
-                {
+                if (f.density(x, 80, z, 80.0, 0.0) - f.density(x, 80, z, 80.0, 1.0)).abs() > 1e-4 {
                     distintos += 1;
                 }
             }
@@ -92,10 +91,7 @@ mod tests {
         let a = DensityField::new(5, 16.0, 1.0 / 80.0, 2, 12.0);
         let b = DensityField::new(5, 16.0, 1.0 / 80.0, 2, 12.0);
         for y in 60..90 {
-            assert_eq!(
-                a.density(1, y, 2, 75.0, 0.8),
-                b.density(1, y, 2, 75.0, 0.8)
-            );
+            assert_eq!(a.density(1, y, 2, 75.0, 0.8), b.density(1, y, 2, 75.0, 0.8));
         }
     }
 }

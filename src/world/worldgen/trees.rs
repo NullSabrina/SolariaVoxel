@@ -332,8 +332,10 @@ mod tests {
         let b = TreePlacer::new(7);
         for (x, z) in [(0, 0), (321, -98), (-4000, 2500)] {
             assert_eq!(
-                a.plan(x, z, Biome::Forest, 70, 0).map(|p| (p.species, p.trunk)),
-                b.plan(x, z, Biome::Forest, 70, 0).map(|p| (p.species, p.trunk))
+                a.plan(x, z, Biome::Forest, 70, 0)
+                    .map(|p| (p.species, p.trunk)),
+                b.plan(x, z, Biome::Forest, 70, 0)
+                    .map(|p| (p.species, p.trunk))
             );
         }
     }

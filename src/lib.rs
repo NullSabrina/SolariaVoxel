@@ -1,258 +1,40 @@
 //! # Solaria Voxel
 //!
-//! Un motor de voxeles escrito en Rust **desde cero**, sin motor de juego.
-//! Usamos dos unicas crates de bajo nivel:
+//! Motor de voxeles propio en Rust, sin motor de juego. `winit` gestiona la
+//! ventana y los eventos; `wgpu` es la capa de GPU. Todo lo demas (bucle de
+//! juego, matematicas, camara, meshing, iluminacion, fluidos, guardado versionado
+//! y generacion procedural) es codigo de este repositorio.
 //!
-//! * [`winit`] — la ventana y los eventos del sistema operativo.
-//! * [`wgpu`] — el acceso a la GPU (Vulkan / Metal / Direct3D12 / OpenGL).
+//! ## Estado actual (`v0.48.0`)
 //!
-//! Todo lo demas (matematicas, camara, bucle de juego, y en el futuro el
-//! meshing de chunks, la iluminacion, el guardado versionado del mundo...) lo
-//! escribimos y documentamos nosotros.
+//! * **Generadores**: `legacy16` (por etapas), `graph` (DAG de densidad) y
+//!   `larion` (pipeline multiescala). `GENERATOR_VERSION = 21`.
+//! * **Guardado**: formato binario versionado `FORMAT_VERSION = 7` (bincode +
+//!   LZ4 + checksum FNV-1a), con migradores v1..v7, escritura atomica, `.bak` y
+//!   recuperacion automatica. Ver [`world::save`].
+//! * **Mundos multiples**: `saves/<slug>/` con `level.json` legible. La base se
+//!   resuelve con `SOLARIA_HOME`, una biblioteca existente en el directorio de
+//!   trabajo o el directorio del ejecutable. Ver [`world::library`].
+//! * **Fluidos** estilo Minecraft con presupuesto por tick y congelacion en los
+//!   bordes de columnas no cargadas. Ver [`world::water`].
+//! * **Render**: greedy meshing, pase de agua, frustum, luz por vertice, cielo
+//!   dia/noche y UI 2D. Solo [`render`] habla con la GPU.
 //!
-//! ## v0.47.0 - Generador Larion (MEGA PROMPT 4)
+//! El historico de decisiones y el detalle de cada version viven en
+//! `DECISIONS.md`; la arquitectura y los invariantes, en `ARCHITECTURE.md`.
 //!
-//! Tercer camino de generacion (`GeneratorKind::Larion`,
-//! `world/worldgen/larion/`): **continentalidad** con domain warping horizontal,
-//! **erosion** como campo continuo que escala el relieve, crestas
-//! multifractales, **densidad 3D en banda** (voladizos), clima en **bandas**
-//! latitudinales y **biomas multi-parametricos** con mezcla. Rango de altura
-//! `p99-p01` de 176..192, cumbres hasta ~294 y 7 biomas (ninguno > 38 %) sobre un
-//! area continental de 20480 bloques; ~1.44x el coste por columna del legacy.
-//! `Legacy16` y `Graph` **no cambian**. `GENERATOR_VERSION -> 21`;
-//! `LARION_CONFIG_VERSION = 1`; `Cargo.toml -> 0.47.0`; `FORMAT_VERSION` intacto
-//! (6). Detalle en `DECISIONS.md`, `docs/worldgen.md` y capturas
-//! `screenshots/larion_<seed>_*.png`.
-//!
-//! ## v0.45.0 - Terreno, biomas, arboles y hojas (MEGA PROMPT 1)
-//!
-//! Refactor del worldgen por fases: **bioma unico** desde `WorldGen` (retirado el
-//! clima del grafo), **superficie por pendiente** (roca en laderas, sedimento en
-//! valles) y **ecotonos** por ruido, **arboles procedimentales** (`worldgen/trees.rs`:
-//! 4 especies, copa por ruido 3D, colocacion por coordenada global con margen de
-//! chunk, sin cortes en fronteras) y **contrato de hojas** (bloquean el agua y
-//! solo asoman caras contra aire). `GENERATOR_VERSION -> 20`,
-//! `WORLDGEN_CONFIG_VERSION -> 4`, `FORMAT_VERSION` intacto (5). Detalle y tablas
-//! antes/despues en `DECISIONS.md`.
-//!
-//! ## v0.29.0 - Personaje y camara en tercera persona
-//!
-//! Se anade el **personaje** completo (humanoide de 1.8, algo mas detallado que
-//! Steve: pelo, ojos, cinturon y botas) con **animacion de andar** (piernas y
-//! brazos en oposicion). La tecla **F5** alterna primera/tercera persona; en
-//! tercera la camara se separa del jugador y se dibuja el personaje, y la mano
-//! se oculta. Reutiliza el sistema de modelos de cubos de v0.28.0 (una malla por
-//! hueso, matriz por pivote).
-//!
-//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Hereda de v0.28.0.
-//!
-//! ## v0.28.0 - Mano en primera persona (sistema de modelos)
-//!
-//! Se dibuja la **mano en primera persona**: el brazo (manga + puño + piel) y el
-//! **bloque sostenido** en la mano, con animacion de **golpe** (al romper/colocar)
-//! y **balanceo** al andar. Para ello se anade un sistema de **modelos de cubos
-//! de color** (`render/model.rs` + `scene/player.rs`) **independiente del atlas**:
-//! un pipeline nuevo con *dynamic offset* por pieza (brazo/item), sombreado por
-//! cara horneado en la CPU y luz dia/noche. Es la base del **personaje** completo.
-//!
-//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Hereda de v0.27.0.
-//!
-//! ## v0.27.0 - Overlay F3 en pantalla (fuente bitmap)
-//!
-//! La pantalla de diagnostico **F3** deja de ir en el titulo de la ventana y se
-//! dibuja **en pantalla**, al estilo de Minecraft: dos columnas con fondo oscuro
-//! (izquierda: version, fps/tiempos, XYZ/bloque/chunk, orientacion, bioma, luz,
-//! hora, semilla; derecha: draw calls, triangulos, culling, chunks, memoria,
-//! GPU, cola de fluidos y guardado). Para dibujar texto anadimos una **fuente
-//! bitmap 5x7** (`render/font.rs`) empaquetada en un atlas de una textura; cada
-//! caracter es un quad que samples su celda.
-//!
-//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Hereda de v0.26.0.
-//!
-//! ## v0.26.0 - Interpolacion de render (timestep fijo)
-//!
-//! La fisica del jugador corre a **timestep fijo** (120 Hz) pero el render puede
-//! ir a mas FPS. Antes la camara usaba directamente la posicion de la fisica, asi
-//! que a alto FPS la vista se quedaba un paso atras (micro-tiron al andar). Ahora
-//! la posicion **logica** (`App::player_pos`) es la unica fuente de verdad de la
-//! fisica y la camara guarda la posicion de **render**, interpolada entre los dos
-//! ultimos pasos con la fraccion de tiempo acumulada (`alpha`).
-//!
-//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (16/5). Hereda de v0.25.0.
-//!
-//! ## v0.25.0 - Tuning del clima y la costa
-//!
-//! Pasada de calibracion del generador con las metricas de la FASE 9:
-//! * **Contraste climatico** (`climate_contrast`, config): empuja temperatura y
-//!   humedad a los extremos; antes el clima quedaba casi todo cerca de `0.5` y
-//!   los biomas frios/aridos eran raros (Tundra+Taiga < 2 %). Ahora hay regiones
-//!   claramente frias, calidas, secas y humedas.
-//! * **Perfil continental mas empinado** cerca de 0 (la costa): playas y
-//!   plataformas mas **estrechas** (antes el gradiente suave dejaba costas muy
-//!   anchas y planas).
-//!
-//! `GENERATOR_VERSION -> 16`. `WORLDGEN_CONFIG_VERSION -> 3`.
-//! `FORMAT_VERSION` intacto (5). Hereda de v0.24.0.
-//!
-//! ## v0.24.0 - Worldgen FASE 9: tooling y calibracion
-//!
-//! Herramientas offline para **equilibrar el generador con datos**:
-//! * `worldgen_preview` gana capas `landform` (colorea el perfil de cada region)
-//!   y **slices de cuevas** (`cave` horizontal a `y=30`, `cave_yz` vertical), y
-//!   metricas nuevas (alturas p50/p95/p99, agua superficial, aire subterraneo).
-//! * `seed_gallery`: mosaico de mapas de bioma de 8 semillas en un PNG.
-//! * `TerrainGenerator::cave_carve_at` — consulta barata de cueva para previews.
-//! * Umbrales de landform **calibrados** para que mesetas/terrazas/acantilados
-//!   aparezcan con una proporcion util (antes casi todo era `Rolling`).
-//!
-//! `GENERATOR_VERSION -> 15`. `FORMAT_VERSION` intacto (5). Hereda de v0.23.0.
-//!
-//! ## v0.23.0 - Worldgen FASE 4: landforms
-//!
-//! El relieve deja de ser el mismo en todo el mundo: un **perfil de landform**
-//! por region (`LandformProfile`: `Rolling`/`Plateau`/`Terraced`/`Cliffs`) se
-//! aplica a la altura. Mesetas de cima plana en zonas secas y elevadas, terrazas
-//! geologicas dispersas y **acantilados** en las montanas; la transformacion es
-//! una funcion `terrace(h, step, sharpness)` que cuantiza la altura en escalones.
-//! Solo actua en tierra (transicion suave en la costa).
-//!
-//! `GENERATOR_VERSION -> 14`. `WORLDGEN_CONFIG_VERSION -> 2` (nuevos parametros
-//! de landform). `FORMAT_VERSION` intacto (5). Hereda de v0.22.0.
-//!
-//! ## v0.22.0 - Worldgen FASE 7: decoracion por reglas
-//!
-//! La decoracion (arboles, rocas) pasa a un sistema de **reglas**
-//! (`worldgen/decoration.rs`): cada tipo es una `DecorationRule` con
-//! condiciones de bioma, altura, humedad, pendiente y cercania a rio, mas una
-//! probabilidad. Dos ruidos de baja frecuencia dan coherencia: **clusters** (los
-//! arboles se agrupan en bosques con claros) y **manchas de roca** en laderas
-//! altas. La pendiente y la altura salen de una **rejilla de muestras con
-//! padding** (una sola pasada), no de re-muestrear `height()` por candidato.
-//!
-//! `GENERATOR_VERSION -> 13`. `FORMAT_VERSION` intacto (5). Hereda de v0.21.1.
-//!
-//! ## v0.21.1 - El agua generada se asienta sola
-//!
-//! El agua de **worldgen** (rios/lagos) nacia como fuente y **nunca se
-//! encolaba**: se quedaba congelada hasta que el jugador editaba algo cerca. Al
-//! cargar una columna ahora se registra su **superficie de agua** (en `Column`,
-//! una pista de runtime que no se guarda) y se encola la parte que **no esta en
-//! equilibrio**, asi que se **asienta sola** al llegar. Ademas el tick baja a
-//! **10 Hz** para que colocar agua no se vea nervioso.
-//!
-//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (12/5). Hereda de v0.21.0.
-//!
-//! ## v0.21.0 - Agua estilo Minecraft (fuente -> distancia)
-//!
-//! `world/water.rs` deja de ser un **igualador que conserva volumen** (se
-//! comportaba como una banera) y pasa al modelo de **Minecraft**:
-//! * **Nivel 8 = fuente**; el flujo vale `8 - distancia` (alcance 7).
-//! * El nivel de una celda de flujo se **recalcula** desde sus vecinos
-//!   (`max - 1`), no de un volumen compartido → al quitar la fuente el agua
-//!   **retrocede y desaparece**.
-//! * **Fuentes infinitas** (2+ vecinos fuente), **caida** a nivel 8 con
-//!   preferencia por bajar, y el flujo huerfano se seca.
-//! * Tick **mas rapido** que Minecraft (20 Hz frente a 0.25 s por paso).
-//!
-//! `GENERATOR_VERSION`/`FORMAT_VERSION` intactos (12/5): no cambia el mundo ni
-//! el guardado, solo la simulacion. Hereda de v0.20.0.
-//!
-//! ## v0.20.0 - Worldgen FASE 6: cuevas jerarquicas
-//!
-//! `world/caves.rs` pasa de un unico campo de densidad a **varios sistemas**
-//! (tubos spaghetti que se cruzan, tuneles regionales, camaras `cheese`, pozos
-//! verticales y canones) con una **mascara de preservacion** (pilares/puentes) y
-//! **entradas** raras que rompen la corteza. La densidad se atenua por
-//! profundidad (`surface - y`) y se refuerza bajo montanas (`mountain_mask`,
-//! anadido a `TerrainSample`). El trabajo 2D (region de camaras, pozos, canones
-//! y entradas) se calcula una vez por columna en `CaveContext`.
-//!
-//! `GENERATOR_VERSION → 12`. Hereda de v0.19.1.
-//!
-//! ## v0.19.1 - Limpieza y orden del repositorio
-//!
-//! Pasada de higiene antes de seguir con el worldgen (FASE 6+): se elimina
-//! codigo muerto, los backups de arte van a `assets/backup/`, `Cargo.toml` gana
-//! metadatos, se anaden licencia dual y `.gitattributes`, y se alinean
-//! `README`/`docs`. No cambia el mundo: `GENERATOR_VERSION`/`FORMAT_VERSION`
-//! intactos (11/5). Sigue a v0.19.0.
-//!
-//! ## v0.19.0 - Worldgen FASE 5: hidrologia (rios y lagos)
-//!
-//! Rios **estructurales**, no `noise > umbral`:
-//! * La linea del rio sigue una **cresta** (`1 - |n|`) con su propio **domain
-//!   warp** → trazados sinuosos y alargados.
-//! * **Caudal** = humedad + ruido de baja frecuencia → ancho y profundidad
-//!   variables (rios pequenos a grandes).
-//! * El cauce **cava** el terreno (`cut = prox^power * depth`) y se rellena de
-//!   agua hasta un nivel contenido bajo el borde; el material pasa a arena/grava.
-//! * **Lagos**: depresion cerrada en valles humedos (`valle · humedad · cuenca`).
-//! * El agua de worldgen nace **estable**: no entra en el active set del automata
-//!   (solo las ediciones del jugador lo hacen).
-//!
-//! `GENERATOR_VERSION → 11`. Escena demo `SOLARIA_RIVER=1`; capa `river` en
-//! `worldgen_preview`. Hereda de v0.18.0 (FASE 3).
-//!
-//! ## v0.18.0 - Worldgen FASE 3: bioma por region celular
-//!
-//! El bioma deja de ser una cascada de `if` sobre umbrales de clima:
-//! * `worldgen/biomes.rs`: `BiomeDefinition` (rangos de temperatura/humedad/
-//!   altura + densidad de arboles) y `select` por **scoring** con bandas suaves;
-//!   anadir un bioma es anadir una fila.
-//! * **Regionalizacion**: el clima se mezcla con el del **centro de la celda**
-//!   (domina en el interior, clima local en el borde) → regiones de bioma
-//!   coherentes de ~`cell_distance` bloques con transiciones suaves.
-//! * **Lapse de altitud**: la temperatura baja con la altura (nieve en cumbres).
-//! * El clima (`temperature`/`humidity`) vive ya en `WorldGen` (una sola muestra
-//!   por (x,z) da geografia + clima + bioma).
-//!
-//! `GENERATOR_VERSION → 10`. Medido (preview 2048x2048, seed 13371): 7 biomas,
-//! Plains 38% / Forest 33% / Savanna 18% / Swamp 6% / Desert 4% / Tundra 1% /
-//! Taiga 1%. Hereda de v0.17.1 (fix buffer GPU).
-//!
-//! ## v0.17.1 - Fix: overrun del buffer de malla
-//!
-//! `Mesh::new` creaba los buffers GPU con el tamano **exacto** de los datos pero
-//! registraba `capacity = next_power_of_two()` (mayor). Al re-meshear una seccion
-//! que crecia dentro de ese rango, `Mesh::update` creia que cabia y
-//! `write_buffer` se salia del buffer (`wgpu Validation Error`), cerrando el
-//! juego. El nuevo worldgen (variabilidad de mallas) lo destapo. Ahora el buffer
-//! se crea con la capacidad reservada; test de la invariante `capacidad >= bytes`.
-//!
-//! Hereda de v0.17.0 (worldgen FASE 1/2). Siguiente: FASE 3 (bioma por celda).
-//!
-//! ## v0.17.0 - Worldgen por etapas (FASE 1/2)
-//!
-//! Primer rediseno del generador de mundo (auditoria de worldgen). Nuevo modulo
-//! [`world::worldgen`] con:
-//! * `WorldGenConfig` central + validacion y `WORLDGEN_CONFIG_VERSION`.
-//! * seeds derivadas por campo (sin RNG con estado) y helpers de math
-//!   (`smoothstep`, `remap`, `spline`).
-//! * muestreador **celular (Worley)** determinista con id estable por celda.
-//! * **continentalness** con domain warping y clasificacion
-//!   `DeepOcean..Interior`; **costas de ancho variable** por celda; altura base
-//!   continental + relieve macro + cordilleras (mascara de rango + cresta) +
-//!   valles.
-//! * preview offline: `cargo run --release --example worldgen_preview`.
-//!
-//! El relieve ya no depende del bioma; el bioma sigue por clima (FASE 3
-//! `DEFERRED`). `GENERATOR_VERSION` sube a 9. Hereda de v0.16.1.
-//!
-//! Pendiente (honesto): bioma por region celular (FASE 3), hidrologia/rios
-//! (FASE 5), jerarquia de cuevas (FASE 6), decoracion por reglas (FASE 7),
-//! interpolacion de render y overlay de texto.
-//!
-//! ## Organizacion del codigo
+//! ## Organizacion
 //!
 //! * [`engine`] — ciclo de vida de la app y bucle de eventos.
-//! * [`render`] — la capa de GPU (una fina envoltura sobre wgpu).
-//! * [`scene`] — que hay en el mundo (camara).
-//! * [`world`] — bloques, chunks, generacion (terreno/cuevas), meshing, agua.
-//! * [`player`] — fisica del jugador (gravedad, suelo, salto, vuelo).
-//! * [`physics`] — fisica AABB de entidades (base de los mobs).
-//! * [`math`] — matematicas 3D propias (`Vec3`, `Mat4`).
+//! * [`render`] — la capa de GPU (envoltura fina sobre wgpu).
+//! * [`scene`] — camara, cielo y ciclo dia/noche.
+//! * [`world`] — bloques, columnas, generacion, meshing, agua y guardado.
+//! * [`player`] — fisica del jugador.
+//! * [`physics`] — fisica AABB de entidades.
+//! * [`math`] — matematicas 3D propias.
+//! * [`ui`] — estado de pantallas, inventario, opciones e idiomas.
 //!
-//! ## Como se ejecuta
+//! ## Ejecucion
 //!
 //! ```no_run
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {

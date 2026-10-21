@@ -4,6 +4,20 @@ El worldgen vive en `src/world/worldgen/` y **no toca la GPU**. Es puramente
 determinista: `(seed, x, z)` da siempre el mismo resultado, sin RNG con estado
 (prerequisito para generar columnas en varios hilos, `Send + Sync`).
 
+## Generadores
+
+| `generator_kind` | Implementacion | Version | Uso / compatibilidad |
+|---|---|---|---|
+| `legacy16` | `worldgen/` por etapas + `terrain.rs` | 21 | Por defecto. Mundos existentes creados antes de `graph`/`larion`. |
+| `graph` | `worldgen/graph.rs` (DAG de densidad) | 21 | Seleccionable al crear (`SOLARIA_GENERATOR=graph`). Rios/acuifero del camino graph siguen pendientes de validacion visual. |
+| `larion` | `worldgen/larion/` (pipeline multiescala) | 21 | Seleccionable al crear (`SOLARIA_GENERATOR=larion`). Biomas multi-parametricos y rios sinuosos. |
+
+El tipo se guarda en `saves/<slug>/level.json` (`generator_kind`) y **no cambia**
+al reabrir el mundo: un mundo existente conserva su generador. `GENERATOR_VERSION`
+es global (`21`) y sube cuando cambia el terreno de cualquier camino; los mundos
+antiguos se siguen leyendo y el terreno ya generado no se regenera. Cambiar de
+generador solo afecta a zonas nuevas.
+
 ## Pipeline
 
 ```
@@ -88,7 +102,7 @@ Escenas demo del motor: `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_RIVER`,
 - `GENERATOR_VERSION` (resultado del mundo) y `FORMAT_VERSION` (binario) son
   **independientes**. Cambiar el mundo sube `GENERATOR_VERSION`; cambiar el
   guardado sube `FORMAT_VERSION` con migrador + test.
-- Actual: `GENERATOR_VERSION = 21`, `FORMAT_VERSION = 6`,
+- Actual: `GENERATOR_VERSION = 21`, `FORMAT_VERSION = 7`,
   `WORLDGEN_CONFIG_VERSION = 4`, `LARION_CONFIG_VERSION = 1`.
 
 ## Generador Larion (MEGA PROMPT 4)

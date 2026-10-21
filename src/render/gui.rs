@@ -3,8 +3,10 @@
 //! Estilo Minecraft: **bisel** de 1 px (luz arriba-izquierda, sombra
 //! abajo-derecha), ranuras hundidas y botones con 4 estados (normal/hover/
 //! pulsado/desactivado). El arte se **pinta en LibreSprite** (`assets/gui.png`,
-//! 256x256) con el script `tools/gen_gui.js`; el manifiesto de regiones vive en
-//! `assets/gui.json`. El procedural de [`build_pixels`] es el fallback sin assets.
+//! 256x256) con el script `tools/gen_gui.js`. Las regiones **canonicas** son las
+//! constantes de este modulo; `assets/gui.json` es su manifiesto legible y un
+//! test comprueba que ambos coinciden (una sola fuente de verdad verificada).
+//! El procedural de [`build_pixels`] es el fallback sin assets.
 
 /// Ancho de la textura de la interfaz.
 pub const GUI_W: u32 = 256;
@@ -138,29 +140,129 @@ pub fn build_pixels() -> Vec<u8> {
     let mut px = vec![0u8; (GUI_W * GUI_H * 4) as usize];
 
     // Hotbar: marco + 9 ranuras.
-    bevel(&mut px, HOTBAR.x, HOTBAR.y, HOTBAR.w, HOTBAR.h, WOOD, BEVEL_LIGHT, DARK, None);
+    bevel(
+        &mut px,
+        HOTBAR.x,
+        HOTBAR.y,
+        HOTBAR.w,
+        HOTBAR.h,
+        WOOD,
+        BEVEL_LIGHT,
+        DARK,
+        None,
+    );
     for i in 0..9 {
         let sx = HOTBAR.x + 1 + i * SLOT;
-        bevel(&mut px, sx, HOTBAR.y + 1, SLOT, SLOT, INNER, DARK, WOOD, Some(DARK));
+        bevel(
+            &mut px,
+            sx,
+            HOTBAR.y + 1,
+            SLOT,
+            SLOT,
+            INNER,
+            DARK,
+            WOOD,
+            Some(DARK),
+        );
     }
     // Ranuras sueltas: normal, hover, seleccionada.
-    bevel(&mut px, SLOT_REGION.x, SLOT_REGION.y, SLOT, SLOT, INNER, DARK, WOOD, Some(DARK));
-    bevel(&mut px, SLOT_HOVER.x, SLOT_HOVER.y, SLOT, SLOT, SLOT_HOVER_FILL, DARK, WOOD, Some(DARK));
-    bevel(&mut px, SELECTION.x, SELECTION.y, SLOT, SLOT, SELECTION_FILL, [255, 248, 210, 255], [150, 130, 80, 255], Some(DARK));
+    bevel(
+        &mut px,
+        SLOT_REGION.x,
+        SLOT_REGION.y,
+        SLOT,
+        SLOT,
+        INNER,
+        DARK,
+        WOOD,
+        Some(DARK),
+    );
+    bevel(
+        &mut px,
+        SLOT_HOVER.x,
+        SLOT_HOVER.y,
+        SLOT,
+        SLOT,
+        SLOT_HOVER_FILL,
+        DARK,
+        WOOD,
+        Some(DARK),
+    );
+    bevel(
+        &mut px,
+        SELECTION.x,
+        SELECTION.y,
+        SLOT,
+        SLOT,
+        SELECTION_FILL,
+        [255, 248, 210, 255],
+        [150, 130, 80, 255],
+        Some(DARK),
+    );
     // Panel de inventario.
-    bevel(&mut px, PANEL.x, PANEL.y, PANEL.w, PANEL.h, INNER, WOOD, DARK, Some(DARK));
+    bevel(
+        &mut px,
+        PANEL.x,
+        PANEL.y,
+        PANEL.w,
+        PANEL.h,
+        INNER,
+        WOOD,
+        DARK,
+        Some(DARK),
+    );
     // Botones: normal, hover, pulsado, desactivado.
     let btn = [
-        (BUTTON, [110, 110, 110, 255], [168, 168, 168, 255], [52, 52, 52, 255]),
-        (BUTTON_HOVER, [126, 126, 150, 255], [190, 190, 210, 255], [60, 60, 74, 255]),
-        (BUTTON_PRESSED, [80, 80, 80, 255], [52, 52, 52, 255], [150, 150, 150, 255]),
-        (BUTTON_DISABLED, [64, 64, 64, 255], [96, 96, 96, 255], [44, 44, 44, 255]),
+        (
+            BUTTON,
+            [110, 110, 110, 255],
+            [168, 168, 168, 255],
+            [52, 52, 52, 255],
+        ),
+        (
+            BUTTON_HOVER,
+            [126, 126, 150, 255],
+            [190, 190, 210, 255],
+            [60, 60, 74, 255],
+        ),
+        (
+            BUTTON_PRESSED,
+            [80, 80, 80, 255],
+            [52, 52, 52, 255],
+            [150, 150, 150, 255],
+        ),
+        (
+            BUTTON_DISABLED,
+            [64, 64, 64, 255],
+            [96, 96, 96, 255],
+            [44, 44, 44, 255],
+        ),
     ];
     for (r, base, light, dark) in btn {
-        bevel(&mut px, r.x, r.y, r.w, r.h, base, light, dark, Some([30, 30, 30, 255]));
+        bevel(
+            &mut px,
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            base,
+            light,
+            dark,
+            Some([30, 30, 30, 255]),
+        );
     }
     // Pestana.
-    bevel(&mut px, TAB.x, TAB.y, TAB.w, TAB.h, [110, 110, 110, 255], [168, 168, 168, 255], [52, 52, 52, 255], Some([30, 30, 30, 255]));
+    bevel(
+        &mut px,
+        TAB.x,
+        TAB.y,
+        TAB.w,
+        TAB.h,
+        [110, 110, 110, 255],
+        [168, 168, 168, 255],
+        [52, 52, 52, 255],
+        Some([30, 30, 30, 255]),
+    );
 
     // Flecha de crafteo.
     draw_arrow(&mut px);
@@ -305,6 +407,36 @@ mod tests {
         }
         assert_ne!(BUTTON.y, BUTTON_HOVER.y);
         assert_ne!(BUTTON_HOVER.y, BUTTON_PRESSED.y);
+    }
+
+    #[test]
+    fn el_manifiesto_gui_json_coincide_con_las_regiones() {
+        // Contrato unico: `assets/gui.json` y las constantes no deben divergir.
+        let text = include_str!("../../assets/gui.json");
+        let v: serde_json::Value = serde_json::from_str(text).expect("gui.json valido");
+        let size = v["size"].as_array().expect("size");
+        assert_eq!(size[0].as_u64().unwrap() as u32, GUI_W);
+        assert_eq!(size[1].as_u64().unwrap() as u32, GUI_H);
+        let check = |key: &str, r: Region| {
+            let a = v[key]
+                .as_array()
+                .unwrap_or_else(|| panic!("falta la region {key}"));
+            let got: Vec<u32> = a.iter().map(|x| x.as_u64().unwrap() as u32).collect();
+            assert_eq!(got, vec![r.x, r.y, r.w, r.h], "region {key}");
+        };
+        check("hotbar", HOTBAR);
+        check("slot", SLOT_REGION);
+        check("slot_hover", SLOT_HOVER);
+        check("slot_selected", SELECTION);
+        check("panel", PANEL);
+        check("button", BUTTON);
+        check("button_hover", BUTTON_HOVER);
+        check("button_pressed", BUTTON_PRESSED);
+        check("button_disabled", BUTTON_DISABLED);
+        check("arrow", ARROW);
+        check("dim", DIM);
+        check("crosshair", CROSSHAIR);
+        check("tab", TAB);
     }
 
     #[test]

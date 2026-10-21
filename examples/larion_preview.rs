@@ -298,12 +298,15 @@ fn shade(base: [u8; 3], h: i32) -> [u8; 3] {
 
 fn slope_color(g: &LarionGenerator, x: i32, z: i32, h: i32) -> [u8; 3] {
     let dh = |dx: i32, dz: i32| {
-        (g.sample((x + dx) as f64, (z + dz) as f64).height.round() as i32 - h)
-            .abs()
+        (g.sample((x + dx) as f64, (z + dz) as f64).height.round() as i32 - h).abs()
     };
     let slope = dh(1, 0).max(dh(-1, 0)).max(dh(0, 1)).max(dh(0, -1));
     let t = (slope as f32 / 12.0).clamp(0.0, 1.0);
-    [(60.0 + 195.0 * t) as u8, (120.0 - 90.0 * t) as u8, (90.0 - 60.0 * t) as u8]
+    [
+        (60.0 + 195.0 * t) as u8,
+        (120.0 - 90.0 * t) as u8,
+        (90.0 - 60.0 * t) as u8,
+    ]
 }
 
 /// Corte vertical X-Y de la densidad cerca de un tramo con relieve.
@@ -329,5 +332,7 @@ fn render_density(g: &LarionGenerator, img: &mut [u8], pixels: usize, step: i32,
             put(img, pixels, px, py, color);
         }
     }
-    println!("[larion] corte de densidad x-y en z={z} (roca marron, aire arriba, cueva cian, agua azul)");
+    println!(
+        "[larion] corte de densidad x-y en z={z} (roca marron, aire arriba, cueva cian, agua azul)"
+    );
 }

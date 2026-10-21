@@ -298,7 +298,9 @@ impl LarionConfig {
             || !(0.0..=1.0).contains(&self.biome_blend_hi)
             || self.biome_blend_lo >= self.biome_blend_hi
         {
-            return Err(LarionConfigError::Unordered("biome_blend_lo < biome_blend_hi"));
+            return Err(LarionConfigError::Unordered(
+                "biome_blend_lo < biome_blend_hi",
+            ));
         }
         if self.rock_slope <= 0.0 {
             return Err(LarionConfigError::NotPositive("rock_slope"));
@@ -343,6 +345,9 @@ mod tests {
             coast_humidity_bias: 2.0,
             ..Default::default()
         };
-        assert!(matches!(c.validate(), Err(LarionConfigError::OutOfRange(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(LarionConfigError::OutOfRange(_))
+        ));
     }
 }

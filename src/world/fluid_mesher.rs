@@ -30,8 +30,8 @@ pub fn surface_height(level: u8) -> f32 {
 /// Nivel maximo de las celdas de agua que comparten la esquina `(x+dx, z+dz)`,
 /// con `dx`/`dz` en `0..=1`. Se toma el maximo para que la esquina se eleve
 /// hacia la celda vecina mas alta y el borde quede inclinado.
-fn corner_max_level(
-    level: &dyn Fn(i32, i32, i32) -> u8,
+fn corner_max_level<L: Fn(i32, i32, i32) -> u8 + ?Sized>(
+    level: &L,
     x: i32,
     y: i32,
     z: i32,
@@ -74,15 +74,21 @@ fn push_quad(
 ///   -1 / 16 para mirar el chunk vecino); `0` = sin agua.
 /// * `query(x,y,z)` — bloque (`is_solid` decide si una cara lateral queda oculta).
 /// * `light(x,y,z)` — `(cielo, bloque)` 0..15 de la celda.
-pub fn fluid_section(
-    level: &dyn Fn(i32, i32, i32) -> u8,
-    query: &dyn Fn(i32, i32, i32) -> Block,
-    light: &dyn Fn(i32, i32, i32) -> (u8, u8),
+pub fn fluid_section<L, Q, G>(
+    level: &L,
+    query: &Q,
+    light: &G,
     section: usize,
     origin: [f32; 3],
-) -> (Vec<Vertex>, Vec<u32>) {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
+) -> (Vec<Vertex>, Vec<u32>)
+where
+    L: Fn(i32, i32, i32) -> u8 + ?Sized,
+    Q: Fn(i32, i32, i32) -> Block + ?Sized,
+    G: Fn(i32, i32, i32) -> (u8, u8) + ?Sized,
+{
+    // P2-18: una seccion normal no deberia reasignar varias veces.
+    let mut vertices = Vec::with_capacity(512);
+    let mut indices = Vec::with_capacity(768);
     let (ox, oy, oz) = (origin[0], origin[1], origin[2]);
     let y_start = section * CHUNK_SIZE;
     let y_end = (y_start + CHUNK_SIZE).min(WORLD_HEIGHT);
@@ -101,6 +107,25 @@ pub fn fluid_section(
                 let block_f = block_light as f32 / MAX_LIGHT as f32;
                 let (xf, yf, zf) = (x as f32, y as f32, z as f32);
 
+                // Se decide **antes** si la celda aporta geometria: una celda
+                // rodeada de agua/solido no calcula esquinas (P2-18).
+                let above_water = level(xi, yi + 1, zi) > 0;
+                let above_solid = query(xi, yi + 1, zi).is_solid();
+                let emit_top = !above_water && !above_solid;
+                let dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+                let mut exposed = [false; 4];
+                let mut any_side = false;
+                for (k, (dx, dz)) in dirs.iter().enumerate() {
+                    let (nx, nz) = (xi + dx, zi + dz);
+                    if level(nx, yi, nz) == 0 && !query(nx, yi, nz).is_solid() {
+                        exposed[k] = true;
+                        any_side = true;
+                    }
+                }
+                if !emit_top && !any_side {
+                    continue;
+                }
+
                 // Esquinas del quad superior (nivel maximo en cada una).
                 let h00 = corner_max_level(level, xi, yi, zi, 0, 0, own);
                 let h10 = corner_max_level(level, xi, yi, zi, 1, 0, own);
@@ -108,9 +133,7 @@ pub fn fluid_section(
                 let h11 = corner_max_level(level, xi, yi, zi, 1, 1, own);
 
                 // Cara superior: solo si arriba no hay agua ni bloque solido.
-                let above_water = level(xi, yi + 1, zi) > 0;
-                let above_solid = query(xi, yi + 1, zi).is_solid();
-                if !above_water && !above_solid {
+                if emit_top {
                     let yh = |hl: u8| oy + yf + surface_height(hl);
                     let p = [
                         [ox + xf, yh(h00), oz + zf],
@@ -137,11 +160,11 @@ pub fn fluid_section(
                 // cascada se ve a escalones en vez de continua.
                 let cap = if above_water { 1.0 } else { 0.0 };
                 let yh = |hl: u8| oy + yf + surface_height(hl).max(cap);
-                for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                    let (nx, nz) = (xi + dx, zi + dz);
-                    if level(nx, yi, nz) > 0 || query(nx, yi, nz).is_solid() {
+                for (k, (dx, dz)) in dirs.iter().enumerate() {
+                    if !exposed[k] {
                         continue;
                     }
+                    let (dx, dz) = (*dx, *dz);
                     // Arista superior inclinada del lado expuesto + base plana,
                     // para que no queden huecos con la celda de abajo.
                     let p = match (dx, dz) {
@@ -170,9 +193,14 @@ pub fn fluid_section(
                             [ox + xf, base, oz + zf],
                         ],
                     };
-                    // v=1 abajo del tile (igual que la antorcha): p[0..1] es el
-                    // borde superior y p[2..3] la base.
-                    let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+                    // P2-19: v=1 abajo del tile, pero **escalado** a la altura
+                    // visible (nivel 1..7 mide menos de un bloque). Con v=1 fijo
+                    // la textura se comprimia verticalmente.
+                    // p[0..1] son los vertices superiores; p[2] esta bajo p[1] y
+                    // p[3] bajo p[0].
+                    let hv0 = (p[0][1] - base).clamp(0.0, 1.0);
+                    let hv1 = (p[1][1] - base).clamp(0.0, 1.0);
+                    let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, hv1], [0.0, hv0]];
                     push_quad(&mut vertices, &mut indices, p, uv, sky_f, block_f, tile);
                 }
             }
@@ -256,6 +284,31 @@ mod tests {
         let level2 = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
         let (v, _) = fluid_section(&level2, &air, &light, 0, [0.0; 3]);
         assert_eq!(nquads(&v), 8, "cara de agua contra agua de igual nivel");
+    }
+
+    #[test]
+    fn las_caras_laterales_parciales_no_comprimen_la_textura() {
+        // P2-19: una celda de nivel 4 mide 0.4375; el borde inferior de la cara
+        // lateral debe usar v=0.4375 (no 1.0) para no aplastar la textura.
+        let mut levels: HashMap<(i32, i32, i32), u8> = HashMap::new();
+        levels.insert((0, 0, 0), 4);
+        let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
+        let query = |_x: i32, _y: i32, _z: i32| Block::Air;
+        let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
+        let (v, _) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
+        let bottom = v
+            .iter()
+            .find(|v| (v.position[0] - 1.0).abs() < 1e-4 && v.position[1].abs() < 1e-4)
+            .expect("falta el vertice inferior de la cara +X");
+        assert!(
+            (bottom.uv[1] - 0.4375).abs() < 1e-3,
+            "v inferior {} (se esperaba 0.4375)",
+            bottom.uv[1]
+        );
+        assert!(
+            v.iter().all(|v| v.uv[1] <= 1.0 + 1e-4),
+            "las UV no deben salirse del tile"
+        );
     }
 
     #[test]

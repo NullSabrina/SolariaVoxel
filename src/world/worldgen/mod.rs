@@ -37,7 +37,7 @@ pub use graph::{
     Graph, GraphError, Node, NodeId, NoiseKind, Program, default_density_graph,
     default_height_graph,
 };
-pub use trees::{Species, TreePlan, TreePlacer};
+pub use trees::{Species, TreePlacer, TreePlan};
 
 use std::sync::atomic::{AtomicU32, Ordering};
 

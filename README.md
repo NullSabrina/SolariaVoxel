@@ -8,15 +8,25 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.47.0` — Generador Larion (terreno a escala monumental)
+## Estado actual: `v0.48.0` — integridad de guardado y auditoría
 
+- **Auditoría P0/P1/P2 cerrada** (`v0.48.0`): un `world.vf` ilegible ya **no** se
+  abre como mundo vacío ni sobrescribe el `.bak`; se recupera automáticamente
+  desde `world.vf.bak` (el dañado queda en `world.vf.corrupt`). Además:
+  snapshots finales sin perder ediciones con un guardado en vuelo, importación
+  legacy que no "resucita", ruta de mundos estable, metadatos inválidos que no
+  degradan semilla/generador en silencio, checksum por chunk (`FORMAT_VERSION =
+  7`), agua que no se seca en bordes de columnas descargadas y varias
+  optimizaciones de agua/meshing. Detalle en
+  [`docs/audit/`](./docs/audit/) y enlazado desde [`AUDIT.md`](./AUDIT.md).
 - **Generador Larion** (`v0.47.0`, MEGA PROMPT 4): tercer camino de generación
   (`GeneratorKind::Larion`, en `world/worldgen/larion/`) con **continentalidad +
   domain warping horizontal**, **erosión** que decide la forma del relieve,
   crestas multifractales, **densidad 3D en banda** (voladizos), clima en **bandas**
   latitudinales y **biomas multi-paramétricos** con mezcla. Sobre un área
   continental de ~20 000 bloques: rango de altura `p99−p01 = 176..192`, cumbres
-  hasta ~300, 7 biomas (ninguno > 38 %) y ~1,44× el coste por columna del legacy.
+  hasta ~300, 7 biomas (ninguno > 38 %) y ~1,54× el coste por columna del legacy
+  (mediana de la re-medición v0.48.0; la cifra histórica era 1,44×).
   Mundos nuevos con `SOLARIA_GENERATOR=larion`. `Legacy16` y `Graph` **no cambian**.
 - **Fix de mundos nuevos** (`v0.47.0`): crear un mundo y entrar en él ya funciona
   (antes, sin `world.vf`, la entrada se rechazaba y siempre se caía en la semilla
@@ -30,8 +40,8 @@ versionado del mundo y la generacion procedural.
 - **Pendiente honesto**: validación visual en GPU de Larion; ríos/acuífero del
   camino `graph`.
 
-Versiones: `GENERATOR_VERSION = 21` · `FORMAT_VERSION = 6` ·
-`LARION_CONFIG_VERSION = 1`.
+Versiones: `GENERATOR_VERSION = 21` · `FORMAT_VERSION = 7` ·
+`LARION_CONFIG_VERSION = 1` · `Cargo.toml = 0.48.0`.
 
 - **Overlay F3** (`v0.27.0`): pantalla de diagnostico en pantalla (dos columnas)
   con una **fuente bitmap 5x7** propia.
@@ -40,8 +50,10 @@ Versiones: `GENERATOR_VERSION = 21` · `FORMAT_VERSION = 6` ·
 - **Worldgen** (`v0.17`–`v0.25`, FASE 4/6/7/9 + tuning). Ver
   [`docs/worldgen.md`](./docs/worldgen.md).
 - **Repo** (`v0.19.1`): limpieza y orden.
-- **Formato de guardado** (`FORMAT_VERSION = 5`): independiente del generador,
-  con migradores y test de datos del jugador.
+- **Formato de guardado** (`FORMAT_VERSION = 7`): independiente del generador,
+  con migradores v1..v7, checksum FNV-1a por chunk (detecta corrupción que
+  conserva el tamaño), orden determinista (mismo estado → mismos bytes) y
+  escritura atómica con `.bak`.
 - **Render**: greedy meshing con face culling, pase de agua translucida
   ordenado, frustum + culling por distancia, luz de cielo/ bloque por vertice,
   niebla atada al radio de vista, overlay F3.
@@ -63,8 +75,16 @@ cargo run
 La primera compilacion tarda unos minutos (compila `wgpu` y sus dependencias).
 Veras en consola la GPU y el formato de superficie elegidos.
 
-Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda en
-`world.vf` (junto al ejecutable) y se recarga automaticamente la proxima vez.
+Al cerrar con **Escape** o la **X** de la ventana, el mundo se guarda y se
+recarga automaticamente la proxima vez. Cada mundo vive en
+`saves/<slug>/world.vf` (más `level.json`, `world.vf.bak` y, si hubo que
+recuperarlo, `world.vf.corrupt`).
+
+La carpeta base se resuelve en este orden: `SOLARIA_HOME` si esta definido; una
+biblioteca `saves/` **ya existente** en el directorio de trabajo (compatibilidad);
+y, si no, el **directorio del ejecutable** (estable al lanzar desde un acceso
+directo). Si el ejecutable esta en una ruta sin permiso de escritura, se usa el
+directorio de trabajo.
 
 ## Controles
 
@@ -108,6 +128,7 @@ Todas son opcionales y sirven para arrancar escenas de demo o ajustar limites.
 | `SOLARIA_SCREEN` | Arranca en una pantalla: `title`, `worlds`, `create`, `pause`, `options`, `controls`. |
 | `SOLARIA_FLUID_BUDGET_CELLS` | Celdas de fluido simuladas por tick. |
 | `SOLARIA_FLUID_BUDGET_MS` | Presupuesto de tiempo del autómata de fluidos. |
+| `SOLARIA_MEM_SECS` | Imprime el informe de memoria CPU/GPU cada N segundos (diagnóstico y benchmarks). |
 | `SOLARIA_TIME` | Hora inicial del ciclo dia/noche (0..1). |
 | `SOLARIA_DAY_SPEED` | Acelera el ciclo (multiplicador; 1 = normal, 24 = un dia por 25 s). |
 | `SOLARIA_DAY` | Dia de juego inicial (fases lunares). |
@@ -125,8 +146,8 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-429 tests de unidad e integracion (+1 benchmark ignorado por defecto:
-`cargo test --release -- --ignored el_coste_por_columna`), cubriendo
+459 tests de unidad e integracion (+1 benchmark ignorado por defecto:
+`cargo test --release -- --ignored el_coste_por_columna`) y 1 doctest, cubriendo
 determinismo, persistencia, meshing, luz, fluidos estilo Minecraft, raycast,
 worldgen por etapas, **generador Larion** (continuidad entre chunks, cobertura de
 biomas, cumbres, coste), cuevas, cielo/color, distancia de vista, interfaz,
@@ -224,10 +245,10 @@ src/
 │   ├── daynight.rs     Hora del mundo y contador de dias.
 │   └── sky.rs          Cielo/atmosfera: paleta, orbita solar y SkyState.
 ├── ui/                 Estado/logica de interfaz sin GPU (i18n, inventario).
-�   +-- lang.rs         Traducciones es/en.
-�   +-- inventory.rs    Categorias, busqueda y filtrado del inventario.
-�   +-- options.rs      Opciones persistentes (options.json) + conflictos de teclas.
-�   +-- screens.rs      Pila de pantallas (titulo, mundos, crear, opciones, pausa).
+│   ├── lang.rs         Traducciones es/en.
+│   ├── inventory.rs    Categorias, busqueda y filtrado del inventario.
+│   ├── options.rs      Opciones persistentes (options.json) + conflictos de teclas.
+│   └── screens.rs      Pila de pantallas (titulo, mundos, crear, opciones, pausa).
 ├── physics.rs          Fisica AABB de entidades (gravedad, colision, flotar).
 ├── math/
 │   ├── vec3.rs         Vector de 3 componentes.

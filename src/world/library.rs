@@ -9,7 +9,10 @@
 //! `level.json` tolerante: si falta o esta corrupto se marca el mundo como
 //! `corrupt` (no crashea la lista).
 //!
-//! Base por defecto: junto al ejecutable; `SOLARIA_HOME` la sobreescribe.
+//! Base por defecto: `SOLARIA_HOME` si existe; si no, una biblioteca ya
+//! existente en el directorio de trabajo (compatibilidad) y, en su defecto,
+//! junto al ejecutable (estable aunque se lance desde un acceso directo). Ver
+//! [`base_dir_from_env`].
 
 use std::path::{Path, PathBuf};
 
@@ -23,6 +26,9 @@ pub const WORLD_FILE: &str = "world.vf";
 pub const WORLD_BAK: &str = "world.vf.bak";
 /// Metadatos legibles.
 pub const LEVEL_FILE: &str = "level.json";
+/// Marca de que el `world.vf` legado ya se importo (evita reimportarlo tras
+/// borrar todos los mundos, P1-2).
+pub const LEGACY_MARKER: &str = ".legacy-imported";
 /// Longitud maxima del slug.
 pub const MAX_SLUG_LEN: usize = 48;
 
@@ -77,11 +83,48 @@ impl WorldEntry {
     }
 }
 
-/// Directorio base (junto al ejecutable, o `SOLARIA_HOME`).
+/// Directorio base de la biblioteca.
+///
+/// Precedencia (P1-3):
+/// 1. `SOLARIA_HOME`, si esta definido.
+/// 2. Una biblioteca `saves/` **ya existente** en el directorio de trabajo
+///    (compatibilidad: no se pierden mundos de versiones anteriores).
+/// 3. El directorio del ejecutable (estable al lanzar desde un acceso directo;
+///    antes dependia del cwd y la biblioteca "desaparecia").
+/// 4. El directorio de trabajo si el del ejecutable no admite escritura.
 pub fn base_dir_from_env() -> PathBuf {
-    std::env::var("SOLARIA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
+    if let Ok(home) = std::env::var("SOLARIA_HOME") {
+        return PathBuf::from(home);
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let chosen = resolve_base_dir(cwd.clone(), exe_dir);
+    // Si el directorio del ejecutable no es escribible (p. ej. Program Files),
+    // no se puede crear la biblioteca: se usa el de trabajo como ultimo recurso.
+    if chosen != cwd && std::fs::create_dir_all(saves_dir(&chosen)).is_err() {
+        return cwd;
+    }
+    chosen
+}
+
+/// Politica pura de [`base_dir_from_env`] (testeable, sin efectos laterales).
+pub fn resolve_base_dir(cwd: PathBuf, exe_dir: Option<PathBuf>) -> PathBuf {
+    let Some(exe) = exe_dir else {
+        return cwd;
+    };
+    if exe == cwd {
+        return exe;
+    }
+    // Compatibilidad: si ya hay una biblioteca en el directorio de trabajo y no
+    // junto al ejecutable, se conserva para no "perder" los mundos existentes.
+    let cwd_has = saves_dir(&cwd).is_dir();
+    let exe_has = saves_dir(&exe).is_dir();
+    if cwd_has && !exe_has {
+        return cwd;
+    }
+    exe
 }
 
 /// Carpeta `saves/` dentro de `base`.
@@ -181,6 +224,31 @@ pub fn unique_slug(base: &str, taken: &[String]) -> String {
     }
 }
 
+/// ¿El slug es seguro para unirse a `saves/`? Solo `[a-z0-9_-]`, sin `.`/`..`
+/// ni separadores, longitud acotada y sin nombres reservados (P2-13).
+pub fn is_safe_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= MAX_SLUG_LEN
+        && slug != "."
+        && slug != ".."
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        && !is_reserved(slug)
+}
+
+/// Valida un slug o devuelve `InvalidInput`.
+fn check_slug(slug: &str) -> std::io::Result<()> {
+    if is_safe_slug(slug) {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("slug no valido: {slug:?}"),
+        ))
+    }
+}
+
 /// Escribe `level.json` de forma **atomica** (`.tmp` -> rename).
 pub fn save_meta(dir: &Path, meta: &WorldMeta) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
@@ -189,7 +257,13 @@ pub fn save_meta(dir: &Path, meta: &WorldMeta) -> std::io::Result<()> {
     let bak = dir.join(format!("{LEVEL_FILE}.bak"));
     let json = serde_json::to_string_pretty(meta)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(&tmp, json)?;
+    // P2-10: sincronizar el temporal antes de rotar/renombrar.
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(json.as_bytes())?;
+        file.sync_all()?;
+    }
     // Windows: `rename` no sobreescribe. Rotamos el actual a `.bak` (en vez de
     // borrarlo): si algo falla entre medias, `load_meta` recupera el `.bak`.
     if final_path.exists() {
@@ -197,7 +271,22 @@ pub fn save_meta(dir: &Path, meta: &WorldMeta) -> std::io::Result<()> {
         std::fs::rename(&final_path, &bak)?;
     }
     std::fs::rename(&tmp, &final_path)?;
+    sync_dir(dir);
     Ok(())
+}
+
+/// `fsync` del directorio (durabilidad de los `rename`), solo en Unix.
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    {
+        if let Ok(file) = std::fs::File::open(dir) {
+            let _ = file.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+    }
 }
 
 /// Carga `level.json` de una carpeta (o `None` si falta/corrupto). Si el
@@ -211,13 +300,41 @@ pub fn load_meta(dir: &Path) -> Option<WorldMeta> {
 }
 
 /// Lista los mundos de `base`, ordenados por ultima vez jugado (desc).
+///
+/// Si no se puede listar la carpeta **no** se finge una lista vacia: se registra
+/// el error y se devuelve vacio solo como ultimo recurso (P2-11). Los llamadores
+/// que necesitan distinguir el error usan [`list_worlds_checked`].
 pub fn list_worlds(base: &Path) -> Vec<WorldEntry> {
+    match list_worlds_checked(base) {
+        Ok(worlds) => worlds,
+        Err(e) => {
+            eprintln!(
+                "[world] no se pudo listar {}: {e}",
+                saves_dir(base).display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// Version que **propaga** los errores de listado (salvo `NotFound`, que es una
+/// biblioteca aun vacia).
+pub fn list_worlds_checked(base: &Path) -> std::io::Result<Vec<WorldEntry>> {
     let dir = saves_dir(base);
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return out;
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(e),
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                eprintln!("[world] entrada ilegible en {}: {e}", dir.display());
+                continue;
+            }
+        };
         if !entry.path().is_dir() {
             continue;
         }
@@ -244,7 +361,7 @@ pub fn list_worlds(base: &Path) -> Vec<WorldEntry> {
         }
     }
     out.sort_by_key(|w| std::cmp::Reverse(w.meta.last_played));
-    out
+    Ok(out)
 }
 
 /// Crea un mundo nuevo (generador legacy) y devuelve su entrada.
@@ -260,7 +377,24 @@ pub fn create_world_kind(
     now: u64,
     generator: &str,
 ) -> std::io::Result<WorldEntry> {
-    let taken: Vec<String> = list_worlds(base).into_iter().map(|w| w.slug).collect();
+    if name.trim().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "el nombre del mundo no puede estar vacio",
+        ));
+    }
+    // P2-11: un fallo de listado no puede llevar a reutilizar un slug existente.
+    let mut taken: Vec<String> = list_worlds_checked(base)?
+        .into_iter()
+        .map(|w| w.slug)
+        .collect();
+    if let Ok(entries) = std::fs::read_dir(saves_dir(base)) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                taken.push(entry.file_name().to_string_lossy().to_string());
+            }
+        }
+    }
     let slug = unique_slug(&slugify(name), &taken);
     let meta = WorldMeta {
         display_name: name.to_string(),
@@ -281,6 +415,13 @@ pub fn create_world_kind(
 
 /// Renombra el **nombre visible** (mantiene el slug para no romper la carpeta).
 pub fn rename_world(base: &Path, slug: &str, new_name: &str) -> std::io::Result<()> {
+    check_slug(slug)?;
+    if new_name.trim().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "el nombre del mundo no puede estar vacio",
+        ));
+    }
     let dir = saves_dir(base).join(slug);
     let mut meta = load_meta(&dir)
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "sin level.json"))?;
@@ -290,21 +431,45 @@ pub fn rename_world(base: &Path, slug: &str, new_name: &str) -> std::io::Result<
 
 /// Duplica un mundo (copia binario + metadatos) con un slug nuevo.
 pub fn duplicate_world(base: &Path, slug: &str, now: u64) -> std::io::Result<WorldEntry> {
+    check_slug(slug)?;
     let src = saves_dir(base).join(slug);
     let mut meta = load_meta(&src)
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "sin level.json"))?;
-    let taken: Vec<String> = list_worlds(base).into_iter().map(|w| w.slug).collect();
+    let taken: Vec<String> = list_worlds_checked(base)?
+        .into_iter()
+        .map(|w| w.slug)
+        .collect();
     let new_slug = unique_slug(&format!("{slug}-copia"), &taken);
     let dst = saves_dir(base).join(&new_slug);
-    std::fs::create_dir_all(&dst)?;
-    let world = src.join(WORLD_FILE);
-    if world.exists() {
-        std::fs::copy(&world, dst.join(WORLD_FILE))?;
+    if dst.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "ya existe la carpeta de la copia",
+        ));
     }
-    meta.display_name = format!("{} (copia)", meta.display_name);
-    meta.created_at = now;
-    meta.last_played = now;
-    save_meta(&dst, &meta)?;
+    // P2-12: se construye en una carpeta temporal y se renombra al final; si
+    // algo falla no queda una carpeta a medias visible en la lista.
+    let tmp = saves_dir(base).join(format!(".{new_slug}.tmp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let build = (|| -> std::io::Result<()> {
+        std::fs::create_dir_all(&tmp)?;
+        for file in [WORLD_FILE, WORLD_BAK] {
+            let from = src.join(file);
+            if from.exists() {
+                std::fs::copy(&from, tmp.join(file))?;
+            }
+        }
+        meta.display_name = format!("{} (copia)", meta.display_name);
+        meta.created_at = now;
+        meta.last_played = now;
+        save_meta(&tmp, &meta)?;
+        std::fs::rename(&tmp, &dst)?;
+        Ok(())
+    })();
+    if let Err(e) = build {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(e);
+    }
     Ok(WorldEntry {
         slug: new_slug,
         meta,
@@ -314,11 +479,13 @@ pub fn duplicate_world(base: &Path, slug: &str, now: u64) -> std::io::Result<Wor
 
 /// Elimina un mundo (carpeta completa).
 pub fn delete_world(base: &Path, slug: &str) -> std::io::Result<()> {
+    check_slug(slug)?;
     std::fs::remove_dir_all(saves_dir(base).join(slug))
 }
 
 /// Marca `last_played = now` (al guardar/salir de un mundo).
 pub fn touch_last_played(base: &Path, slug: &str, now: u64) -> std::io::Result<()> {
+    check_slug(slug)?;
     let dir = saves_dir(base).join(slug);
     let mut meta = load_meta(&dir)
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "sin level.json"))?;
@@ -327,21 +494,45 @@ pub fn touch_last_played(base: &Path, slug: &str, now: u64) -> std::io::Result<(
 }
 
 /// Importa el `world.vf` antiguo (junto al ejecutable) a `saves/` si existe y no
-/// hay mundos. **Copia** (no mueve). Devuelve la entrada importada.
+/// hay mundos. **Copia** (no mueve) y deja una marca (`.legacy-imported`) para
+/// no reimportarlo al borrar todos los mundos (P1-2). Devuelve la entrada
+/// importada.
 pub fn import_legacy(base: &Path, now: u64) -> std::io::Result<Option<WorldEntry>> {
     let legacy = base.join(WORLD_FILE);
-    if !legacy.exists() || !list_worlds(base).is_empty() {
+    if !legacy.exists() {
         return Ok(None);
     }
-    let taken: Vec<String> = Vec::new();
+    // Ya se importo una vez: no debe "resucitar" aunque la lista este vacia.
+    if base.join(LEGACY_MARKER).exists() {
+        return Ok(None);
+    }
+    if !list_worlds_checked(base)?.is_empty() {
+        return Ok(None);
+    }
+    let mut taken: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(saves_dir(base)) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                taken.push(entry.file_name().to_string_lossy().to_string());
+            }
+        }
+    }
     let slug = unique_slug(&slugify("Mundo importado"), &taken);
     let dst = saves_dir(base).join(&slug);
     std::fs::create_dir_all(&dst)?;
     std::fs::copy(&legacy, dst.join(WORLD_FILE))?;
-    // Lee la semilla real del header del binario importado (si se puede).
-    let seed = super::save::load_and_migrate(&legacy)
-        .map(|s| s.header.seed)
-        .unwrap_or(0);
+    let legacy_bak = base.join(WORLD_BAK);
+    if legacy_bak.exists() {
+        let _ = std::fs::copy(&legacy_bak, dst.join(WORLD_BAK));
+    }
+    // P2-14: solo se lee la cabecera (no se descomprime el mundo entero).
+    let seed = match super::save::WorldSave::peek_header(&legacy) {
+        Ok(header) => header.seed,
+        Err(e) => {
+            eprintln!("[world] no se pudo leer la cabecera del mundo legado: {e}");
+            0
+        }
+    };
     let meta = WorldMeta {
         display_name: "Mundo importado".to_string(),
         seed,
@@ -352,6 +543,8 @@ pub fn import_legacy(base: &Path, now: u64) -> std::io::Result<Option<WorldEntry
         generator_kind: default_generator(),
     };
     save_meta(&dst, &meta)?;
+    // Marca de importacion: borrar todos los mundos no debe resucitar el legado.
+    std::fs::write(base.join(LEGACY_MARKER), b"1")?;
     Ok(Some(WorldEntry {
         slug,
         meta,
@@ -489,6 +682,93 @@ mod tests {
         assert!(first.dir(&base).join(WORLD_FILE).exists());
         // La segunda vez ya hay mundos: no reimporta.
         assert!(import_legacy(&base, 200).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn el_legado_no_resucita_tras_borrar_todos_los_mundos() {
+        // P1-2: importar deja marca; borrar todos no lo reimporta al reiniciar.
+        let base = temp_base("legacy_resurrect");
+        std::fs::write(base.join(WORLD_FILE), b"antiguo").unwrap();
+        let first = import_legacy(&base, 10).unwrap().unwrap();
+        assert!(base.join(LEGACY_MARKER).exists());
+        delete_world(&base, &first.slug).unwrap();
+        assert!(list_worlds(&base).is_empty());
+        assert!(
+            import_legacy(&base, 20).unwrap().is_none(),
+            "no debe reimportar el legado"
+        );
+        assert!(!saves_dir(&base).join("mundo-importado").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn la_politica_de_directorio_base_es_estable() {
+        // P1-3: sin biblioteca previa usa el ejecutable; conserva la del cwd.
+        let cwd = temp_base("base_cwd");
+        let exe = temp_base("base_exe");
+        let _ = std::fs::remove_dir_all(saves_dir(&cwd));
+        let _ = std::fs::remove_dir_all(saves_dir(&exe));
+        assert_eq!(resolve_base_dir(cwd.clone(), Some(exe.clone())), exe);
+
+        std::fs::create_dir_all(saves_dir(&cwd)).unwrap();
+        assert_eq!(resolve_base_dir(cwd.clone(), Some(exe.clone())), cwd);
+
+        std::fs::create_dir_all(saves_dir(&exe)).unwrap();
+        assert_eq!(resolve_base_dir(cwd.clone(), Some(exe.clone())), exe);
+        assert_eq!(resolve_base_dir(cwd.clone(), None), cwd);
+        let _ = std::fs::remove_dir_all(&cwd);
+        let _ = std::fs::remove_dir_all(&exe);
+    }
+
+    #[test]
+    fn duplicar_es_atomico_y_copia_el_backup() {
+        // P2-12: sin carpetas parciales y con el .bak incluido.
+        let base = temp_base("dup_atomic");
+        let a = create_world(&base, "Original", 1, 10).unwrap();
+        std::fs::write(a.dir(&base).join(WORLD_FILE), b"main").unwrap();
+        std::fs::write(a.dir(&base).join(WORLD_BAK), b"bak").unwrap();
+        let copy = duplicate_world(&base, &a.slug, 20).unwrap();
+        assert_eq!(
+            std::fs::read(copy.dir(&base).join(WORLD_FILE)).unwrap(),
+            b"main"
+        );
+        assert_eq!(
+            std::fs::read(copy.dir(&base).join(WORLD_BAK)).unwrap(),
+            b"bak"
+        );
+        // No quedan temporales de la duplicacion.
+        let leftovers: Vec<_> = std::fs::read_dir(saves_dir(&base))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "quedaron temporales");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn los_slugs_inseguros_se_rechazan() {
+        // P2-13: `..` no debe poder borrar la biblioteca entera.
+        let base = temp_base("slug_guard");
+        let a = create_world(&base, "Seguro", 1, 10).unwrap();
+        assert!(delete_world(&base, "..").is_err());
+        assert!(delete_world(&base, "../x").is_err());
+        assert!(rename_world(&base, &a.slug, "   ").is_err());
+        assert!(duplicate_world(&base, "../x", 1).is_err());
+        assert!(touch_last_played(&base, "a/b", 1).is_err());
+        assert!(is_safe_slug(&a.slug));
+        assert!(!is_safe_slug(".."));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn crear_no_reutiliza_una_carpeta_existente() {
+        // P2-11: aunque la carpeta no tenga metadatos, no se pisa.
+        let base = temp_base("slug_collision");
+        std::fs::create_dir_all(saves_dir(&base).join("mundo-x")).unwrap();
+        let w = create_world(&base, "Mundo X", 1, 1).unwrap();
+        assert_eq!(w.slug, "mundo-x-2");
         let _ = std::fs::remove_dir_all(&base);
     }
 

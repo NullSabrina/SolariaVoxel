@@ -435,28 +435,8 @@ impl World {
     ///    que pueda fluir hacia la columna nueva (los flujos que cruzaban a un
     ///    chunk no cargado se perdian).
     fn wake_column_water(&mut self, pos: ChunkPos) {
-        let ox = pos.x * CHUNK_SIZE as i32;
-        let oz = pos.z * CHUNK_SIZE as i32;
         let mut cells: Vec<[i32; 3]> = Vec::new();
-        {
-            let Some(column) = self.columns.get(&pos) else {
-                return;
-            };
-            for &[x, z, y] in column.water_surface() {
-                cells.push([ox + x as i32, y as i32, oz + z as i32]);
-            }
-            if column.has_flow_storage() {
-                for y in 0..WORLD_HEIGHT {
-                    for z in 0..CHUNK_SIZE {
-                        for x in 0..CHUNK_SIZE {
-                            if column.flow_at(x, y, z) > 0 {
-                                cells.push([ox + x as i32, y as i32, oz + z as i32]);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        self.collect_own_water(pos, &mut cells);
         // Vecinos: agua en la cara compartida (incluye fuentes colocadas por el
         // jugador, que no estan en `water_surface`).
         for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
@@ -487,6 +467,24 @@ impl World {
             if !self.water_in_equilibrium(c) {
                 self.enqueue_water(c);
             }
+        }
+    }
+
+    /// Agua "propia" de una columna: la superficie generada y las celdas con
+    /// flujo restaurado. Las celdas de flujo salen de una cache por columna, sin
+    /// escanear las 98 304 celdas (P1-8).
+    fn collect_own_water(&mut self, pos: ChunkPos, out: &mut Vec<[i32; 3]>) {
+        let ox = pos.x * CHUNK_SIZE as i32;
+        let oz = pos.z * CHUNK_SIZE as i32;
+        let Some(column) = self.columns.get_mut(&pos) else {
+            return;
+        };
+        for &[x, z, y] in column.water_surface() {
+            out.push([ox + x as i32, y as i32, oz + z as i32]);
+        }
+        for &idx in column.flow_cells() {
+            let (x, y, z) = Column::cell_of_index(idx);
+            out.push([ox + x as i32, y as i32, oz + z as i32]);
         }
     }
 
@@ -856,6 +854,10 @@ impl World {
     }
 
     /// Despierta el agua de las columnas cargadas dentro del radio de simulacion.
+    ///
+    /// Solo se encola el agua **propia** de cada columna (superficie + flujo):
+    /// las caras compartidas solo cambian cuando una columna se carga/descarga,
+    /// no al cruzar de chunk, y escanearlas en cada cruce era el coste P1-8.
     fn wake_sim_water(&mut self, center: ChunkPos) {
         let sim = self.view.simulation_radius;
         let positions: Vec<ChunkPos> = self
@@ -864,8 +866,14 @@ impl World {
             .filter(|pos| in_radius(**pos, center, sim))
             .copied()
             .collect();
+        let mut cells: Vec<[i32; 3]> = Vec::new();
         for pos in positions {
-            self.wake_column_water(pos);
+            self.collect_own_water(pos, &mut cells);
+        }
+        for c in cells {
+            if !self.water_in_equilibrium(c) {
+                self.enqueue_water(c);
+            }
         }
     }
 
@@ -1115,43 +1123,50 @@ impl World {
         }
     }
 
-    /// Escribe el estado de agua de una celda **sin** marcarla como editada
-    /// (la simulacion reescribe el bloque `Water`/`Air` a su gusto). El bloque y
-    /// el nibble de flujo de la columna quedan coherentes: `Source` es flujo 0.
+    /// Escribe el estado de agua de una celda y, si cambio, marca la columna
+    /// como **editada** para que el nuevo estado de flujo se persista (P2-1).
+    /// El bloque y el nibble de flujo quedan coherentes: `Source` es flujo 0.
     fn set_water_raw(&mut self, world: [i32; 3], f: Fluid) {
         if world[1] < 0 || world[1] >= WORLD_HEIGHT as i32 {
             return;
         }
         let (pos, local) = Self::world_to_local(world);
-        let Some(column) = self.columns.get_mut(&pos) else {
-            return;
+        let changed = {
+            let Some(column) = self.columns.get_mut(&pos) else {
+                return;
+            };
+            let (x, y, z) = (local[0], local[1], local[2]);
+            // El agua **nunca** sustituye un bloque que la bloquea (solido, hoja,
+            // antorcha, lava): la simulacion ya evita esas celdas, pero esto lo
+            // garantiza de forma defensiva (2.2a).
+            if column.get(x, y, z).blocks_fluid() {
+                return;
+            }
+            let before = (column.get(x, y, z), column.flow_at(x, y, z));
+            match f {
+                Fluid::None => {
+                    column.set_flow(x, y, z, 0);
+                    if column.get(x, y, z) == Block::Water {
+                        column.set(x, y, z, Block::Air);
+                    }
+                }
+                Fluid::Source => {
+                    column.set_flow(x, y, z, 0);
+                    if column.get(x, y, z) != Block::Water {
+                        column.set(x, y, z, Block::Water);
+                    }
+                }
+                Fluid::Flow(level) => {
+                    column.set_flow(x, y, z, level);
+                    if column.get(x, y, z) != Block::Water {
+                        column.set(x, y, z, Block::Water);
+                    }
+                }
+            }
+            before != (column.get(x, y, z), column.flow_at(x, y, z))
         };
-        let (x, y, z) = (local[0], local[1], local[2]);
-        // El agua **nunca** sustituye un bloque que la bloquea (solido, hoja,
-        // antorcha, lava): la simulacion ya evita esas celdas, pero esto lo
-        // garantiza de forma defensiva (2.2a).
-        if column.get(x, y, z).blocks_fluid() {
-            return;
-        }
-        match f {
-            Fluid::None => {
-                column.set_flow(x, y, z, 0);
-                if column.get(x, y, z) == Block::Water {
-                    column.set(x, y, z, Block::Air);
-                }
-            }
-            Fluid::Source => {
-                column.set_flow(x, y, z, 0);
-                if column.get(x, y, z) != Block::Water {
-                    column.set(x, y, z, Block::Water);
-                }
-            }
-            Fluid::Flow(level) => {
-                column.set_flow(x, y, z, level);
-                if column.get(x, y, z) != Block::Water {
-                    column.set(x, y, z, Block::Water);
-                }
-            }
+        if changed {
+            self.dirty.insert(pos);
         }
     }
 
@@ -1179,10 +1194,17 @@ impl World {
         let start = std::time::Instant::now();
         let mut dirty: Vec<FluidDirty> = Vec::new();
         let mut processed = 0usize;
+        // P2-16: consultar el reloj por celda es caro en el hot path; basta con
+        // hacerlo cada 64 celdas (el presupuesto es de milisegundos).
+        let mut since_clock = 0u32;
         while processed < budget.cells {
-            if start.elapsed().as_secs_f32() * 1000.0 >= budget.ms {
-                break;
+            if since_clock >= 64 {
+                since_clock = 0;
+                if start.elapsed().as_secs_f32() * 1000.0 >= budget.ms {
+                    break;
+                }
             }
+            since_clock += 1;
             let Some(p) = self.water_queue.pop() else {
                 break;
             };
@@ -1830,7 +1852,10 @@ mod tests {
         // Cargamos el chunk (2,0): el agua del borde debe despertarse y cruzar.
         world.update_streaming([40.0, 120.0, 8.0]); // centro (2,0)
         assert!(world.is_loaded(ChunkPos::new(2, 0)));
-        assert!(world.is_loaded(ChunkPos::new(1, 0)), "el vecino sigue cargado");
+        assert!(
+            world.is_loaded(ChunkPos::new(1, 0)),
+            "el vecino sigue cargado"
+        );
         for z in 0..CHUNK_SIZE as i32 {
             world.set_block([32, 100, z], Block::Stone);
             for y in 101..112 {
@@ -1878,7 +1903,9 @@ mod tests {
     #[test]
     fn el_tick_marca_el_borde_cuando_el_cambio_toca_un_borde_de_chunk() {
         use super::super::block::Block;
-        let mut world = World::new(7, 0, vec![]);
+        // Radio 1: la columna vecina (-1,0) esta cargada, asi el borde del chunk
+        // tiene datos a ambos lados (P1-6: un vecino descargado se congela).
+        let mut world = World::new(7, 1, vec![]);
         world.update_streaming([8.0, 120.0, 8.0]);
         for z in 0..CHUNK_SIZE as i32 {
             for x in 0..CHUNK_SIZE as i32 {
