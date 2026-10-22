@@ -104,7 +104,8 @@ pub const FORMAT_VERSION: u32 = 7;
 ///   pipeline historico (`generator_config = 1`) conserva byte a byte el terreno
 ///   de v21. La version del pipeline vive en `level.json`
 ///   (`WorldMeta::generator_config`), no en este header bincode, para no romper
-///   `FORMAT_VERSION = 7`.
+///   `FORMAT_VERSION = 7`. `generator_config = 3` (v0.52) anade arboles
+///   organicos, cuevas worm y Larion SIMD sin tocar 1 ni 2.
 pub const GENERATOR_VERSION: u32 = 22;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
@@ -128,7 +129,7 @@ impl ChunkPos {
 
 /// Ficha del mundo.
 ///
-/// La version del **pipeline** Larion (`generator_config = 1/2`) no vive aqui:
+/// La version del **pipeline** Larion (`generator_config = 1/2/3`) no vive aqui:
 /// esta en `WorldMeta` (`level.json`) para no cambiar el layout bincode de
 /// `FORMAT_VERSION = 7`. `generator_version` sigue siendo informativo.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]

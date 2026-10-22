@@ -61,8 +61,16 @@ pub struct HydroSample {
 }
 
 impl HydroSample {
-    /// Perfil en V del cauce: profundidad maxima en el eje, 0 en el borde.
-    pub fn v_depth(&self, _cfg: &HydroConfig) -> f32 {
+    /// Perfil en V del cauce historico (v1/v2): profundidad derivada del caudal
+    /// ya muestreado. Se conserva para que los mundos existentes no cambien.
+    pub fn v_depth(&self, cfg: &HydroConfig) -> f32 {
+        let depth = math::lerp(cfg.river_min_depth, cfg.river_max_depth, self.flow.sqrt());
+        let t = (self.dist / self.width.max(1.0)).clamp(0.0, 1.0);
+        depth * (1.0 - t * t).powi(2)
+    }
+
+    /// Perfil en V de v3: usa la profundidad por celda (incluye deltas).
+    pub fn v_depth_v3(&self, _cfg: &HydroConfig) -> f32 {
         let depth = self.depth;
         let t = (self.dist / self.width.max(1.0)).clamp(0.0, 1.0);
         depth * (1.0 - t * t).powi(2)
@@ -117,17 +125,28 @@ impl HydroWindow {
         //    la red de drenaje y dispararia el coste.
         let csize = ((WINDOW + 2 * HALO) / GEO_STEP) as usize;
         let mut coarse = vec![0.0f32; csize * csize];
-        let mut xs = Vec::with_capacity(csize * csize);
-        let mut zs = Vec::with_capacity(csize * csize);
-        for cj in 0..csize {
-            for ci in 0..csize {
-                let wx = grid_origin.0 + ci as i32 * GEO_STEP + GEO_STEP / 2;
-                let wz = grid_origin.1 + cj as i32 * GEO_STEP + GEO_STEP / 2;
-                xs.push(wx as f64);
-                zs.push(wz as f64);
+        if generator.config_version() >= 3 {
+            let mut xs = Vec::with_capacity(csize * csize);
+            let mut zs = Vec::with_capacity(csize * csize);
+            for cj in 0..csize {
+                for ci in 0..csize {
+                    let wx = grid_origin.0 + ci as i32 * GEO_STEP + GEO_STEP / 2;
+                    let wz = grid_origin.1 + cj as i32 * GEO_STEP + GEO_STEP / 2;
+                    xs.push(wx as f64);
+                    zs.push(wz as f64);
+                }
+            }
+            generator.geography_height_many(&xs, &zs, &mut coarse);
+        } else {
+            // v1/v2: mismo orden y misma ruta escalar que antes (hash intacto).
+            for cj in 0..csize {
+                for ci in 0..csize {
+                    let wx = grid_origin.0 + ci as i32 * GEO_STEP + GEO_STEP / 2;
+                    let wz = grid_origin.1 + cj as i32 * GEO_STEP + GEO_STEP / 2;
+                    coarse[cj * csize + ci] = generator.geography_height(wx as f64, wz as f64);
+                }
             }
         }
-        generator.geography_height_many(&xs, &zs, &mut coarse);
         let mut h0 = vec![0.0f32; n];
         for j in 0..size {
             for i in 0..size {
@@ -193,14 +212,17 @@ impl HydroWindow {
             .collect();
         // Deltas: al llegar al mar el cauce se ensancha y se hace somero. El
         // factor es funcion determinista de caudal y cota, no de estado global.
+        // Solo v3: v2 debe conservar el ancho y la profundidad historicos.
         let sea_level = generator.config().sea_level;
         let mut delta = vec![1.0f32; n];
-        for i in 0..n {
-            let surface = filled[i] + dh[i];
-            if let Some(scale) = delta_width_scale(flow01[i], surface, sea_level) {
-                width[i] *= scale;
-                depth[i] *= 0.5;
-                delta[i] = scale;
+        if generator.config_version() >= 3 {
+            for i in 0..n {
+                let surface = filled[i] + dh[i];
+                if let Some(scale) = delta_width_scale(flow01[i], surface, sea_level) {
+                    width[i] *= scale;
+                    depth[i] *= 0.5;
+                    delta[i] = scale;
+                }
             }
         }
         let mut water = vec![0.0f32; n];

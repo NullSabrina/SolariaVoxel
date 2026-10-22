@@ -815,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn un_mundo_nuevo_nace_con_generator_config_2() {
+    fn un_mundo_nuevo_nace_con_generator_config_actual() {
         let base = temp_base("gencfg_new");
         let w = create_world_kind(&base, "Nuevo", 1, 1, "larion").unwrap();
         assert_eq!(

@@ -7,10 +7,13 @@
 //! siguen siendo `Legacy16` sin migrar el archivo, y no hay que tocar
 //! `FORMAT_VERSION`/`GENERATOR_VERSION`.
 
-/// Version del pipeline para los mundos **nuevos** (P0.0). Los mundos
-/// existentes sin `generator_config` en `level.json` se quedan en
-/// [`LEGACY_GENERATOR_CONFIG`].
-pub const CURRENT_GENERATOR_CONFIG: u32 = 2;
+/// Version del pipeline para los mundos **nuevos**. Los mundos existentes sin
+/// `generator_config` en `level.json` se quedan en [`LEGACY_GENERATOR_CONFIG`].
+///
+/// * `2`: hidrologia P0.1 + acuiferos (v0.48-v0.51). Congelada: los mundos
+///   creados entonces deben seguir generando los mismos chunks.
+/// * `3`: arboles organicos, cuevas worm, ruido SIMD y `density_youth` (v0.52).
+pub const CURRENT_GENERATOR_CONFIG: u32 = 3;
 
 /// Version del pipeline historico (v0.48.0): conserva byte a byte la generacion
 /// Larion anterior a P0.1.

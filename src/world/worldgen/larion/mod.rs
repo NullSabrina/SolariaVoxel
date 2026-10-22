@@ -96,7 +96,8 @@ pub struct LarionGenerator {
 
     density: DensityField,
     selector: BiomeSelector,
-    /// Version del pipeline: 1 = historico, 2 = hidrologia P0.1.
+    /// Version del pipeline: 1 = historico, 2 = hidrologia P0.1, 3 = arboles
+    /// organicos + SIMD + `density_youth`.
     config_version: u32,
     /// Cache de ventanas hidro (solo se usa en `config_version >= 2`).
     hydro: HydroCache,
@@ -110,15 +111,15 @@ impl LarionGenerator {
 
     /// Crea el generador con una configuracion explicita y la version del
     /// pipeline. `version = 1` conserva byte a byte la generacion historica;
-    /// `version = 2` activa la hidrologia P0.1. Si la configuracion no es
-    /// valida, cae a la de por defecto (nunca deja el mundo en un estado
-    /// absurdo silencioso).
+    /// `version = 2` activa la hidrologia P0.1; `version = 3` anade el backend
+    /// SIMD y la densidad variable. Si la configuracion no es valida, cae a la
+    /// de por defecto (nunca deja el mundo en un estado absurdo silencioso).
     pub fn with_config(seed: u32, config: LarionConfig) -> Self {
         Self::with_version(seed, config, 1)
     }
 
     /// Igual que [`LarionGenerator::with_config`] pero eligiendo la version del
-    /// pipeline. Los mundos existentes usan 1; los nuevos, 2.
+    /// pipeline. Los mundos existentes usan 1 o 2; los nuevos, 3.
     pub fn with_version(seed: u32, config: LarionConfig, version: u32) -> Self {
         let config = if config.validate().is_ok() {
             config
@@ -129,8 +130,8 @@ impl LarionGenerator {
             seed.wrapping_mul(0x9E37_79B9)
                 .wrapping_add(k.wrapping_mul(0x85EB_CA6B))
         };
-        // v2 usa el backend SIMD; v1 conserva `noise-rs` byte a byte.
-        let simd = version >= 2;
+        // v3 usa el backend SIMD; v1 y v2 conservan `noise-rs` byte a byte.
+        let simd = version >= 3;
         Self {
             warp: if simd {
                 Warp2D::new_simd(
@@ -335,6 +336,12 @@ impl LarionGenerator {
             .collect()
     }
 
+    /// Altura geografica (sin clima/bioma/rios) por punto, en f32. Camino
+    /// escalar historico: lo usa la hidrologia de v1/v2 para no cambiar su hash.
+    pub(super) fn geography_height(&self, x: f64, z: f64) -> f32 {
+        self.geography(x, z, false).composed.height
+    }
+
     /// Altura geografica (sin clima/bioma/rios). La usa [`HydroWindow`].
     pub(super) fn geography_height_many(&self, xs: &[f64], zs: &[f64], out: &mut [f32]) {
         assert_eq!(xs.len(), zs.len());
@@ -388,8 +395,8 @@ impl LarionGenerator {
             .density(x, y, z, sample.height, Self::overhang_strength(sample))
     }
 
-    /// Densidad segun la version del pipeline. v1 conserva la banda fija
-    /// historica; v2 usa banda/amplitud variables (P1.3).
+    /// Densidad segun la version del pipeline. v1 y v2 conservan la banda fija
+    /// historica; v3 usa banda/amplitud variables (P1.3).
     #[inline]
     pub fn density_versioned(
         &self,
@@ -399,7 +406,7 @@ impl LarionGenerator {
         sample: &LarionSample,
         version: u32,
     ) -> f32 {
-        if version >= 2 {
+        if version >= 3 {
             self.density
                 .density_youth(x, y, z, sample.height, Self::overhang_strength(sample))
         } else {
@@ -462,7 +469,11 @@ impl LarionGenerator {
                         .get(self, x as i32, z as i32)
                         .sample(x as f32, z as f32),
                 };
-                let v_depth = hydro.v_depth(&cfg.hydro);
+                let v_depth = if self.config_version >= 3 {
+                    hydro.v_depth_v3(&cfg.hydro)
+                } else {
+                    hydro.v_depth(&cfg.hydro)
+                };
                 let height =
                     (composed.height + hydro.dh - v_depth).clamp(cfg.min_height, cfg.max_height);
                 let proximity = if hydro.flow > cfg.hydro.river_min_flow {

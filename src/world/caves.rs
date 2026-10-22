@@ -324,7 +324,7 @@ pub struct CaveSystem {
     shaft_region: Fbm<Perlin>,
     canyon_region: Perlin,
     entrance_region: Fbm<Perlin>,
-    /// Red de worms (P1.4), solo en `generator_config >= 2`.
+    /// Red de worms (P1.4), solo en `generator_config >= 3`.
     worms: Option<WormField>,
 }
 

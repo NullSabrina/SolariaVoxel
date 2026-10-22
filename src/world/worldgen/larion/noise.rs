@@ -159,8 +159,8 @@ fn simd_ridged_fill(
 
 /// fBm SIMD (`quick-noise`): misma firma que [`Fractal2D`] pero procesa lotes.
 ///
-/// Es el backend de `generator_config >= 2`. v1 sigue usando `noise-rs` para
-/// conservar su hash byte a byte.
+/// Es el backend de `generator_config >= 3`. v1 y v2 siguen usando `noise-rs`
+/// para conservar su hash byte a byte.
 #[derive(Clone, Copy, Debug)]
 pub struct SimdFractal2D {
     seed: u32,

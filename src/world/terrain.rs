@@ -152,7 +152,7 @@ impl TerrainGenerator {
             surface_detail: Perlin::new(mix(6)),
             aquifer: Perlin::new(mix(7)),
             cave_mask: Perlin::new(mix(8)),
-            caves: if generator_config >= 2 {
+            caves: if generator_config >= 3 {
                 CaveSystem::new_with_worms(seed)
             } else {
                 CaveSystem::new(seed)
@@ -856,7 +856,7 @@ impl TerrainGenerator {
 
         const G: i32 = CHUNK_SIZE as i32;
         let gw = (G + 2) as usize;
-        let grid: Vec<LarionSample> = if self.generator_config >= 2 {
+        let grid: Vec<LarionSample> = if self.generator_config >= 3 {
             // P1.1: cada campo de ruido se procesa por lotes (SIMD) en lugar de
             // 324 llamadas escalares.
             larion.sample_grid(
@@ -968,7 +968,7 @@ impl TerrainGenerator {
                         s.temperature,
                         lcfg.snow_temperature,
                         self.generator_config >= 2,
-                        if self.generator_config >= 2 {
+                        if self.generator_config >= 3 {
                             ecotone_window(s.blend.mix)
                         } else {
                             0.0
@@ -1036,7 +1036,7 @@ impl TerrainGenerator {
                     && (self.generator_config < 2 || slope >= 2 || s.mountain > 0.15)
                     && {
                         let mut ts = terrain_sample_from_larion(&s);
-                        if self.generator_config >= 2 {
+                        if self.generator_config >= 3 {
                             ts.biome = biome_mat;
                         }
                         self.decorator.decide(wx, wz, &ts, height, slope)
@@ -1060,7 +1060,7 @@ impl TerrainGenerator {
         // Pasada de arboles con margen (identica a la del legacy).
         // El camino organico usa una copa algo mas ancha, asi que su margen es
         // mayor; v1 conserva el margen historico.
-        let tree_margin = if self.generator_config >= 2 {
+        let tree_margin = if self.generator_config >= 3 {
             ORGANIC_MARGIN
         } else {
             MARGIN
@@ -1083,7 +1083,7 @@ impl TerrainGenerator {
                     } else {
                         s.biome
                     };
-                    if self.generator_config >= 2 {
+                    if self.generator_config >= 3 {
                         // P0.3: densidad continua del clima/bioma/hidrologia,
                         // atenuada por pendiente en el punto de colocacion.
                         let density = s.tree_density * (1.0 - 0.45 * slope as f32).max(0.0);
@@ -1092,7 +1092,7 @@ impl TerrainGenerator {
                     } else {
                         self.trees.plan(wx, wz, biome, ground, slope)
                     }
-                } else if self.generator_config >= 2 {
+                } else if self.generator_config >= 3 {
                     if !self.trees.maybe_organic(wx, wz) {
                         None
                     } else {
@@ -1134,7 +1134,11 @@ impl TerrainGenerator {
                             .max()
                             .unwrap_or(0)
                     };
-                    let biome = s.biome;
+                    let biome = if self.generator_config >= 2 {
+                        self.larion_material_biome(&s, wx, wz, &lcfg)
+                    } else {
+                        s.biome
+                    };
                     self.trees.plan(wx, wz, biome, ground, slope)
                 } else {
                     None
@@ -1178,7 +1182,25 @@ impl TerrainGenerator {
                 b.primary
             };
         }
-        // P1.2: ventana de ecotono real `w_secondary = mix` en `[0.15, 0.50]`.
+        // v2 (v0.48-v0.51): ventana de mezcla + Perlin de ~30 bloques. Se
+        // conserva intacta para no cambiar los mundos creados en esa version.
+        if self.generator_config == 2 {
+            if !(lo..=hi).contains(&b.mix) {
+                return b.primary;
+            }
+            let t = ((b.mix - lo) / (hi - lo).max(1e-4)).clamp(0.0, 1.0);
+            let noise = self
+                .surface_detail
+                .get([wx as f64 * 0.035, wz as f64 * 0.035])
+                * 0.5
+                + 0.5;
+            return if noise < t as f64 {
+                b.secondary
+            } else {
+                b.primary
+            };
+        }
+        // v3 / P1.2: ventana de ecotono real `w_secondary = mix` en `[0.15, 0.50]`.
         // El material se decide con ruido coherente de ~1/20 bloques (0.05),
         // no con un hash blanco por columna: la frontera queda irregular pero
         // continua, sin tablero de ajedrez.

@@ -266,6 +266,23 @@ pub fn baseline_hash() -> u64 {
     h
 }
 
+/// Hash de una rejilla de 32x32 dentro de **una sola ventana hidro** con
+/// `version = 2`. Una sola ventana mantiene el test barato; cubre ruido escalar,
+/// hidrologia (priority-flood, perfil de cauce), clima, bioma y densidad.
+pub fn baseline_hash_v2() -> u64 {
+    let g = LarionGenerator::with_version(13_371, LarionConfig::default(), 2);
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for z in 0..32 {
+        for x in 0..32 {
+            let sample = g.sample(x as f64 * 3.0, z as f64 * 3.0);
+            h = hash_u64(h, x);
+            h = hash_u64(h, z);
+            h = hash_u64(h, column_hash(&sample));
+        }
+    }
+    h
+}
+
 /// Imprime el baseline. Ejecutar **una vez**:
 /// `cargo test print_baseline_hash --release -- --ignored --nocapture`
 #[test]
@@ -290,6 +307,29 @@ fn test_column_hash_unchanged_v1() {
         got, BASELINE_HASH,
         "la columna v1 cambio (0x{got:016x} != 0x{BASELINE_HASH:016x}); \
          revisa el orden de las muestras de ruido o los campos de LarionSample"
+    );
+}
+
+/// Imprime el baseline v2. Ejecutar **una vez**:
+/// `cargo test print_baseline_hash_v2 --release -- --ignored --nocapture`
+#[test]
+#[ignore = "se ejecuta a mano para rellenar BASELINE_HASH_V2"]
+fn print_baseline_hash_v2() {
+    let h = baseline_hash_v2();
+    println!("BASELINE_HASH_V2 (hex) = 0x{h:016x}");
+    println!("BASELINE_HASH_V2 (dec) = {h}");
+}
+
+#[test]
+fn test_column_hash_unchanged_v2() {
+    // v2 esta congelada: los mundos de v0.48-v0.51 deben seguir generando igual.
+    // Si este test falla, el cambio debe ir detras de `generator_config >= 3`.
+    const BASELINE_HASH_V2: u64 = 0xec62_cef3_3507_bfe3;
+    let got = baseline_hash_v2();
+    assert_eq!(
+        got, BASELINE_HASH_V2,
+        "la columna v2 cambio (0x{got:016x} != 0x{BASELINE_HASH_V2:016x}); \
+         mueve el cambio a generator_config >= 3"
     );
 }
 

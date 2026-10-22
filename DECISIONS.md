@@ -4716,7 +4716,7 @@ usa `occludes()` en lugar de `is_solid()` para decidir caras.
 
 ### 2026-10-22 - Arboles organicos v2 por Poisson + Space Colonization
 
-**Decision.** Con `generator_config >= 2` los arboles usan colocacion **Poisson
+**Decision.** Con `generator_config >= 3` los arboles usan colocacion **Poisson
 por dart throwing global** (celda de 4 bloques, 3 candidatos, radio 2.5-7) y un
 esqueleto de ramas por *Space Colonization* voxelizado a troncos de 1-2 bloques.
 El camino v1 (hash + elipsoide) se conserva intacto para los mundos existentes.
@@ -4735,7 +4735,7 @@ cruce de chunks.
 **Decision.** `CaveSystem::new_with_worms` anade una red de **worms** (cubicas de
 Bezier + conectores rectos entre celdas de 64 bloques, 2 worms/celda) que se
 excava ademas de los sistemas jerarquicos. Se activa con
-`generator_config >= 2`.
+`generator_config >= 3`.
 
 **Motivo.** Los sistemas por umbral (spaghetti/cheese) producen cavidades
 aisladas: muchas cuevas sin salida. Los worms garantizan un grafo conectado sin
@@ -4744,9 +4744,9 @@ depender de un post-proceso global.
 **Consecuencia.** `WormField`, `WORM_CELL = 64`, `MAX_WORMS = 26`;
 `examples/cave_connectivity.rs` mide la componente mayor y las islas.
 
-### 2026-10-22 - Larion v2: ruido SIMD y banda de densidad variable
+### 2026-10-22 - Larion v3: ruido SIMD y banda de densidad variable
 
-**Decision.** `LarionGenerator::with_version(_, _, 2)` usa `quick-noise` por
+**Decision.** `LarionGenerator::with_version(_, _, 3)` usa `quick-noise` por
 lotes con despacho **runtime** SIMD y cuantiza la salida a 1/4096 para que el
 resultado no dependa de FMA/arquitectura. La geografia se evalua por rejilla
 (`geography_grid`). `DensityField::density_youth` escala banda y amplitud con la
@@ -4757,10 +4757,11 @@ worldgen. SIMD reduce el coste sin exigir `target-cpu=native`. La banda fija
 generaba voladizos tambien en llanuras; hacerla dependiente de `youth` los
 reserva a montana joven y suaviza el resto.
 
-**Consecuencia.** `FractalField2D` / `RidgedField2D` / `SimdFractal2D`,
-`SIMD_FBM_GAIN = 0.65`, `NOISE_QUANT = 4096`; `LarionConfig::version`; v1
-conserva `test_column_hash_unchanged_v1`. **Pendiente**: baseline de hash para
-v2 (hoy solo v1 esta blindado).
+**Consecuencia.** `CURRENT_GENERATOR_CONFIG = 3`. v1 y **v2 quedan congeladas**:
+las features nuevas van detras de `>= 3`, y `test_column_hash_unchanged_v2`
+protege la salida de v2 (comparada columna a columna contra `v0.51.0` en 3
+semillas). `FractalField2D` / `RidgedField2D` / `SimdFractal2D`,
+`SIMD_FBM_GAIN = 0.65`, `NOISE_QUANT = 4096`.
 
 ## Plantilla para nuevas entradas
 
