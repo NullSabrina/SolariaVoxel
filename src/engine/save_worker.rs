@@ -90,6 +90,23 @@ impl SaveWorker {
             let _ = handle.join();
         }
     }
+
+    /// Cierra el canal y mueve el `join` a un hilo aparte. Devuelve el handle de
+    /// ese hilo: el hilo principal ya no se bloquea esperando a que termine un
+    /// guardado grande (p. ej. al borrar un mundo). El `Drop` de `self` no
+    /// vuelve a esperar porque el handle ya se tomo.
+    pub fn close_async(mut self) -> JoinHandle<()> {
+        self.tx = None;
+        let handle = self.handle.take();
+        thread::Builder::new()
+            .name("solaria-save-close".to_string())
+            .spawn(move || {
+                if let Some(handle) = handle {
+                    let _ = handle.join();
+                }
+            })
+            .expect("no se pudo crear el hilo de cierre")
+    }
 }
 
 impl Drop for SaveWorker {
@@ -151,6 +168,15 @@ mod tests {
         assert_eq!(loaded.player_pos, [4.0, 5.0, 6.0]);
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("vf.bak"));
+    }
+
+    #[test]
+    fn cerrar_en_segundo_plano_no_bloquea_al_llamador() {
+        // El cierre que usa el borrado de mundos devuelve el control y el
+        // `join` ocurre en otro hilo.
+        let worker = SaveWorker::spawn();
+        let handle = worker.close_async();
+        handle.join().expect("el hilo de cierre debe terminar");
     }
 
     #[test]

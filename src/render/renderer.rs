@@ -1089,6 +1089,7 @@ impl Renderer {
     }
 
     /// Dibuja y presenta un frame.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         view_projection: &Mat4,
@@ -1097,6 +1098,7 @@ impl Renderer {
         ui_quads: &[UiQuad],
         hand: Option<HandView>,
         character: Option<CharacterView>,
+        draw_world: bool,
     ) {
         // Manda a los workers el meshing pendiente (con presupuesto) y recoge lo
         // terminado, subiendolo a la GPU (validando revisiones).
@@ -1216,106 +1218,108 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            // Cielo primero (fondo): cubre la pantalla sin escribir profundidad.
-            self.sky.draw(&mut pass);
+            if draw_world {
+                // Cielo primero (fondo): cubre la pantalla sin escribir profundidad.
+                self.sky.draw(&mut pass);
 
-            pass.set_pipeline(self.pipeline.pipeline());
-            pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
-            let section = CHUNK_SIZE as f32;
-            // Pase opaco. Culling jerarquico: 1) frustum, 2) distancia (una
-            // seccion entera en la niebla no se dibuja: no se veria).
-            for (pos, column) in &self.meshes {
-                let (wx, wz) = (
-                    (pos.x * CHUNK_SIZE as i32) as f32,
-                    (pos.z * CHUNK_SIZE as i32) as f32,
-                );
-                for (index, section_meshes) in column.iter().enumerate() {
-                    let Some(mesh) = section_meshes.opaque.as_ref() else {
-                        continue;
-                    };
-                    let y0 = index as f32 * section;
-                    let aabb_min = [wx, y0, wz];
-                    let aabb_max = [wx + section, y0 + section, wz + section];
-                    if !frustum.intersects_aabb(aabb_min, aabb_max) {
-                        stats.culled_frustum += 1;
-                        continue;
+                pass.set_pipeline(self.pipeline.pipeline());
+                pass.set_bind_group(0, self.pipeline.bind_group(), &[]);
+                let section = CHUNK_SIZE as f32;
+                // Pase opaco. Culling jerarquico: 1) frustum, 2) distancia (una
+                // seccion entera en la niebla no se dibuja: no se veria).
+                for (pos, column) in &self.meshes {
+                    let (wx, wz) = (
+                        (pos.x * CHUNK_SIZE as i32) as f32,
+                        (pos.z * CHUNK_SIZE as i32) as f32,
+                    );
+                    for (index, section_meshes) in column.iter().enumerate() {
+                        let Some(mesh) = section_meshes.opaque.as_ref() else {
+                            continue;
+                        };
+                        let y0 = index as f32 * section;
+                        let aabb_min = [wx, y0, wz];
+                        let aabb_max = [wx + section, y0 + section, wz + section];
+                        if !frustum.intersects_aabb(aabb_min, aabb_max) {
+                            stats.culled_frustum += 1;
+                            continue;
+                        }
+                        if nearest_dist2(camera_pos, aabb_min, aabb_max) > cull_dist2 {
+                            stats.culled_distance += 1;
+                            continue;
+                        }
+                        mesh.draw(&mut pass);
+                        stats.sections_drawn += 1;
+                        stats.draw_calls += 1;
+                        stats.triangles += (mesh.index_count() / 3) as u64;
                     }
-                    if nearest_dist2(camera_pos, aabb_min, aabb_max) > cull_dist2 {
-                        stats.culled_distance += 1;
-                        continue;
-                    }
-                    mesh.draw(&mut pass);
-                    stats.sections_drawn += 1;
-                    stats.draw_calls += 1;
-                    stats.triangles += (mesh.index_count() / 3) as u64;
                 }
-            }
-            // Pase de agua (translucido): mismo bind group, otro pipeline con
-            // blending alfa. **Decision**: z-test ON y z-write OFF (ver
-            // `pipeline.rs`), porque el agua no debe tapar lo que tiene detras ni
-            // escribir profundidad entre sus propias caras. Como el blending alfa
-            // es sensible al orden y el `HashMap` de meshes no lo garantiza,
-            // ordenamos las secciones de agua de **lejos a cerca** por distancia
-            // a la camara (reutilizando el buffer `water_order`).
-            pass.set_pipeline(self.pipeline.water_pipeline());
-            self.water_order.clear();
-            for (pos, column) in &self.meshes {
-                let (wx, wz) = (
-                    (pos.x * CHUNK_SIZE as i32) as f32,
-                    (pos.z * CHUNK_SIZE as i32) as f32,
-                );
-                for (index, section_meshes) in column.iter().enumerate() {
-                    if section_meshes.water.is_none() {
-                        continue;
+                // Pase de agua (translucido): mismo bind group, otro pipeline con
+                // blending alfa. **Decision**: z-test ON y z-write OFF (ver
+                // `pipeline.rs`), porque el agua no debe tapar lo que tiene detras ni
+                // escribir profundidad entre sus propias caras. Como el blending alfa
+                // es sensible al orden y el `HashMap` de meshes no lo garantiza,
+                // ordenamos las secciones de agua de **lejos a cerca** por distancia
+                // a la camara (reutilizando el buffer `water_order`).
+                pass.set_pipeline(self.pipeline.water_pipeline());
+                self.water_order.clear();
+                for (pos, column) in &self.meshes {
+                    let (wx, wz) = (
+                        (pos.x * CHUNK_SIZE as i32) as f32,
+                        (pos.z * CHUNK_SIZE as i32) as f32,
+                    );
+                    for (index, section_meshes) in column.iter().enumerate() {
+                        if section_meshes.water.is_none() {
+                            continue;
+                        }
+                        let y0 = index as f32 * section;
+                        let aabb_min = [wx, y0, wz];
+                        let aabb_max = [wx + section, y0 + section, wz + section];
+                        if !frustum.intersects_aabb(aabb_min, aabb_max) {
+                            continue;
+                        }
+                        if nearest_dist2(camera_pos, aabb_min, aabb_max) > cull_dist2 {
+                            stats.culled_distance += 1;
+                            continue;
+                        }
+                        // Distancia al centro de la seccion (basta para ordenar).
+                        let dx = wx + section * 0.5 - camera_pos.x;
+                        let dy = y0 + section * 0.5 - camera_pos.y;
+                        let dz = wz + section * 0.5 - camera_pos.z;
+                        self.water_order
+                            .push((dx * dx + dy * dy + dz * dz, *pos, index));
                     }
-                    let y0 = index as f32 * section;
-                    let aabb_min = [wx, y0, wz];
-                    let aabb_max = [wx + section, y0 + section, wz + section];
-                    if !frustum.intersects_aabb(aabb_min, aabb_max) {
-                        continue;
-                    }
-                    if nearest_dist2(camera_pos, aabb_min, aabb_max) > cull_dist2 {
-                        stats.culled_distance += 1;
-                        continue;
-                    }
-                    // Distancia al centro de la seccion (basta para ordenar).
-                    let dx = wx + section * 0.5 - camera_pos.x;
-                    let dy = y0 + section * 0.5 - camera_pos.y;
-                    let dz = wz + section * 0.5 - camera_pos.z;
-                    self.water_order
-                        .push((dx * dx + dy * dy + dz * dz, *pos, index));
                 }
-            }
-            sort_water_back_to_front(&mut self.water_order);
-            for &(_, pos, index) in &self.water_order {
-                if let Some(mesh) = self
-                    .meshes
-                    .get(&pos)
-                    .and_then(|column| column[index].water.as_ref())
-                {
-                    mesh.draw(&mut pass);
-                    stats.draw_calls += 1;
-                    stats.triangles += (mesh.index_count() / 3) as u64;
+                sort_water_back_to_front(&mut self.water_order);
+                for &(_, pos, index) in &self.water_order {
+                    if let Some(mesh) = self
+                        .meshes
+                        .get(&pos)
+                        .and_then(|column| column[index].water.as_ref())
+                    {
+                        mesh.draw(&mut pass);
+                        stats.draw_calls += 1;
+                        stats.triangles += (mesh.index_count() / 3) as u64;
+                    }
                 }
-            }
 
-            if let Some(highlight) = self.highlight_mesh.as_ref() {
-                pass.set_pipeline(self.highlight_pipeline.pipeline());
-                highlight.draw(&mut pass);
-            }
-
-            // Mano en primera persona (brazo + item). Va muy cerca de la camara,
-            // asi que gana el z-test frente al mundo.
-            if hand.is_some() {
-                self.model.draw(&mut pass, 0, &self.hand_arm);
-                self.model.draw(&mut pass, 1, &self.hand_item);
-            }
-            // Personaje (tercera persona).
-            if character.is_some() {
-                for (i, mesh) in self.char_parts.iter().enumerate() {
-                    self.model.draw(&mut pass, 2 + i as u32, mesh);
+                if let Some(highlight) = self.highlight_mesh.as_ref() {
+                    pass.set_pipeline(self.highlight_pipeline.pipeline());
+                    highlight.draw(&mut pass);
                 }
-            }
+
+                // Mano en primera persona (brazo + item). Va muy cerca de la camara,
+                // asi que gana el z-test frente al mundo.
+                if hand.is_some() {
+                    self.model.draw(&mut pass, 0, &self.hand_arm);
+                    self.model.draw(&mut pass, 1, &self.hand_item);
+                }
+                // Personaje (tercera persona).
+                if character.is_some() {
+                    for (i, mesh) in self.char_parts.iter().enumerate() {
+                        self.model.draw(&mut pass, 2 + i as u32, mesh);
+                    }
+                }
+            } // draw_world
 
             // Interfaz 2D (hotbar/inventario) al final, siempre encima.
             self.ui.draw(&mut pass);

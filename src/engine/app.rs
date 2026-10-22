@@ -1724,27 +1724,46 @@ impl App {
     fn menu_action(&mut self, i: usize) {
         if let Some(slug) = self.confirm_delete.clone() {
             if i == 0 {
-                if slug == self.world_slug {
+                let active = slug == self.world_slug;
+                if active {
                     // P2-15: no dejar el autoguardado reintentando contra una
-                    // carpeta borrada. Se suelta el mundo activo y se espera al
-                    // worker (que puede estar escribiendo) antes de borrar.
-                    self.renderer = None;
-                    self.camera = None;
-                    if let Some(worker) = self.save_worker.as_mut() {
-                        worker.join();
-                    }
-                    self.save_worker = Some(super::save_worker::SaveWorker::spawn());
+                    // carpeta borrada. El renderer se conserva (solo contiene
+                    // el mundo en memoria y hace falta para dibujar el menu);
+                    // el worker se cierra **en segundo plano** (antes `join()`
+                    // bloqueaba el hilo de UI varios segundos y el juego se
+                    // "pegaba").
                     self.world_slug.clear();
                     self.save_pending = false;
                     self.save_requested = false;
                     self.save_finalized = false;
                 }
-                if let Err(e) = crate::world::library::delete_world(&self.world_base, &slug) {
-                    eprintln!("[world] no se pudo borrar '{slug}': {e}");
+                // El borrado (esperar al worker + remove_dir_all) va a un hilo.
+                let dir = crate::world::library::saves_dir(&self.world_base).join(&slug);
+                let old_worker = self.save_worker.take();
+                self.save_worker = Some(super::save_worker::SaveWorker::spawn());
+                if let Some(worker) = old_worker {
+                    let join = worker.close_async();
+                    std::thread::Builder::new()
+                        .name("solaria-world-delete".to_string())
+                        .spawn(move || {
+                            let _ = join.join();
+                            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                                if e.kind() != std::io::ErrorKind::NotFound {
+                                    eprintln!("[world] no se pudo borrar {dir:?}: {e}");
+                                }
+                            }
+                        })
+                        .ok();
+                } else if let Err(e) = std::fs::remove_dir_all(&dir) {
+                    if e.kind() != std::io::ErrorKind::NotFound {
+                        eprintln!("[world] no se pudo borrar {dir:?}: {e}");
+                    }
                 }
+                // Quita el mundo de la lista YA (no esperar al disco).
+                self.worlds.retain(|w| w.slug != slug);
+                self.world_sel = self.world_sel.min(self.worlds.len().saturating_sub(1));
             }
             self.confirm_delete = None;
-            self.reload_worlds();
             return;
         }
         match self.screens.top() {
@@ -2091,17 +2110,43 @@ impl App {
     /// Quads del **menu/titulo** (fondo, logo, botones, listas) y su leyenda.
     fn build_menu_ui(&self, win_w: f32, win_h: f32) -> Vec<crate::render::UiQuad> {
         use crate::render::{UiQuad, font, gui, region_uv};
+        use crate::world::{Block, Face};
         let top = self.screens.top();
         if top == Screen::Playing {
             return Vec::new();
         }
         let mut quads: Vec<UiQuad> = Vec::new();
-        // Atenua el mundo detras.
-        quads.push(UiQuad {
-            rect: [0.0, 0.0, win_w, win_h],
-            uv: region_uv(gui::DIM),
-            layer: -1,
-        });
+        if top == Screen::Title || top == Screen::Pause {
+            // El titulo y la pausa dejan ver el mundo (la pausa es un overlay).
+            quads.push(UiQuad {
+                rect: [0.0, 0.0, win_w, win_h],
+                uv: region_uv(gui::DIM),
+                layer: -1,
+            });
+        } else {
+            // Menus "de verdad": fondo de tierra tileado (como Minecraft), sin
+            // el mundo detras. Solo el titulo y la pausa muestran la escena.
+            let tile = Block::Dirt.face_tile(Face::PosY) as i32;
+            const TILE_PX: f32 = 64.0;
+            let mut y = 0.0;
+            while y < win_h {
+                let mut x = 0.0;
+                while x < win_w {
+                    quads.push(UiQuad {
+                        rect: [x, y, TILE_PX, TILE_PX],
+                        uv: [0.0, 0.0, 1.0, 1.0],
+                        layer: tile,
+                    });
+                    x += TILE_PX;
+                }
+                y += TILE_PX;
+            }
+            quads.push(UiQuad {
+                rect: [0.0, 0.0, win_w, win_h],
+                uv: region_uv(gui::DIM),
+                layer: -1,
+            });
+        }
 
         // Titulo grande (logo textual) arriba.
         let title = match top {
@@ -2910,6 +2955,13 @@ impl ApplicationHandler for App {
                 self.update_ms = t_update.elapsed().as_secs_f32() * 1000.0;
                 let t_render = Instant::now();
                 let held_block = self.hotbar_block_sel();
+                // Solo el titulo, la pausa y el juego muestran la escena; el
+                // resto de menus usa el fondo de tierra de la UI. Se calcula
+                // antes de prestar `renderer`/`camera`.
+                let draw_world = matches!(
+                    self.screens.top(),
+                    Screen::Playing | Screen::Pause | Screen::Title
+                );
                 if let (Some(renderer), Some(camera)) =
                     (self.renderer.as_mut(), self.camera.as_mut())
                 {
@@ -2961,7 +3013,15 @@ impl ApplicationHandler for App {
                     });
                     renderer.set_hand_item(held_block);
                     renderer.sync_streaming(player_eye);
-                    renderer.render(&view_projection, position, &sky_basis, &ui, hand, character);
+                    renderer.render(
+                        &view_projection,
+                        position,
+                        &sky_basis,
+                        &ui,
+                        hand,
+                        character,
+                        draw_world,
+                    );
                     // Restaura la camara del jugador para la fisica del proximo frame.
                     camera.position = player_eye;
                     camera.update_view();
@@ -3070,6 +3130,35 @@ mod tests {
         // Un frame gigante no dispara infinitos pasos; ademas la deuda se anula.
         assert_eq!(fixed_steps(&mut acc, 5.0), MAX_FIXED_STEPS);
         assert_eq!(acc, 0.0, "la deuda acumulada deberia descartarse");
+    }
+
+    #[test]
+    fn los_menus_de_fuera_del_juego_usan_fondo_de_tierra() {
+        // El selector/crear/opciones no deben mostrar el mundo: primer quad =
+        // tile de tierra de 64 px, y un DIM a pantalla completa encima.
+        use crate::world::{Block, Face};
+        let mut app = App::default();
+        app.screens.replace(Screen::WorldSelect);
+        let quads = app.build_menu_ui(1280.0, 720.0);
+        assert_eq!(quads[0].rect, [0.0, 0.0, 64.0, 64.0]);
+        assert_eq!(
+            quads[0].layer,
+            Block::Dirt.face_tile(Face::PosY) as i32,
+            "el fondo debe ser el tile de tierra"
+        );
+        assert!(
+            quads
+                .iter()
+                .any(|q| q.rect == [0.0, 0.0, 1280.0, 720.0] && q.layer == -1),
+            "falta el oscurecido a pantalla completa"
+        );
+
+        // El titulo y la pausa si dejan ver el mundo: solo llevan el DIM.
+        for screen in [Screen::Title, Screen::Pause] {
+            app.screens.replace(screen);
+            let quads = app.build_menu_ui(1280.0, 720.0);
+            assert_eq!(quads[0].rect, [0.0, 0.0, 1280.0, 720.0]);
+        }
     }
 
     #[test]
