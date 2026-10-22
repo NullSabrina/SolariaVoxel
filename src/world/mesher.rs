@@ -61,7 +61,8 @@ pub fn mesh_column(column: &Column, origin: [f32; 3]) -> Vec<SectionMesh> {
                 for face in Face::ALL {
                     let (ox, oy, oz) = face.offset();
                     // Vecino global: cruza secciones sin problema.
-                    if column.get_or_air(xi + ox, yi + oy, zi + oz).is_solid() {
+                    let neighbor = column.get_or_air(xi + ox, yi + oy, zi + oz);
+                    if neighbor.occludes() || (block == Block::Leaves && neighbor != Block::Air) {
                         continue;
                     }
                     let tile = block.face_tile(face);
@@ -121,7 +122,8 @@ pub fn mesh_section(column: &Column, section: usize, origin: [f32; 3]) -> Sectio
                 let (xi, yi, zi) = (x as i32, y as i32, z as i32);
                 for face in Face::ALL {
                     let (ox, oy, oz) = face.offset();
-                    if column.get_or_air(xi + ox, yi + oy, zi + oz).is_solid() {
+                    let neighbor = column.get_or_air(xi + ox, yi + oy, zi + oz);
+                    if neighbor.occludes() || (block == Block::Leaves && neighbor != Block::Air) {
                         continue;
                     }
                     let tile = block.face_tile(face);
@@ -180,24 +182,8 @@ fn add_face(
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-/// Par de luces `(cielo, bloque)` de una celda, normalizadas a 0..1.
-fn light_pair(column: &Column, x: usize, y: usize, z: usize) -> (f32, f32) {
-    (
-        column.light_at(x, y, z) as f32 / MAX_LIGHT as f32,
-        column.block_light_at(x, y, z) as f32 / MAX_LIGHT as f32,
-    )
-}
-
-/// Emite la geometria de una antorcha. En el modelo
-/// `assets/models/solaria_torch.bbmodel` la unica parte **visible** son las dos
-/// **tablas cruzadas** (`cross_x`/`cross_z`), con la textura de antorcha; el
-/// palo central usa la textura "blank" (transparente) y no se ve.
-///
-/// Se dibujan como dos planos cruzados (uno en `X = centro`, otro en
-/// `Z = centro`) con el tile entero: el shader descarta el alfa bajo (cutout),
-/// asi que solo se ve la llama y el palo del sprite, no el fondo transparente.
-/// Cada plano se emite con las dos orientaciones (el pipeline usa back-face
-/// culling).
+/// Emite la antorcha original (dos planos cruzados + palo) del modelo de
+/// Blockbench. Se conserva porque el usuario valido ese modelo.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_torch(
     vertices: &mut Vec<Vertex>,
@@ -218,18 +204,14 @@ pub(crate) fn emit_torch(
     let (x1, y1, z1) = (x0 + 1.0, y0 + 1.0, z0 + 1.0);
     let (cx, cz) = (x0 + 0.5, z0 + 0.5);
     let tile = block.face_tile(Face::PosY) as u32;
-    // `v = 0` arriba (llama) y `v = 1` abajo (palo), igual que el sprite.
     let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
-    // Plano X = centro: recorre Z (u) e Y (v).
     let plane_x = [[cx, y0, z1], [cx, y0, z0], [cx, y1, z0], [cx, y1, z1]];
-    // Plano Z = centro: recorre X (u) e Y (v).
     let plane_z = [[x0, y0, cz], [x1, y0, cz], [x1, y1, cz], [x0, y1, cz]];
     for corners in [plane_x, plane_z] {
         let base = vertices.len() as u32;
         for (corner, uv) in corners.iter().zip(uvs.iter()) {
             vertices.push(Vertex::with_light(*corner, *uv, sky, block_light, tile));
         }
-        // Las dos orientaciones (mismos vertices, indices invertidos).
         indices.extend_from_slice(&[
             base,
             base + 1,
@@ -247,6 +229,80 @@ pub(crate) fn emit_torch(
     }
 }
 
+/// Emite un modelo cuboide JSON (reservado para bloques no cubicos futuros).
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_model(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    origin: [f32; 3],
+    x: usize,
+    y: usize,
+    z: usize,
+    model: &crate::world::block_model::BlockModel,
+    sky: f32,
+    block_light: f32,
+) {
+    let base_pos = [
+        origin[0] + x as f32,
+        origin[1] + y as f32,
+        origin[2] + z as f32,
+    ];
+    for el in &model.elements {
+        let from = [
+            base_pos[0] + el.from[0] / 16.0,
+            base_pos[1] + el.from[1] / 16.0,
+            base_pos[2] + el.from[2] / 16.0,
+        ];
+        let to = [
+            base_pos[0] + el.to[0] / 16.0,
+            base_pos[1] + el.to[1] / 16.0,
+            base_pos[2] + el.to[2] / 16.0,
+        ];
+        for face in Face::ALL {
+            let Some(mf) = el.face(face) else {
+                continue;
+            };
+            let corners = model_corners(from, to, face);
+            let [u0, v0, u1, v1] = mf.uv;
+            let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
+            let base = vertices.len() as u32;
+            for (corner, uv) in corners.iter().zip(uvs.iter()) {
+                vertices.push(Vertex::with_light(
+                    *corner,
+                    *uv,
+                    sky,
+                    block_light,
+                    mf.tile as u32,
+                ));
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+}
+
+/// Esquinas de una cara de un cuboide `from..to`, en el mismo orden que
+/// `add_face` (abajo-izq, abajo-der, arriba-der, arriba-izq).
+fn model_corners(from: [f32; 3], to: [f32; 3], face: Face) -> [[f32; 3]; 4] {
+    let [x0, y0, z0] = from;
+    let [x1, y1, z1] = to;
+    match face {
+        Face::PosX => [[x1, y0, z0], [x1, y0, z1], [x1, y1, z1], [x1, y1, z0]],
+        Face::NegX => [[x0, y0, z1], [x0, y0, z0], [x0, y1, z0], [x0, y1, z1]],
+        Face::PosY => [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
+        Face::NegY => [[x0, y0, z1], [x0, y0, z0], [x1, y0, z0], [x1, y0, z1]],
+        Face::PosZ => [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+        Face::NegZ => [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]],
+    }
+}
+
+/// Par de luces `(cielo, bloque)` de una celda, normalizadas a 0..1.
+fn light_pair(column: &Column, x: usize, y: usize, z: usize) -> (f32, f32) {
+    (
+        column.light_at(x, y, z) as f32 / MAX_LIGHT as f32,
+        column.block_light_at(x, y, z) as f32 / MAX_LIGHT as f32,
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,7 +359,6 @@ mod tests {
         column.set(8, 8, 8, Block::Torch);
         let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
         assert_eq!(sections.len(), 1);
-        // Dos planos cruzados; cada uno con las dos orientaciones.
         assert_eq!(sections[0].vertices.len(), 8);
         assert_eq!(sections[0].indices.len(), 24);
         // Todas las caras usan el tile de la antorcha.
@@ -325,7 +380,6 @@ mod tests {
         column.set(9, 8, 8, Block::Torch);
         let sections = mesh_column(&column, [0.0, 0.0, 0.0]);
         let total: usize = sections.iter().map(|s| s.vertices.len()).sum();
-        // 6 caras de la piedra (24) + los dos planos de la antorcha (8).
         assert_eq!(total, 24 + 8);
     }
 }

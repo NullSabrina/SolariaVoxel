@@ -34,7 +34,10 @@ pub fn time_of_day() -> f32 {
 /// Permite apuntar al sol o a la luna sin tocar el codigo de cada demo.
 pub fn apply_look(camera: &mut Camera) {
     if let Ok(s) = std::env::var("SOLARIA_LOOK") {
-        let parts: Vec<f32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        let parts: Vec<f32> = s
+            .split(',')
+            .filter_map(|p| p.trim().parse::<f32>().ok())
+            .collect();
         if parts.len() == 2 {
             camera.yaw_deg = parts[0];
             camera.pitch_deg = parts[1];

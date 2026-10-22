@@ -1,8 +1,8 @@
 [package]
 name = "solaria_voxel"
-version = "0.51.0"
+version = "0.52.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.95"
 description = "Solaria Voxel - motor de voxeles en Rust construido desde cero (ventana + wgpu)"
 license = "MIT OR Apache-2.0"
 authors = ["NullSabrina"]
@@ -38,6 +38,7 @@ lz4_flex = "0.14.0"
 png = "0.18.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+quick-noise = "0.3.0"
 
 # ---------------------------------------------------------------------------
 # Perfiles de compilacion.

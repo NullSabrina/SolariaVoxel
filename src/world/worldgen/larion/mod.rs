@@ -43,7 +43,10 @@ pub use config::{HydroConfig, LARION_CONFIG_VERSION, LarionConfig, LarionConfigE
 pub use density::DensityField;
 pub use height::LarionSample;
 pub use hydro::{CELL, HALO, HydroCache, HydroSample, HydroWindow, MAX_WINDOWS, WINDOW};
-pub use noise::{Fractal2D, Fractal3D, Ridged2D, ScalarField2D, Warp2D};
+pub use noise::{
+    Fractal2D, Fractal3D, FractalField2D, Ridged2D, RidgedField2D, ScalarField2D, SimdFractal2D,
+    SimdRidged2D, Warp2D,
+};
 pub use spline::{Spline, SplineError};
 
 use std::f32::consts::TAU;
@@ -71,18 +74,18 @@ pub struct LarionGenerator {
 
     /// Domain warping horizontal de la continentalidad.
     warp: Warp2D,
-    continental: Fractal2D,
-    erosion: Fractal2D,
-    peaks: Ridged2D,
-    valley: Fractal2D,
-    macro_relief: Fractal2D,
-    detail: Fractal2D,
-    temperature: Fractal2D,
-    humidity: Fractal2D,
-    river_ridge: Fractal2D,
-    river_warp: Fractal2D,
-    river_width: Fractal2D,
-    lake_basin: Fractal2D,
+    continental: noise::FractalField2D,
+    erosion: noise::FractalField2D,
+    peaks: noise::RidgedField2D,
+    valley: noise::FractalField2D,
+    macro_relief: noise::FractalField2D,
+    detail: noise::FractalField2D,
+    temperature: noise::FractalField2D,
+    humidity: noise::FractalField2D,
+    river_ridge: noise::FractalField2D,
+    river_warp: noise::FractalField2D,
+    river_width: noise::FractalField2D,
+    lake_basin: noise::FractalField2D,
 
     /// `continentalness -> altura`.
     base_curve: Spline,
@@ -126,24 +129,62 @@ impl LarionGenerator {
             seed.wrapping_mul(0x9E37_79B9)
                 .wrapping_add(k.wrapping_mul(0x85EB_CA6B))
         };
+        // v2 usa el backend SIMD; v1 conserva `noise-rs` byte a byte.
+        let simd = version >= 2;
         Self {
-            warp: Warp2D::new(
-                s(1),
-                config.continental_warp_scale,
-                config.continental_warp_strength,
+            warp: if simd {
+                Warp2D::new_simd(
+                    s(1),
+                    config.continental_warp_scale,
+                    config.continental_warp_strength,
+                )
+            } else {
+                Warp2D::new(
+                    s(1),
+                    config.continental_warp_scale,
+                    config.continental_warp_strength,
+                )
+            },
+            continental: noise::FractalField2D::new(
+                s(2),
+                config.continental_octaves,
+                config.continental_scale,
+                simd,
             ),
-            continental: Fractal2D::new(s(2), config.continental_octaves, config.continental_scale),
-            erosion: Fractal2D::new(s(3), config.erosion_octaves, config.erosion_scale),
-            peaks: Ridged2D::new(s(4), config.peaks_octaves, config.peaks_scale),
-            valley: Fractal2D::new(s(5), 2, config.valley_scale),
-            macro_relief: Fractal2D::new(s(6), 2, config.macro_scale),
-            detail: Fractal2D::new(s(7), config.detail_octaves, config.detail_scale),
-            temperature: Fractal2D::new(s(8), config.temperature_octaves, config.temperature_scale),
-            humidity: Fractal2D::new(s(9), config.humidity_octaves, config.humidity_scale),
-            river_ridge: Fractal2D::new(s(10), 1, config.river_scale),
-            river_warp: Fractal2D::new(s(11), 2, config.river_warp_scale),
-            river_width: Fractal2D::new(s(12), 1, config.river_scale * 0.5),
-            lake_basin: Fractal2D::new(s(13), 1, config.river_scale * 2.1),
+            erosion: noise::FractalField2D::new(
+                s(3),
+                config.erosion_octaves,
+                config.erosion_scale,
+                simd,
+            ),
+            // Las crestas se quedan en `noise-rs`: `quick-noise::Ridged` tiene
+            // otra distribucion (mediana ~3.7 en 5 octavas) y saturaba
+            // `peaks01` a 1.0 en v2. El resto de campos 2D si usan SIMD.
+            peaks: noise::RidgedField2D::new(s(4), config.peaks_octaves, config.peaks_scale, false),
+            valley: noise::FractalField2D::new(s(5), 2, config.valley_scale, simd),
+            macro_relief: noise::FractalField2D::new(s(6), 2, config.macro_scale, simd),
+            detail: noise::FractalField2D::new(
+                s(7),
+                config.detail_octaves,
+                config.detail_scale,
+                simd,
+            ),
+            temperature: noise::FractalField2D::new(
+                s(8),
+                config.temperature_octaves,
+                config.temperature_scale,
+                simd,
+            ),
+            humidity: noise::FractalField2D::new(
+                s(9),
+                config.humidity_octaves,
+                config.humidity_scale,
+                simd,
+            ),
+            river_ridge: noise::FractalField2D::new(s(10), 1, config.river_scale, simd),
+            river_warp: noise::FractalField2D::new(s(11), 2, config.river_warp_scale, simd),
+            river_width: noise::FractalField2D::new(s(12), 1, config.river_scale * 0.5, simd),
+            lake_basin: noise::FractalField2D::new(s(13), 1, config.river_scale * 2.1, simd),
             base_curve: height::default_base_curve(),
             detail_curve: erosion::default_detail_curve(),
             peaks_curve: erosion::default_peaks_curve(),
@@ -234,9 +275,101 @@ impl LarionGenerator {
         }
     }
 
+    /// Version por lotes de [`LarionGenerator::geography`]. Usa `sample_many`
+    /// para que el backend SIMD procese todos los puntos de una columna (o de la
+    /// ventana hidro) en pocas llamadas.
+    fn geography_grid(&self, xs: &[f64], zs: &[f64], include_detail: bool) -> Vec<GeoFields> {
+        let cfg = &self.config;
+        let n = xs.len();
+        assert_eq!(zs.len(), n);
+        let mut sx = vec![0.0f64; n];
+        let mut sz = vec![0.0f64; n];
+        self.warp.apply_many(xs, zs, &mut sx, &mut sz);
+
+        // Un unico buffer para los seis campos de la geografia: antes eran seis
+        // `Vec` por columna (mas el resto de la composicion).
+        let mut fields = vec![0.0f32; n * 6];
+        let (continental, rest) = fields.split_at_mut(n);
+        let (erosion_raw, rest) = rest.split_at_mut(n);
+        let (peaks_raw, rest) = rest.split_at_mut(n);
+        let (macro_raw, rest) = rest.split_at_mut(n);
+        let (valley_raw, rest) = rest.split_at_mut(n);
+        let detail = rest;
+        self.continental.sample_many(&sx, &sz, continental);
+        self.erosion.sample_many(&sx, &sz, erosion_raw);
+        self.peaks.sample_many(&sx, &sz, peaks_raw);
+        self.macro_relief.sample_many(&sx, &sz, macro_raw);
+        self.valley.sample_many(&sx, &sz, valley_raw);
+        if include_detail {
+            self.detail.sample_many(xs, zs, detail);
+        }
+
+        (0..n)
+            .map(|i| {
+                let continental_raw = continental[i].clamp(-1.0, 1.0);
+                let erosion = erosion::erosion_from_raw(erosion_raw[i]);
+                let peaks01 = self.peaks_curve.eval(peaks_raw[i]).clamp(0.0, 1.0);
+                let valley_raw = valley_raw[i];
+                let detail_gain = self.detail_curve.eval(erosion);
+                GeoFields {
+                    composed: height::compose_height(
+                        cfg,
+                        &self.base_curve,
+                        &HeightInputs {
+                            continental_raw,
+                            erosion,
+                            peaks01,
+                            macro_n: macro_raw[i],
+                            valley_raw,
+                            detail: detail[i],
+                            detail_gain,
+                        },
+                    ),
+                    continental_raw,
+                    erosion,
+                    peaks01,
+                    valley_raw,
+                    warped: (sx[i], sz[i]),
+                }
+            })
+            .collect()
+    }
+
     /// Altura geografica (sin clima/bioma/rios). La usa [`HydroWindow`].
-    pub(super) fn geography_height(&self, x: f64, z: f64) -> f32 {
-        self.geography(x, z, false).composed.height
+    pub(super) fn geography_height_many(&self, xs: &[f64], zs: &[f64], out: &mut [f32]) {
+        assert_eq!(xs.len(), zs.len());
+        assert_eq!(xs.len(), out.len());
+        let geos = self.geography_grid(xs, zs, false);
+        for (i, g) in geos.iter().enumerate() {
+            out[i] = g.composed.height;
+        }
+    }
+
+    /// Muestrea una rejilla rectangular `w x h` (fila a fila, X avanza primero)
+    /// con backend SIMD y una sola ventana hidro. Equivale a llamar
+    /// `sample_with_window` en cada punto, pero agrupa cada campo de ruido.
+    pub fn sample_grid(
+        &self,
+        x0: f64,
+        z0: f64,
+        w: usize,
+        h: usize,
+        window: Option<&HydroWindow>,
+    ) -> Vec<LarionSample> {
+        let n = w * h;
+        let mut xs = Vec::with_capacity(n);
+        let mut zs = Vec::with_capacity(n);
+        for j in 0..h {
+            for i in 0..w {
+                xs.push(x0 + i as f64);
+                zs.push(z0 + j as f64);
+            }
+        }
+        let geos = self.geography_grid(&xs, &zs, true);
+        geos.into_iter()
+            .enumerate()
+            .map(|(i, geo)| self.compose_with_geo(geo, xs[i], zs[i], window))
+            .collect()
     }
 
     /// Fuerza de los voladizos `[0, 1]` para una muestra: solo en montana joven
@@ -255,6 +388,25 @@ impl LarionGenerator {
             .density(x, y, z, sample.height, Self::overhang_strength(sample))
     }
 
+    /// Densidad segun la version del pipeline. v1 conserva la banda fija
+    /// historica; v2 usa banda/amplitud variables (P1.3).
+    #[inline]
+    pub fn density_versioned(
+        &self,
+        x: i32,
+        y: i32,
+        z: i32,
+        sample: &LarionSample,
+        version: u32,
+    ) -> f32 {
+        if version >= 2 {
+            self.density
+                .density_youth(x, y, z, sample.height, Self::overhang_strength(sample))
+        } else {
+            self.density(x, y, z, sample)
+        }
+    }
+
     /// Muestrea la columna `(x, z)`. Punto de entrada unico del generador.
     pub fn sample(&self, x: f64, z: f64) -> LarionSample {
         self.sample_with_window(x, z, None)
@@ -264,8 +416,19 @@ impl LarionGenerator {
     /// la resuelve **una vez** por columna y la pasa a sus 18x18 muestras para
     /// no expulsar ventanas en cada borde. `None` resuelve por punto (API suelta).
     pub fn sample_with_window(&self, x: f64, z: f64, window: Option<&HydroWindow>) -> LarionSample {
-        let cfg = &self.config;
         let geo = self.geography(x, z, true);
+        self.compose_with_geo(geo, x, z, window)
+    }
+
+    /// Compone una muestra completa a partir de una geografia ya calculada.
+    fn compose_with_geo(
+        &self,
+        geo: GeoFields,
+        x: f64,
+        z: f64,
+        window: Option<&HydroWindow>,
+    ) -> LarionSample {
+        let cfg = &self.config;
         let composed = geo.composed;
         let continental_raw = geo.continental_raw;
         let erosion = geo.erosion;
@@ -289,73 +452,90 @@ impl LarionGenerator {
         let mountain = (peaks01 * composed.interior * composed.landness * (1.0 - erosion * 0.85))
             .clamp(0.0, 1.0);
 
-        let (height, river_proximity, surface_water, hydro_erosion) = if self.config_version >= 2 {
-            // P0.1: drenaje global + perfil en V del cauce.
-            let hydro = match window {
-                Some(window) => window.sample(x as f32, z as f32),
-                None => self
-                    .hydro
-                    .get(self, x as i32, z as i32)
-                    .sample(x as f32, z as f32),
-            };
-            let v_depth = hydro.v_depth(&cfg.hydro);
-            let height =
-                (composed.height + hydro.dh - v_depth).clamp(cfg.min_height, cfg.max_height);
-            let proximity = if hydro.flow > cfg.hydro.river_min_flow {
-                hydro.proximity() * composed.landness
+        let (height, river_proximity, surface_water, hydro_erosion, tree_density) =
+            if self.config_version >= 2 {
+                // P0.1: drenaje global + perfil en V del cauce.
+                let hydro = match window {
+                    Some(window) => window.sample(x as f32, z as f32),
+                    None => self
+                        .hydro
+                        .get(self, x as i32, z as i32)
+                        .sample(x as f32, z as f32),
+                };
+                let v_depth = hydro.v_depth(&cfg.hydro);
+                let height =
+                    (composed.height + hydro.dh - v_depth).clamp(cfg.min_height, cfg.max_height);
+                let proximity = if hydro.flow > cfg.hydro.river_min_flow {
+                    hydro.proximity() * composed.landness
+                } else {
+                    0.0
+                };
+                // Lago/cauce: `hydro.water` ya es 0 fuera del agua y la superficie
+                // del priority-flood dentro (incluido el ancho completo del cauce).
+                // Antes se exigia `water > height + 0.25`, lo que descartaba el
+                // agua de un rio cuyo nivel coincide con la superficie: el canal
+                // quedaba seco salvo una lama central.
+                let mut water = hydro.water;
+                if water < 0.0 || !water.is_finite() {
+                    water = 0.0;
+                }
+                if height < cfg.sea_level {
+                    water = water.max(cfg.sea_level);
+                }
+                let tree_density = tree_density_value(
+                    blend.primary,
+                    blend.secondary,
+                    blend.mix,
+                    humidity,
+                    temperature,
+                    Some((hydro.dist, hydro.width, hydro.water)),
+                );
+                (height, proximity, water, (-hydro.dh).max(0.0), tree_density)
             } else {
-                0.0
+                // v1: comportamiento historico, byte a byte. NO tocar el orden de
+                // las muestras de ruido.
+                let (sx, sz) = geo.warped;
+                let rw = self.river_warp.sample(sx, sz) as f32;
+                let rwx = sx + (rw * cfg.river_warp_strength) as f64;
+                let ridge_n = self.river_ridge.sample(rwx, sz) as f32;
+                let ridge = 1.0 - ridge_n.abs();
+                let width_n = self.river_width.sample(sx, sz) as f32 * 0.5 + 0.5;
+                let flow = rivers::river_flow(humidity, width_n);
+                let width = rivers::river_width(cfg, flow);
+                let river_proximity = rivers::river_proximity(ridge, width) * composed.landness;
+                let cut = rivers::river_cut(cfg, river_proximity, flow, mountain);
+
+                // Lagos: depresion cerrada en valles humedos.
+                let valley_raw = geo.valley_raw;
+                let basin = self.lake_basin.sample(sx, sz) as f32 * 0.5 + 0.5;
+                let lake_ness = (1.0 - math::saturate(valley_raw.abs()))
+                    * math::smoothstep(0.5, 0.8, humidity)
+                    * math::smoothstep(0.62, 1.0, basin)
+                    * composed.landness;
+                let lake_cut = lake_ness * 5.0;
+
+                let carved = (composed.height - cut - lake_cut).max(cfg.min_height);
+
+                let mut surface_water = 0.0f32;
+                if cut > 0.25 {
+                    surface_water = surface_water.max(composed.height - cut * 0.35);
+                }
+                if lake_ness > 0.02 {
+                    surface_water = surface_water.max(composed.height - lake_cut * 0.35);
+                }
+                if carved < cfg.sea_level {
+                    surface_water = surface_water.max(cfg.sea_level);
+                }
+                let tree_density = tree_density_value(
+                    blend.primary,
+                    blend.secondary,
+                    blend.mix,
+                    humidity,
+                    temperature,
+                    None,
+                ) * (1.0 - 0.8 * river_proximity);
+                (carved, river_proximity, surface_water, 0.0, tree_density)
             };
-            // Lago/cauce: `hydro.water` ya es 0 fuera del agua y la superficie
-            // del priority-flood dentro (incluido el ancho completo del cauce).
-            // Antes se exigia `water > height + 0.25`, lo que descartaba el
-            // agua de un rio cuyo nivel coincide con la superficie: el canal
-            // quedaba seco salvo una lama central.
-            let mut water = hydro.water;
-            if water < 0.0 || !water.is_finite() {
-                water = 0.0;
-            }
-            if height < cfg.sea_level {
-                water = water.max(cfg.sea_level);
-            }
-            (height, proximity, water, (-hydro.dh).max(0.0))
-        } else {
-            // v1: comportamiento historico, byte a byte. NO tocar el orden de
-            // las muestras de ruido.
-            let (sx, sz) = geo.warped;
-            let rw = self.river_warp.sample(sx, sz) as f32;
-            let rwx = sx + (rw * cfg.river_warp_strength) as f64;
-            let ridge_n = self.river_ridge.sample(rwx, sz) as f32;
-            let ridge = 1.0 - ridge_n.abs();
-            let width_n = self.river_width.sample(sx, sz) as f32 * 0.5 + 0.5;
-            let flow = rivers::river_flow(humidity, width_n);
-            let width = rivers::river_width(cfg, flow);
-            let river_proximity = rivers::river_proximity(ridge, width) * composed.landness;
-            let cut = rivers::river_cut(cfg, river_proximity, flow, mountain);
-
-            // Lagos: depresion cerrada en valles humedos.
-            let valley_raw = geo.valley_raw;
-            let basin = self.lake_basin.sample(sx, sz) as f32 * 0.5 + 0.5;
-            let lake_ness = (1.0 - math::saturate(valley_raw.abs()))
-                * math::smoothstep(0.5, 0.8, humidity)
-                * math::smoothstep(0.62, 1.0, basin)
-                * composed.landness;
-            let lake_cut = lake_ness * 5.0;
-
-            let carved = (composed.height - cut - lake_cut).max(cfg.min_height);
-
-            let mut surface_water = 0.0f32;
-            if cut > 0.25 {
-                surface_water = surface_water.max(composed.height - cut * 0.35);
-            }
-            if lake_ness > 0.02 {
-                surface_water = surface_water.max(composed.height - lake_cut * 0.35);
-            }
-            if carved < cfg.sea_level {
-                surface_water = surface_water.max(cfg.sea_level);
-            }
-            (carved, river_proximity, surface_water, 0.0)
-        };
 
         LarionSample {
             height,
@@ -369,6 +549,7 @@ impl LarionGenerator {
             river_proximity,
             surface_water,
             hydro_erosion,
+            tree_density,
             biome: blend.primary,
             blend,
             ocean: height <= cfg.sea_level,
@@ -397,6 +578,51 @@ impl LarionGenerator {
         let raw = n + cfg.coast_humidity_bias * (1.0 - 2.0 * interior);
         math::saturate(0.5 + (raw - 0.5) * cfg.climate_contrast)
     }
+}
+
+/// Densidad base de un bioma normalizada a `[0, 1]`. Solo pesa un 8% en la
+/// densidad final: el grueso viene de campos **continuos** de clima, para que la
+/// frontera de bioma no produzca un escalon de arboles.
+fn biome_tree_base(biome: crate::world::terrain::Biome) -> f32 {
+    use crate::world::terrain::Biome;
+    match biome {
+        Biome::Forest => 1.0,
+        Biome::Taiga => 0.9,
+        Biome::Swamp => 0.8,
+        Biome::Plains => 0.55,
+        Biome::Savanna => 0.40,
+        Biome::Tundra => 0.15,
+        Biome::Desert => 0.0,
+    }
+}
+
+/// Densidad de vegetacion de una columna (P0.3). Es una funcion **continua** de
+/// humedad/temperatura, con el bioma mezclado por `mix` (que vale 0.5 justo en la
+/// frontera y da el mismo resultado al intercambiar primario/secundario). El
+/// cauce y el agua anulan la densidad; el borde del cauce se suaviza en 2 anchos
+/// para que no haya un muro de arboles junto al rio.
+fn tree_density_value(
+    primary: crate::world::terrain::Biome,
+    secondary: crate::world::terrain::Biome,
+    mix: f32,
+    humidity: f32,
+    temperature: f32,
+    hydro: Option<(f32, f32, f32)>,
+) -> f32 {
+    let base = biome_tree_base(primary) * (1.0 - mix) + biome_tree_base(secondary) * mix;
+    let wet = math::smoothstep(0.30, 0.80, humidity);
+    let arid =
+        math::smoothstep(0.72, 0.95, temperature) * (1.0 - math::smoothstep(0.18, 0.55, humidity));
+    let cold = math::smoothstep(0.02, 0.22, temperature);
+    let mut density = wet * (1.0 - 0.75 * arid) * (0.35 + 0.65 * cold) + 0.08 * base;
+    if let Some((dist, width, water)) = hydro {
+        if water > 0.0 || dist < width {
+            density = 0.0;
+        } else {
+            density *= math::smoothstep(width, width * 2.0 + 2.0, dist);
+        }
+    }
+    density.clamp(0.0, 1.0)
 }
 
 #[cfg(test)]

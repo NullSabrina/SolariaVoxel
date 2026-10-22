@@ -48,6 +48,31 @@ impl DensityField {
         let n = self.noise.sample(x as f64, y as f64, z as f64) as f32;
         d + n * self.amplitude * overhang.clamp(0.0, 1.0) * fade
     }
+
+    /// Densidad con **banda y amplitud variables** (P1.3). `youth` en `[0, 1]`
+    /// viene de erosion + relieve: 1 = montana joven (voladizos extremos), 0 =
+    /// llanura erosionada (superficie casi lisa). El fade `(1 - t²)²` es C1 en
+    /// los bordes de la banda: no deja un cambio de pendiente visible.
+    #[inline]
+    pub fn density_youth(&self, x: i32, y: i32, z: i32, h: f32, youth: f32) -> f32 {
+        let youth = youth.clamp(0.0, 1.0);
+        let band = self.band * (0.45 + 1.0 * youth);
+        let amplitude = self.amplitude * (0.12 + 1.68 * youth);
+        let d = h - y as f32;
+        if d > band {
+            return 1.0;
+        }
+        if d < -band {
+            return -1.0;
+        }
+        let u = (d / band).clamp(-1.0, 1.0);
+        // Rampa C1: valor ±1 en los bordes con derivada 0 (sin kink).
+        let base = 0.5 * (3.0 * u - u * u * u);
+        let t = u.abs();
+        let fade = (1.0 - t * t).powi(2);
+        let n = self.noise.sample(x as f64, y as f64, z as f64) as f32;
+        base + n * (amplitude / band) * fade
+    }
 }
 
 #[cfg(test)]
@@ -93,5 +118,46 @@ mod tests {
         for y in 60..90 {
             assert_eq!(a.density(1, y, 2, 75.0, 0.8), b.density(1, y, 2, 75.0, 0.8));
         }
+    }
+
+    #[test]
+    fn la_banda_variable_hace_mas_voladizos_en_montana_joven() {
+        let f = DensityField::new(3, 16.0, 1.0 / 60.0, 2, 14.0);
+        // 2 bloques por encima de H: un voladizo es densidad > 0 aqui.
+        let (mut solid_young, mut solid_plain) = (0u32, 0u32);
+        for x in 0..40 {
+            for z in 0..40 {
+                if f.density_youth(x, 82, z, 80.0, 1.0) > 0.0 {
+                    solid_young += 1;
+                }
+                if f.density_youth(x, 82, z, 80.0, 0.0) > 0.0 {
+                    solid_plain += 1;
+                }
+            }
+        }
+        assert!(
+            solid_young > 100,
+            "la montana joven no genera voladizos ({solid_young})"
+        );
+        assert!(
+            solid_plain * 2 < solid_young,
+            "la llanura no es mas lisa ({solid_plain} vs {solid_young})"
+        );
+    }
+
+    #[test]
+    fn el_fade_de_la_banda_es_continuo_en_el_borde() {
+        let f = DensityField::new(7, 16.0, 1.0 / 60.0, 2, 14.0);
+        // Joven: band = 16 * 1.45 = 23.2. d=23 dentro, d=24 fuera.
+        let inside = f.density_youth(4, 57, 9, 80.0, 1.0);
+        let outside = f.density_youth(4, 56, 9, 80.0, 1.0);
+        assert!(inside > 0.0 && outside > 0.0);
+        assert!(
+            (inside - outside).abs() < 0.2,
+            "salto en el borde de la banda: {inside} vs {outside}"
+        );
+        // Y el signo es trivial fuera por ambos lados.
+        assert!(f.density_youth(4, 20, 9, 80.0, 1.0) > 0.0);
+        assert!(f.density_youth(4, 140, 9, 80.0, 1.0) < 0.0);
     }
 }

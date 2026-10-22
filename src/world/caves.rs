@@ -55,6 +55,233 @@ const MOUNTAIN_CAVE_BOOST: f64 = 0.60;
 /// Profundidad (bajo la superficie) que puede abrir una entrada.
 const ENTRANCE_DEPTH: i32 = 7;
 
+/// Lado de la celda de `WormField` en X/Z (bloques).
+pub const WORM_CELL: i32 = 64;
+/// Worms por celda.
+pub const WORMS_PER_CELL: usize = 2;
+/// Maximo de worms base + conectores que se guardan en un contexto.
+pub const MAX_WORMS: usize = 26;
+
+/// Tramo de un worm: cubica de Bezier + radio de excavacion.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Worm {
+    a: [f32; 3],
+    c1: [f32; 3],
+    c2: [f32; 3],
+    b: [f32; 3],
+    radius: f32,
+}
+
+impl Worm {
+    const ZERO: Self = Self {
+        a: [0.0; 3],
+        c1: [0.0; 3],
+        c2: [0.0; 3],
+        b: [0.0; 3],
+        radius: 0.0,
+    };
+
+    fn aabb(&self) -> ([f32; 3], [f32; 3]) {
+        let mut lo = self.a;
+        let mut hi = self.a;
+        for p in [self.c1, self.c2, self.b] {
+            for i in 0..3 {
+                lo[i] = lo[i].min(p[i]);
+                hi[i] = hi[i].max(p[i]);
+            }
+        }
+        for i in 0..3 {
+            lo[i] -= self.radius;
+            hi[i] += self.radius;
+        }
+        (lo, hi)
+    }
+
+    /// Distancia minima aproximada (8 muestras) al eje del worm.
+    fn distance2(&self, p: [f32; 3]) -> f32 {
+        let mut best = f32::INFINITY;
+        for s in 0..=8 {
+            let t = s as f32 / 8.0;
+            let u = 1.0 - t;
+            let x = u * u * u * self.a[0]
+                + 3.0 * u * u * t * self.c1[0]
+                + 3.0 * u * t * t * self.c2[0]
+                + t * t * t * self.b[0];
+            let y = u * u * u * self.a[1]
+                + 3.0 * u * u * t * self.c1[1]
+                + 3.0 * u * t * t * self.c2[1]
+                + t * t * t * self.b[1];
+            let z = u * u * u * self.a[2]
+                + 3.0 * u * u * t * self.c1[2]
+                + 3.0 * u * t * t * self.c2[2]
+                + t * t * t * self.b[2];
+            let dx = p[0] - x;
+            let dy = p[1] - y;
+            let dz = p[2] - z;
+            best = best.min(dx * dx + dy * dy + dz * dz);
+        }
+        best
+    }
+}
+
+/// Red de worms determinista (P1.4). Dos worms por celda de 64 bloques,
+/// conectados a un vecino con probabilidad 0.7 mediante un tubo recto.
+#[derive(Clone, Copy, Debug)]
+pub struct WormField {
+    seed: u64,
+}
+
+impl WormField {
+    pub fn new(seed: u32) -> Self {
+        Self {
+            seed: seed as u64 ^ 0xA24B_AED4_963E_E407,
+        }
+    }
+
+    fn cell_seed(&self, cx: i32, cz: i32, k: usize) -> u64 {
+        mix64(
+            self.seed
+                ^ (cx as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                ^ (cz as i64 as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                ^ (k as u64).wrapping_mul(0x94D0_49BB_1331_11EB),
+        )
+    }
+
+    fn worm(&self, cx: i32, cz: i32, k: usize) -> Worm {
+        let mut rng = SplitMix64::new(self.cell_seed(cx, cz, k));
+        let ox = (cx * WORM_CELL) as f32;
+        let oz = (cz * WORM_CELL) as f32;
+        let a = [
+            ox + 8.0 + rng.next_f32() * 48.0,
+            12.0 + rng.next_f32() * 18.0,
+            oz + 8.0 + rng.next_f32() * 48.0,
+        ];
+        let b = [
+            ox + 8.0 + rng.next_f32() * 48.0,
+            42.0 + rng.next_f32() * 14.0,
+            oz + 8.0 + rng.next_f32() * 48.0,
+        ];
+        let c1 = [
+            a[0] + (rng.next_f32() * 2.0 - 1.0) * 12.0,
+            a[1] + 6.0 + rng.next_f32() * 12.0,
+            a[2] + (rng.next_f32() * 2.0 - 1.0) * 12.0,
+        ];
+        let c2 = [
+            b[0] + (rng.next_f32() * 2.0 - 1.0) * 12.0,
+            b[1] - 8.0 - rng.next_f32() * 10.0,
+            b[2] + (rng.next_f32() * 2.0 - 1.0) * 12.0,
+        ];
+        Worm {
+            a,
+            c1,
+            c2,
+            b,
+            radius: 1.4 + rng.next_f32() * 1.6,
+        }
+    }
+
+    /// Worms que pueden afectar a `(x, z)`: 3x3 celdas + conectores del centro
+    /// hacia sus cuatro vecinos ortogonales.
+    pub fn context(&self, x: i32, z: i32) -> ([Worm; MAX_WORMS], u8) {
+        let cx = x.div_euclid(WORM_CELL);
+        let cz = z.div_euclid(WORM_CELL);
+        let mut out = [Worm::ZERO; MAX_WORMS];
+        let mut n = 0usize;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                for k in 0..WORMS_PER_CELL {
+                    if n < MAX_WORMS {
+                        out[n] = self.worm(cx + dx, cz + dz, k);
+                        n += 1;
+                    }
+                }
+            }
+        }
+        // Conectores: 0.7 de probabilidad por worm y vecino ortogonal.
+        for (dir, dx, dz) in [(0, 1, 0), (1, -1, 0), (2, 0, 1), (3, 0, -1)] {
+            for k in 0..WORMS_PER_CELL {
+                let h = mix64(
+                    self.cell_seed(cx, cz, k) ^ (dir as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93),
+                );
+                if (h & 0xFFFF) as f32 / 65536.0 >= 0.7 || n >= MAX_WORMS {
+                    continue;
+                }
+                let a = self.worm(cx, cz, k);
+                let b = self.worm(cx + dx, cz + dz, k);
+                let start = a.b;
+                let end = b.a;
+                out[n] = Worm {
+                    a: start,
+                    c1: [
+                        start[0] + (end[0] - start[0]) * 0.33,
+                        start[1] + (end[1] - start[1]) * 0.33,
+                        start[2] + (end[2] - start[2]) * 0.33,
+                    ],
+                    c2: [
+                        start[0] + (end[0] - start[0]) * 0.66,
+                        start[1] + (end[1] - start[1]) * 0.66,
+                        start[2] + (end[2] - start[2]) * 0.66,
+                    ],
+                    b: end,
+                    radius: 1.2,
+                };
+                n += 1;
+            }
+        }
+        (out, n as u8)
+    }
+}
+
+/// ¿Un worm del contexto excava `(x, y, z)`? AABB barata antes de la cubica.
+fn worm_hollow(ctx: &CaveContext, x: i32, y: i32, z: i32) -> bool {
+    if ctx.worm_count == 0 {
+        return false;
+    }
+    let p = [x as f32, y as f32, z as f32];
+    for w in &ctx.worms[..ctx.worm_count as usize] {
+        let (lo, hi) = w.aabb();
+        if p[0] < lo[0]
+            || p[1] < lo[1]
+            || p[2] < lo[2]
+            || p[0] > hi[0]
+            || p[1] > hi[1]
+            || p[2] > hi[2]
+        {
+            continue;
+        }
+        let r2 = w.radius * w.radius;
+        if w.distance2(p) <= r2 {
+            return true;
+        }
+    }
+    false
+}
+
+fn mix64(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        mix64(self.state)
+    }
+
+    fn next_f32(&mut self) -> f32 {
+        (self.next_u64() >> 40) as f32 / (1u32 << 24) as f32
+    }
+}
+
 /// Resultado de evaluar una celda.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Carve {
@@ -77,6 +304,9 @@ pub struct CaveContext {
     pub canyon: f64,
     /// `0..1`: probabilidad local de entrada (rompe corteza).
     pub entrance: f64,
+    /// Worms (P1.4) que pueden afectar a esta columna. `worm_count == 0` en v1.
+    pub worms: [Worm; MAX_WORMS],
+    pub worm_count: u8,
 }
 
 /// El sistema de cuevas, determinista por semilla.
@@ -94,10 +324,21 @@ pub struct CaveSystem {
     shaft_region: Fbm<Perlin>,
     canyon_region: Perlin,
     entrance_region: Fbm<Perlin>,
+    /// Red de worms (P1.4), solo en `generator_config >= 2`.
+    worms: Option<WormField>,
 }
 
 impl CaveSystem {
     pub fn new(seed: u32) -> Self {
+        Self::with_worms(seed, false)
+    }
+
+    /// Igual que [`CaveSystem::new`] pero activando la red de worms.
+    pub fn new_with_worms(seed: u32) -> Self {
+        Self::with_worms(seed, true)
+    }
+
+    fn with_worms(seed: u32, worms: bool) -> Self {
         let s = |k: u32| seed.wrapping_mul(0x9E37_79B9).wrapping_add(k);
         Self {
             // Tubos delgados: dos Fbm de frecuencia distinta se cruzan -> red de
@@ -147,6 +388,7 @@ impl CaveSystem {
                 .set_octaves(2)
                 .set_frequency(0.006)
                 .set_persistence(0.5),
+            worms: worms.then(|| WormField::new(seed)),
         }
     }
 
@@ -155,6 +397,10 @@ impl CaveSystem {
     pub fn context(&self, x: i32, z: i32, mountain: f32) -> CaveContext {
         let (fx, fz) = (x as f64, z as f64);
         let n01 = |n: f64| (n * 0.5 + 0.5).clamp(0.0, 1.0);
+        let (worms, worm_count) = match self.worms {
+            Some(w) => w.context(x, z),
+            None => ([Worm::ZERO; MAX_WORMS], 0),
+        };
         CaveContext {
             mountain,
             cheese_region: smoothstep(0.35, 0.70, n01(self.cheese_region.get([fx, fz]))),
@@ -166,6 +412,8 @@ impl CaveSystem {
                 1.0 - self.canyon_region.get([fx * 0.0016, fz * 0.010]).abs(),
             ),
             entrance: smoothstep(0.86, 0.98, n01(self.entrance_region.get([fx, fz]))),
+            worms,
+            worm_count,
         }
     }
 
@@ -222,15 +470,20 @@ impl CaveSystem {
         }
         let (fx, fy, fz) = (x as f64, y as f64, z as f64);
 
-        let mut hollow = false;
+        // 0) Red de worms (P1.4): tubos globales de 64 bloques. Solo en v2
+        // (`worm_count > 0`) y por debajo de la corteza.
+        let mut hollow =
+            y > BEDROCK_CLEAR + 2 && y < surface - CHEESE_CRUST_KEEP && worm_hollow(ctx, x, y, z);
         // 1) Tubos delgados (spaghetti), dos campos cruzados. El segundo solo se
         // evalua cerca de la banda cero del primero (que es donde se cruzan), para
         // no pagar un ruido 3D en cada celda del subsuelo.
-        let ta = self.tubes_a.get([fx, fy, fz]);
-        if ta.abs() < TUBE_A_WIDTH * at
-            || (ta.abs() < 0.30 && self.tubes_b.get([fx, fy, fz]).abs() < TUBE_B_WIDTH * at)
-        {
-            hollow = true;
+        if !hollow {
+            let ta = self.tubes_a.get([fx, fy, fz]);
+            if ta.abs() < TUBE_A_WIDTH * at
+                || (ta.abs() < 0.30 && self.tubes_b.get([fx, fy, fz]).abs() < TUBE_B_WIDTH * at)
+            {
+                hollow = true;
+            }
         }
         // 2) Tubos regionales (mas anchos).
         if !hollow && self.regional.get([fx, fy, fz]).abs() < REGION_WIDTH * at {
@@ -420,5 +673,50 @@ mod tests {
             }
         }
         assert!(run_max >= 8, "no hay pozos verticales largos: {run_max}");
+    }
+
+    #[test]
+    fn worm_field_es_determinista() {
+        let a = WormField::new(7);
+        let b = WormField::new(7);
+        for (x, z) in [(0, 0), (63, 63), (-100, 250), (4000, -2500)] {
+            let ca = a.context(x, z);
+            let cb = b.context(x, z);
+            assert_eq!(ca.1, cb.1, "distinto numero de worms en ({x},{z})");
+            assert_eq!(ca.0[..ca.1 as usize], cb.0[..cb.1 as usize]);
+        }
+    }
+
+    #[test]
+    fn worm_field_teje_conectores_entre_celdas() {
+        let f = WormField::new(13_371);
+        let mut con_conector = 0;
+        for cz in 0..8 {
+            for cx in 0..8 {
+                let (_, n) = f.context(cx * WORM_CELL + 32, cz * WORM_CELL + 32);
+                if n as usize > 3 * 3 * WORMS_PER_CELL {
+                    con_conector += 1;
+                }
+            }
+        }
+        assert!(con_conector > 0, "no se genero ningun conector");
+    }
+
+    #[test]
+    fn v2_no_cava_la_corteza_con_worms() {
+        let c = CaveSystem::new_with_worms(99);
+        for x in 0..32 {
+            for z in 0..32 {
+                let ctx = c.context(x, z, 0.0);
+                for y in (70 - CAVE_CRUST)..70 {
+                    if c.carve(&ctx, x, y, z, 70, 50) != Carve::None {
+                        assert!(
+                            CaveSystem::is_entrance(&ctx, y, 70),
+                            "corteza cavada sin entrada: y={y}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

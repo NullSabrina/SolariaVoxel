@@ -189,3 +189,138 @@ fn los_voladizos_solo_aparecen_en_montana_joven() {
     }
     assert!(con_voladizo > 0, "no hay montana joven con voladizos");
 }
+
+// ---------------------------------------------------------------------------
+// P0.0b: hash canonico de la columna v1.
+//
+// El hash es FNV-1a de los campos de `LarionSample` en un orden **fijo**. Cambiar
+// el orden, anadir un campo al hash o cambiar la formula v1 rompe el test: es
+// justo lo que queremos detectar. Los campos se codifican con `f32::to_bits()`
+// (nunca con `Hash` de `f32`, que no existe para floats).
+// ---------------------------------------------------------------------------
+
+fn hash_u64(mut h: u64, v: u64) -> u64 {
+    for b in v.to_le_bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+fn hash_f32(h: u64, v: f32) -> u64 {
+    hash_u64(h, v.to_bits() as u64)
+}
+
+/// Hash canonico de una muestra Larion. Orden documentado y estable:
+/// altura, continentalidad (normalizada y cruda), erosion, crestas, temperatura,
+/// humedad, montana, rio, agua, erosion hidrica, densidad de arboles, bioma,
+/// mezcla y oceano.
+pub fn column_hash(s: &LarionSample) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    h = hash_f32(h, s.height);
+    h = hash_f32(h, s.continentalness);
+    h = hash_f32(h, s.continental_raw);
+    h = hash_f32(h, s.erosion);
+    h = hash_f32(h, s.peaks);
+    h = hash_f32(h, s.temperature);
+    h = hash_f32(h, s.humidity);
+    h = hash_f32(h, s.mountain);
+    h = hash_f32(h, s.river_proximity);
+    h = hash_f32(h, s.surface_water);
+    h = hash_f32(h, s.hydro_erosion);
+    h = hash_f32(h, s.tree_density);
+    h = hash_u64(h, s.biome as u8 as u64);
+    h = hash_u64(h, s.blend.primary as u8 as u64);
+    h = hash_u64(h, s.blend.secondary as u8 as u64);
+    h = hash_f32(h, s.blend.mix);
+    h = hash_u64(h, u64::from(s.ocean));
+    h
+}
+
+/// 1000 entradas deterministas `(seed, x, z)`: cuatro semillas y una rejilla
+/// aritmetica sin dependencia de `HashMap` ni del orden de generacion.
+fn baseline_input(i: usize) -> (u32, f64, f64) {
+    const SEEDS: [u32; 4] = [13_371, 7, 2_024, 99];
+    let seed = SEEDS[i % SEEDS.len()];
+    let x = ((i as i64 * 7919).rem_euclid(20_000)) as f64 - 10_000.0;
+    let z = ((i as i64 * 104_729).rem_euclid(20_000)) as f64 - 10_000.0;
+    (seed, x, z)
+}
+
+/// Hash agregado de las 1000 muestras con `version = 1`.
+pub fn baseline_hash() -> u64 {
+    let gens: Vec<LarionGenerator> = [13_371u32, 7, 2_024, 99]
+        .into_iter()
+        .map(|seed| LarionGenerator::with_version(seed, LarionConfig::default(), 1))
+        .collect();
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for i in 0..1000 {
+        let (seed, x, z) = baseline_input(i);
+        let idx = gens.iter().position(|g| g.seed() == seed).unwrap();
+        let sample = gens[idx].sample(x, z);
+        h = hash_u64(h, seed as u64);
+        h = hash_u64(h, x.to_bits());
+        h = hash_u64(h, z.to_bits());
+        h = hash_u64(h, column_hash(&sample));
+    }
+    h
+}
+
+/// Imprime el baseline. Ejecutar **una vez**:
+/// `cargo test print_baseline_hash --release -- --ignored --nocapture`
+#[test]
+#[ignore = "se ejecuta a mano para rellenar BASELINE_HASH"]
+fn print_baseline_hash() {
+    let h = baseline_hash();
+    println!("BASELINE_HASH (hex) = 0x{h:016x}");
+    println!("BASELINE_HASH (dec) = {h}");
+}
+
+#[test]
+fn test_column_hash_unchanged_v1() {
+    // Baseline medido con `print_baseline_hash` sobre el codigo de este turno.
+    const BASELINE_HASH: u64 = 0x7a69_3088_f994_1c67;
+    assert_ne!(
+        BASELINE_HASH, 0,
+        "ejecuta `cargo test print_baseline_hash --release -- --ignored --nocapture` \
+         y pega el valor en BASELINE_HASH"
+    );
+    let got = baseline_hash();
+    assert_eq!(
+        got, BASELINE_HASH,
+        "la columna v1 cambio (0x{got:016x} != 0x{BASELINE_HASH:016x}); \
+         revisa el orden de las muestras de ruido o los campos de LarionSample"
+    );
+}
+
+#[test]
+fn test_tree_density_blends_at_biome_border() {
+    // P0.3: la densidad de arboles no puede saltar en la frontera de bioma. Se
+    // busca una frontera real (cambio de `blend.primary` entre columnas
+    // contiguas) y se mide el salto maximo de `tree_density` por bloque.
+    let g = LarionGenerator::with_version(13_371, LarionConfig::default(), 1);
+    let mut border = None;
+    'z: for z in (0..900).step_by(37) {
+        let z = z as f64 - 400.0;
+        let mut prev = g.sample(-1500.0, z).blend.primary;
+        for xi in -1499..1500 {
+            let s = g.sample(xi as f64, z);
+            if s.blend.primary != prev {
+                border = Some((xi, z));
+                break 'z;
+            }
+            prev = s.blend.primary;
+        }
+    }
+    let (x0, z) = border.expect("no se encontro una frontera de bioma");
+    let mut max_delta = 0.0f32;
+    for dx in -10..=10 {
+        let a = g.sample((x0 + dx) as f64, z).tree_density;
+        let b = g.sample((x0 + dx + 1) as f64, z).tree_density;
+        max_delta = max_delta.max((a - b).abs());
+    }
+    assert!(
+        max_delta <= 0.02,
+        "salto de densidad de arboles en la frontera ({x0:.0},{z}): {max_delta}"
+    );
+}

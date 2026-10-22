@@ -29,7 +29,7 @@ use super::generator::GeneratorKind;
 use super::worldgen::decoration::{DecorationKind, Decorator};
 use super::worldgen::graph::{Graph, Program, default_density_graph, default_height_graph};
 use super::worldgen::larion::{Aquifer, AquiferFluid, LarionConfig, LarionGenerator, LarionSample};
-use super::worldgen::trees::{MARGIN, TreePlacer};
+use super::worldgen::trees::{MARGIN, ORGANIC_MARGIN, TreePlacer};
 use super::worldgen::{
     LandClass, LandformProfile, TerrainSample, WorldGen, WorldGenConfig, biomes, math,
 };
@@ -152,7 +152,11 @@ impl TerrainGenerator {
             surface_detail: Perlin::new(mix(6)),
             aquifer: Perlin::new(mix(7)),
             cave_mask: Perlin::new(mix(8)),
-            caves: CaveSystem::new(seed),
+            caves: if generator_config >= 2 {
+                CaveSystem::new_with_worms(seed)
+            } else {
+                CaveSystem::new(seed)
+            },
             decorator: Decorator::new(seed),
             trees: TreePlacer::new(seed),
             seed,
@@ -301,6 +305,7 @@ impl TerrainGenerator {
                     river_proximity: s.river_proximity,
                     surface_water: s.surface_water,
                     hydro_erosion: 0.0,
+                    tree_density: 0.0,
                     biome: s.biome,
                     blend: super::worldgen::larion::BiomeBlend {
                         primary: s.biome,
@@ -317,10 +322,28 @@ impl TerrainGenerator {
     /// para previews/metricas: muestrea la geografia una vez y decide, sin
     /// generar la columna entera.
     pub fn cave_carve_at(&self, x: i32, y: i32, z: i32) -> bool {
+        self.cave_carve_at_with_window(x, y, z, None)
+    }
+
+    /// Igual que [`TerrainGenerator::cave_carve_at`] pero reutilizando la ventana
+    /// hidro ya resuelta. Critico para P0.3: `tree_base_supported` se llama por
+    /// arbol aceptado y, sin esto, cada uno reconstruia la ventana (3 builds por
+    /// columna en el benchmark).
+    fn cave_carve_at_with_window(
+        &self,
+        x: i32,
+        y: i32,
+        z: i32,
+        window: Option<&super::worldgen::larion::HydroWindow>,
+    ) -> bool {
         if !self.has_caves(x, z) {
             return false;
         }
-        let s = self.sample(x, z);
+        let s = if self.kind == GeneratorKind::Larion {
+            terrain_sample_from_larion(&self.larion_sample_with_window(x, z, window))
+        } else {
+            self.worldgen.sample(x as f64, z as f64)
+        };
         let (lo, hi) = self.height_bounds();
         let height = (s.base_height.round() as i32).clamp(lo, hi);
         let ctx = self.caves.context(x, z, s.mountain_mask);
@@ -462,10 +485,16 @@ impl TerrainGenerator {
     /// decision **global y determinista** (cuevas del legacy o densidad
     /// interpolada del grafo), asi que los dos chunks que dibujan un arbol que
     /// cruza la frontera coinciden. Evita arboles flotando sobre cuevas.
-    fn tree_base_supported(&self, wx: i32, ground: i32, wz: i32) -> bool {
+    fn tree_base_supported(
+        &self,
+        wx: i32,
+        ground: i32,
+        wz: i32,
+        window: Option<&super::worldgen::larion::HydroWindow>,
+    ) -> bool {
         match self.kind {
             GeneratorKind::Legacy16 | GeneratorKind::Larion => {
-                !self.cave_carve_at(wx, ground - 1, wz)
+                !self.cave_carve_at_with_window(wx, ground - 1, wz, window)
             }
             GeneratorKind::Graph => self.interpolated_density(wx, ground - 1, wz) > 0.0,
         }
@@ -605,7 +634,7 @@ impl TerrainGenerator {
                     None
                 };
                 if let Some(plan) = plan
-                    && self.tree_base_supported(plan.wx, plan.ground, plan.wz)
+                    && self.tree_base_supported(plan.wx, plan.ground, plan.wz, None)
                 {
                     self.trees.draw(&mut column, &plan, world_x, world_z);
                 }
@@ -789,7 +818,7 @@ impl TerrainGenerator {
                     None
                 };
                 if let Some(plan) = plan
-                    && self.tree_base_supported(plan.wx, plan.ground, plan.wz)
+                    && self.tree_base_supported(plan.wx, plan.ground, plan.wz, None)
                 {
                     self.trees.draw(&mut column, &plan, world_x, world_z);
                 }
@@ -827,16 +856,29 @@ impl TerrainGenerator {
 
         const G: i32 = CHUNK_SIZE as i32;
         let gw = (G + 2) as usize;
-        let mut grid: Vec<LarionSample> = Vec::with_capacity(gw * gw);
-        for gz in -1..=G {
-            for gx in -1..=G {
-                grid.push(larion.sample_with_window(
-                    (world_x + gx) as f64,
-                    (world_z + gz) as f64,
-                    hydro_ref,
-                ));
+        let grid: Vec<LarionSample> = if self.generator_config >= 2 {
+            // P1.1: cada campo de ruido se procesa por lotes (SIMD) en lugar de
+            // 324 llamadas escalares.
+            larion.sample_grid(
+                (world_x - 1) as f64,
+                (world_z - 1) as f64,
+                gw,
+                gw,
+                hydro_ref,
+            )
+        } else {
+            let mut grid = Vec::with_capacity(gw * gw);
+            for gz in -1..=G {
+                for gx in -1..=G {
+                    grid.push(larion.sample_with_window(
+                        (world_x + gx) as f64,
+                        (world_z + gz) as f64,
+                        hydro_ref,
+                    ));
+                }
             }
-        }
+            grid
+        };
         let idx = |gx: i32, gz: i32| -> usize { ((gz + 1) as usize) * gw + (gx + 1) as usize };
         let h_of = |s: &LarionSample| (s.height.round() as i32).clamp(lo, hi);
         let slope_at = |gx: i32, gz: i32, ground: i32| -> i32 {
@@ -871,7 +913,8 @@ impl TerrainGenerator {
                 let top_scan = (height + band + 1).clamp(0, WORLD_HEIGHT as i32);
                 let mut top_solid: Option<usize> = None;
                 for y in 0..top_scan as usize {
-                    if larion.density(wx, y as i32, wz, &s) <= 0.0 {
+                    if larion.density_versioned(wx, y as i32, wz, &s, self.generator_config) <= 0.0
+                    {
                         continue;
                     }
                     if let Some(ctx) = &caves_ctx {
@@ -925,6 +968,11 @@ impl TerrainGenerator {
                         s.temperature,
                         lcfg.snow_temperature,
                         self.generator_config >= 2,
+                        if self.generator_config >= 2 {
+                            ecotone_window(s.blend.mix)
+                        } else {
+                            0.0
+                        },
                     );
                     column.set(x, y, z, block);
                     top_solid = Some(y);
@@ -986,10 +1034,14 @@ impl TerrainGenerator {
                     && (2..=13).contains(&z)
                     && top_solid.is_some()
                     && (self.generator_config < 2 || slope >= 2 || s.mountain > 0.15)
-                    && self
-                        .decorator
-                        .decide(wx, wz, &terrain_sample_from_larion(&s), height, slope)
-                        == Some(DecorationKind::Boulder)
+                    && {
+                        let mut ts = terrain_sample_from_larion(&s);
+                        if self.generator_config >= 2 {
+                            ts.biome = biome_mat;
+                        }
+                        self.decorator.decide(wx, wz, &ts, height, slope)
+                            == Some(DecorationKind::Boulder)
+                    }
                 {
                     let ground = top_solid.map_or(height as usize, |t| t + 1);
                     place_boulder(
@@ -1006,8 +1058,15 @@ impl TerrainGenerator {
         }
 
         // Pasada de arboles con margen (identica a la del legacy).
-        for gz in -MARGIN..CHUNK_SIZE as i32 + MARGIN {
-            for gx in -MARGIN..CHUNK_SIZE as i32 + MARGIN {
+        // El camino organico usa una copa algo mas ancha, asi que su margen es
+        // mayor; v1 conserva el margen historico.
+        let tree_margin = if self.generator_config >= 2 {
+            ORGANIC_MARGIN
+        } else {
+            MARGIN
+        };
+        for gz in -tree_margin..CHUNK_SIZE as i32 + tree_margin {
+            for gx in -tree_margin..CHUNK_SIZE as i32 + tree_margin {
                 let wx = world_x + gx;
                 let wz = world_z + gz;
                 let plan = if (0..CHUNK_SIZE as i32).contains(&gx)
@@ -1024,7 +1083,40 @@ impl TerrainGenerator {
                     } else {
                         s.biome
                     };
-                    self.trees.plan(wx, wz, biome, ground, slope)
+                    if self.generator_config >= 2 {
+                        // P0.3: densidad continua del clima/bioma/hidrologia,
+                        // atenuada por pendiente en el punto de colocacion.
+                        let density = s.tree_density * (1.0 - 0.45 * slope as f32).max(0.0);
+                        self.trees
+                            .plan_organic(wx, wz, biome, ground, slope, density)
+                    } else {
+                        self.trees.plan(wx, wz, biome, ground, slope)
+                    }
+                } else if self.generator_config >= 2 {
+                    if !self.trees.maybe_organic(wx, wz) {
+                        None
+                    } else {
+                        let s = self.larion_sample_with_window(wx, wz, hydro_ref);
+                        let ground = (s.height.round() as i32).clamp(lo, hi);
+                        let slope = {
+                            [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                                .iter()
+                                .map(|&(dx, dz)| {
+                                    (self
+                                        .larion_sample_with_window(wx + dx, wz + dz, hydro_ref)
+                                        .height
+                                        .round() as i32
+                                        - ground)
+                                        .abs()
+                                })
+                                .max()
+                                .unwrap_or(0)
+                        };
+                        let biome = self.larion_material_biome(&s, wx, wz, &lcfg);
+                        let density = s.tree_density * (1.0 - 0.45 * slope as f32).max(0.0);
+                        self.trees
+                            .plan_organic(wx, wz, biome, ground, slope, density)
+                    }
                 } else if self.trees.maybe(wx, wz) {
                     let s = self.larion_sample_with_window(wx, wz, hydro_ref);
                     let ground = (s.height.round() as i32).clamp(lo, hi);
@@ -1042,17 +1134,13 @@ impl TerrainGenerator {
                             .max()
                             .unwrap_or(0)
                     };
-                    let biome = if self.generator_config >= 2 {
-                        self.larion_material_biome(&s, wx, wz, &lcfg)
-                    } else {
-                        s.biome
-                    };
+                    let biome = s.biome;
                     self.trees.plan(wx, wz, biome, ground, slope)
                 } else {
                     None
                 };
                 if let Some(plan) = plan
-                    && self.tree_base_supported(plan.wx, plan.ground, plan.wz)
+                    && self.tree_base_supported(plan.wx, plan.ground, plan.wz, hydro_ref)
                 {
                     self.trees.draw(&mut column, &plan, world_x, world_z);
                 }
@@ -1078,29 +1166,32 @@ impl TerrainGenerator {
         }
         let lo = lcfg.biome_blend_lo;
         let hi = lcfg.biome_blend_hi;
-        if !(lo..=hi).contains(&b.mix) {
-            return b.primary;
-        }
         // v1 conserva byte a byte el hash por columna historico
         // (`test_column_hash_unchanged_v1`).
         if self.generator_config < 2 {
+            if !(lo..=hi).contains(&b.mix) {
+                return b.primary;
+            }
             return if hash01(wx, wz) < b.mix {
                 b.secondary
             } else {
                 b.primary
             };
         }
-        // v2: antes esto era `hash01(wx, wz) < mix`, un hash **por columna**,
-        // asi que la frontera de bioma se veia como un tablero de ajedrez de
-        // arena y hierba. Usamos un Perlin de baja frecuencia (parches de ~30
-        // bloques) para que la mezcla sea espacialmente coherente.
-        let t = ((b.mix - lo) / (hi - lo).max(1e-4)).clamp(0.0, 1.0);
+        // P1.2: ventana de ecotono real `w_secondary = mix` en `[0.15, 0.50]`.
+        // El material se decide con ruido coherente de ~1/20 bloques (0.05),
+        // no con un hash blanco por columna: la frontera queda irregular pero
+        // continua, sin tablero de ajedrez.
+        let t = ecotone_window(b.mix);
+        if t <= 0.0 {
+            return b.primary;
+        }
         let noise = self
             .surface_detail
-            .get([wx as f64 * 0.035, wz as f64 * 0.035])
+            .get([wx as f64 * 0.05, wz as f64 * 0.05])
             * 0.5
             + 0.5;
-        if noise < t as f64 {
+        if (noise as f32) < t {
             b.secondary
         } else {
             b.primary
@@ -1146,6 +1237,7 @@ fn larion_surface_block(
     temperature: f32,
     snow_temperature: f32,
     coherent: bool,
+    ecotone: f32,
 ) -> Block {
     if y + 1 == height && height > 200 {
         return if temperature < snow_temperature {
@@ -1154,7 +1246,14 @@ fn larion_surface_block(
             Block::Stone
         };
     }
-    surface_block(y, height, biome, variant, 0.0, slope, cfg, coherent)
+    surface_block(y, height, biome, variant, ecotone, slope, cfg, coherent)
+}
+
+/// Fuerza del **ecotono** Larion (P1.2): 0 en el interior del bioma, 1 en la
+/// frontera. `w_secondary` es `BiomeBlend::mix` (0..0.5); la ventana efectiva es
+/// `[0.15, 0.50]`.
+fn ecotone_window(w_secondary: f32) -> f32 {
+    math::smoothstep(0.15, 0.50, w_secondary)
 }
 
 /// Fuerza del **ecotono** en `cell_edge` (0 en la frontera de celda, ~1 en el
@@ -1445,6 +1544,17 @@ mod tests {
         // Prerequisito para generar columnas en hilos de trabajo.
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<TerrainGenerator>();
+    }
+
+    #[test]
+    fn el_ecotono_solo_actua_en_la_frontera() {
+        // P1.2: la ventana efectiva es `w_secondary` en [0.15, 0.50].
+        assert_eq!(ecotone_window(0.0), 0.0);
+        assert_eq!(ecotone_window(0.10), 0.0);
+        assert!(ecotone_window(0.50) >= 0.999);
+        let a = ecotone_window(0.25);
+        let b = ecotone_window(0.40);
+        assert!(a > 0.0 && a < b && b < 1.0, "ecotono no monotono");
     }
 
     #[test]

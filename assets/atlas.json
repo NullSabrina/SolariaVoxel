@@ -1,0 +1,163 @@
+{
+  "cols": 8,
+  "generator": "cargo run --release --example gen_atlas",
+  "height": 96,
+  "rows": 3,
+  "source": "Minetest Game (CC0) + derivados",
+  "tile": 32,
+  "tiles": [
+    {
+      "h": 32,
+      "index": 0,
+      "name": "grass_top",
+      "w": 32,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "h": 32,
+      "index": 1,
+      "name": "grass_side",
+      "w": 32,
+      "x": 32,
+      "y": 0
+    },
+    {
+      "h": 32,
+      "index": 2,
+      "name": "dirt",
+      "w": 32,
+      "x": 64,
+      "y": 0
+    },
+    {
+      "h": 32,
+      "index": 3,
+      "name": "stone",
+      "w": 32,
+      "x": 96,
+      "y": 0
+    },
+    {
+      "h": 32,
+      "index": 4,
+      "name": "sand",
+      "w": 32,
+      "x": 128,
+      "y": 0
+    },
+    {
+      "h": 32,
+      "index": 5,
+      "name": "wood_side",
+      "w": 32,
+      "x": 160,
+      "y": 0
+    },
+    {
+      "h": 32,
+      "index": 6,
+      "name": "wood_top",
+      "w": 32,
+      "x": 192,
+      "y": 0
+    },
+    {
+      "h": 32,
+      "index": 7,
+      "name": "leaves",
+      "w": 32,
+      "x": 224,
+      "y": 0
+    },
+    {
+      "h": 32,
+      "index": 8,
+      "name": "torch",
+      "w": 32,
+      "x": 0,
+      "y": 32
+    },
+    {
+      "h": 32,
+      "index": 9,
+      "name": "snow",
+      "w": 32,
+      "x": 32,
+      "y": 32
+    },
+    {
+      "h": 32,
+      "index": 10,
+      "name": "water",
+      "w": 32,
+      "x": 64,
+      "y": 32
+    },
+    {
+      "h": 32,
+      "index": 11,
+      "name": "planks",
+      "w": 32,
+      "x": 96,
+      "y": 32
+    },
+    {
+      "h": 32,
+      "index": 12,
+      "name": "crafting_side",
+      "w": 32,
+      "x": 128,
+      "y": 32
+    },
+    {
+      "h": 32,
+      "index": 13,
+      "name": "crafting_top",
+      "w": 32,
+      "x": 160,
+      "y": 32
+    },
+    {
+      "h": 32,
+      "index": 14,
+      "name": "coarse_dirt",
+      "w": 32,
+      "x": 192,
+      "y": 32
+    },
+    {
+      "h": 32,
+      "index": 15,
+      "name": "gravel",
+      "w": 32,
+      "x": 224,
+      "y": 32
+    },
+    {
+      "h": 32,
+      "index": 16,
+      "name": "podzol_top",
+      "w": 32,
+      "x": 0,
+      "y": 64
+    },
+    {
+      "h": 32,
+      "index": 17,
+      "name": "lava",
+      "w": 32,
+      "x": 32,
+      "y": 64
+    },
+    {
+      "h": 32,
+      "index": 18,
+      "name": "obsidian",
+      "w": 32,
+      "x": 64,
+      "y": 64
+    }
+  ],
+  "width": 256
+}

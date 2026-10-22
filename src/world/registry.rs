@@ -227,7 +227,8 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         id: 6,
         name: "leaves",
         face_tiles: all(7),
-        solid: false,
+        // Solidas para colision (no se atraviesan), pero cutout: no ocluyen.
+        solid: true,
         visible: true,
         render: RenderKind::Cutout,
         fluid: FluidKind::None,
@@ -576,8 +577,9 @@ mod tests {
         assert!(!Block::Torch.is_solid());
         assert!(Block::Torch.is_visible());
         assert_eq!(Block::Torch.light_emission(), 14);
-        assert!(!Block::Leaves.is_solid());
+        assert!(Block::Leaves.is_solid(), "las hojas no se atraviesan");
         assert!(Block::Leaves.is_visible());
+        assert!(!Block::Leaves.occludes(), "pero su cutout no ocluye");
         assert!(Block::Water.is_liquid());
         assert!(Block::Lava.is_liquid());
         assert!(Block::Lava.blocks_fluid());

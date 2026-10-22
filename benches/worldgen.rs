@@ -7,7 +7,10 @@
 //! construir una ventana y `hydro_sample` el de muestrearla.
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use solaria_voxel::world::worldgen::larion::{HydroWindow, LarionConfig, LarionGenerator};
+use solaria_voxel::world::worldgen::larion::{
+    Fractal2D, HydroWindow, LarionConfig, LarionGenerator, ScalarField2D, SimdFractal2D,
+};
+use solaria_voxel::world::worldgen::{Species, TreePlacer};
 use solaria_voxel::world::{GeneratorKind, TerrainGenerator};
 
 fn bench_worldgen(c: &mut Criterion) {
@@ -32,6 +35,79 @@ fn bench_worldgen(c: &mut Criterion) {
         b.iter(|| black_box(window.sample(123.0, -77.0)))
     });
     hydro.finish();
+
+    // --- P0.3: colocacion y forma de arboles. ---
+    let trees = TreePlacer::new(13_371);
+
+    let mut poisson = c.benchmark_group("poisson_candidate");
+    poisson.sample_size(50);
+    poisson.bench_function("maybe_64x64", |b| {
+        b.iter(|| {
+            let mut hits = 0u32;
+            for z in 0..64 {
+                for x in 0..64 {
+                    if trees.maybe_organic(x, z) {
+                        hits += 1;
+                    }
+                }
+            }
+            black_box(hits)
+        })
+    });
+    poisson.finish();
+
+    let mut placement = c.benchmark_group("tree_placement");
+    placement.sample_size(20);
+    placement.bench_function("organic_48x48", |b| {
+        b.iter(|| {
+            let mut n = 0u32;
+            for z in 0..48 {
+                for x in 0..48 {
+                    if trees
+                        .plan_organic(x, z, solaria_voxel::world::Biome::Forest, 70, 0, 0.8)
+                        .is_some()
+                    {
+                        n += 1;
+                    }
+                }
+            }
+            black_box(n)
+        })
+    });
+    placement.finish();
+
+    let mut sca = c.benchmark_group("space_colonization");
+    sca.sample_size(50);
+    sca.bench_function("oak", |b| {
+        b.iter(|| black_box(trees.shape_for_bench(123, -45, Species::Oak, 0xDEAD_BEEF)))
+    });
+    sca.finish();
+
+    // --- P1.1: lote de ruido escalar (legacy) vs SIMD (quick-noise). ---
+    let n = 18 * 18;
+    let xs: Vec<f64> = (0..n).map(|i| (i % 18) as f64 - 9.0).collect();
+    let zs: Vec<f64> = (0..n).map(|i| (i / 18) as f64 - 9.0).collect();
+    let legacy = Fractal2D::new(13371, 4, 1.0 / 1200.0);
+    let simd = SimdFractal2D::new(13371, 4, 1.0 / 1200.0);
+    let mut out = vec![0.0f32; n];
+
+    let mut noise = c.benchmark_group("noise_sample_many");
+    noise.sample_size(50);
+    noise.bench_function("legacy_324", |b| {
+        b.iter(|| {
+            for i in 0..n {
+                out[i] = legacy.sample(xs[i], zs[i]) as f32;
+            }
+            black_box(out.iter().copied().sum::<f32>())
+        })
+    });
+    noise.bench_function("simd_324", |b| {
+        b.iter(|| {
+            simd.sample_many(&xs, &zs, &mut out);
+            black_box(out.iter().copied().sum::<f32>())
+        })
+    });
+    noise.finish();
 }
 
 criterion_group!(benches, bench_worldgen);

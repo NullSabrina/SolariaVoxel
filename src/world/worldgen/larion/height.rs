@@ -39,6 +39,11 @@ pub struct LarionSample {
     /// Erosion hidrica aplicada (`>= 0`), de la ventana P0.1. En `version=1`
     /// vale 0: el pipeline historico no tiene esta etapa.
     pub hydro_erosion: f32,
+    /// Densidad de arboles `[0, 1]` de la columna (P0.3): clima continuo
+    /// (humedad/temperatura), bioma y supresion en cauces/agua. La pendiente se
+    /// aplica en el punto de colocacion (`terrain.rs`), porque una muestra 2D no
+    /// conoce a sus vecinas sin pagar cuatro muestreos extra.
+    pub tree_density: f32,
     /// Bioma principal seleccionado.
     pub biome: Biome,
     /// Bioma principal + secundario + peso de mezcla.

@@ -113,3 +113,10 @@ ejecutable en modo demo (ver `README.md`).
 | `graph_preview_13371.png` | Preview offline del grafo (mapa de altura + corte de densidad). |
 | `v0.44.4_sun_cube_tex.png` | Sol como cubo 3D con superficie moteada (textura por cara). |
 | `v0.44.4_moon_cube_tex.png` | Luna como cubo 3D con crateres y fase. |
+
+## Larion v2 y atlas CC0 (`v0.52`)
+
+| Captura | Que muestra |
+| ------- | ----------- |
+| `larion_13371_height_v1.png` | Relieve Larion v1 (pipeline historico, byte a byte). |
+| `larion_13371_height_v2.png` | Relieve Larion v2: hidrologia, arboles organicos y `density_youth`. |

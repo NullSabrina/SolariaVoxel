@@ -174,6 +174,13 @@ impl Block {
         registry::definition(self).render
     }
 
+    /// ¿Ocluye la cara de un vecino? Solo los opacos. Las hojas son solidas
+    /// para colision, pero su cutout deja ver a traves: no deben ocultar.
+    #[inline]
+    pub fn occludes(self) -> bool {
+        self.render_kind() == RenderKind::Opaque
+    }
+
     /// Dureza relativa. **Reservado** para los tiempos de minado (aun no usada).
     #[inline]
     pub fn hardness(self) -> f32 {
@@ -218,12 +225,13 @@ mod tests {
     }
 
     #[test]
-    fn no_bloquean_aire_antorcha_agua_y_hojas() {
+    fn no_bloquean_aire_antorcha_ni_agua_y_las_hojas_si_colisionan() {
         assert!(!Block::Air.is_solid());
         assert!(!Block::Torch.is_solid());
         assert!(!Block::Water.is_solid());
-        assert!(!Block::Leaves.is_solid());
+        assert!(Block::Leaves.is_solid(), "las hojas no se atraviesan");
         assert!(Block::Leaves.is_visible());
+        assert!(!Block::Leaves.occludes(), "pero su cutout no ocluye");
         assert!(Block::Grass.is_solid());
     }
 

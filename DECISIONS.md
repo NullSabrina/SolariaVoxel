@@ -4681,6 +4681,87 @@ release (ratio ~1.01×; ventana 89 ms amortizada). Tests:
 `test_column_hash_unchanged_v1`, `test_window_deterministic_1_vs_4_workers`,
 `larion_v2_activa_la_hidrologia_y_sigue_siendo_determinista`.
 
+## v0.52.0 - Atlas CC0, arboles organicos y Larion v2
+
+### 2026-10-22 - Atlas 32x32 compuesto desde CC0 (no procedural)
+
+**Decision.** `assets/atlas.png` pasa a **256x96** (8x3 tiles de **32x32**)
+compuesto por `tools/gen_atlas.ps1` desde PNG 16x16 CC0 de Minetest Game
+(escalados 2x nearest). El runtime lo sube como **texture array** con mipmaps
+por capa generados en CPU. `atlas::build_pixels()` queda como fallback si falta
+el PNG.
+
+**Motivo.** El atlas procedural 16x16 se veia plano y con ruido por pixel; las
+texturas CC0 dan bases legibles y el tile 32x32 reduce el aliasing al mirar de
+lejos. La cadena de mips por capa evita el sangrado entre tiles vecinos (un
+mipmap global mezclaria hojas con piedra).
+
+**Consecuencia.** `TILE = 32`, `COLS = 8`, `TILE_NAMES` documenta los 19 tiles.
+`default_grass_side` se compone sobre `default_dirt` (Minetest lo entrega como
+overlay transparente) y las hojas se densifican al ~13% de huecos.
+
+### 2026-10-22 - Las hojas son solidas para colision pero no ocluyen
+
+**Decision.** `Block::Leaves.is_solid()` pasa a `true`; se anade
+`Block::occludes()` (solo `RenderKind::Opaque`) y el mesher lo usa para el
+culling. Las hojas se cortan contra cualquier vecino no-aire, pero no ocultan la
+cara de un bloque opaco vecino.
+
+**Motivo.** Antes las hojas se atravesaban al caminar y ademas se usaban como
+oclusor, lo que dejaba huecos en las caras de los troncos. Separar **colision**
+(solido) de **oclusion** (opaco) resuelve ambos sin cambiar el cutout.
+
+**Consecuencia.** Tests de `block.rs` y `registry.rs` actualizados; `greedy.rs`
+usa `occludes()` en lugar de `is_solid()` para decidir caras.
+
+### 2026-10-22 - Arboles organicos v2 por Poisson + Space Colonization
+
+**Decision.** Con `generator_config >= 2` los arboles usan colocacion **Poisson
+por dart throwing global** (celda de 4 bloques, 3 candidatos, radio 2.5-7) y un
+esqueleto de ramas por *Space Colonization* voxelizado a troncos de 1-2 bloques.
+El camino v1 (hash + elipsoide) se conserva intacto para los mundos existentes.
+
+**Motivo.** El elipsoide de v1 repetia silueta y no tenia ramas. Poisson global
+no depende del orden de generacion ni del chunk, asi que dos workers producen el
+mismo bosque; SCA da troncos ramificados y copas irregulares sin plantillas.
+
+**Consecuencia.** `TreePlacer::maybe_organic` / `plan_organic` /
+`shape_for_bench`; `ORGANIC_MARGIN = 5`; benchmarks `poisson_candidate`,
+`tree_placement` y `space_colonization`; tests de distancia minima, ramas y
+cruce de chunks.
+
+### 2026-10-22 - Cuevas worm (P1.4) para conectar sistemas
+
+**Decision.** `CaveSystem::new_with_worms` anade una red de **worms** (cubicas de
+Bezier + conectores rectos entre celdas de 64 bloques, 2 worms/celda) que se
+excava ademas de los sistemas jerarquicos. Se activa con
+`generator_config >= 2`.
+
+**Motivo.** Los sistemas por umbral (spaghetti/cheese) producen cavidades
+aisladas: muchas cuevas sin salida. Los worms garantizan un grafo conectado sin
+depender de un post-proceso global.
+
+**Consecuencia.** `WormField`, `WORM_CELL = 64`, `MAX_WORMS = 26`;
+`examples/cave_connectivity.rs` mide la componente mayor y las islas.
+
+### 2026-10-22 - Larion v2: ruido SIMD y banda de densidad variable
+
+**Decision.** `LarionGenerator::with_version(_, _, 2)` usa `quick-noise` por
+lotes con despacho **runtime** SIMD y cuantiza la salida a 1/4096 para que el
+resultado no dependa de FMA/arquitectura. La geografia se evalua por rejilla
+(`geography_grid`). `DensityField::density_youth` escala banda y amplitud con la
+edad del relieve (erosion + montana).
+
+**Motivo.** El perfil mostraba el ruido escalar como coste dominante del
+worldgen. SIMD reduce el coste sin exigir `target-cpu=native`. La banda fija
+generaba voladizos tambien en llanuras; hacerla dependiente de `youth` los
+reserva a montana joven y suaviza el resto.
+
+**Consecuencia.** `FractalField2D` / `RidgedField2D` / `SimdFractal2D`,
+`SIMD_FBM_GAIN = 0.65`, `NOISE_QUANT = 4096`; `LarionConfig::version`; v1
+conserva `test_column_hash_unchanged_v1`. **Pendiente**: baseline de hash para
+v2 (hoy solo v1 esta blindado).
+
 ## Plantilla para nuevas entradas
 
 ```

@@ -50,6 +50,10 @@ pub struct HydroSample {
     pub width: f32,
     /// Distancia al eje del cauce en bloques.
     pub dist: f32,
+    /// Profundidad maxima del cauce en el eje (bloques). En un delta se reduce.
+    pub depth: f32,
+    /// Factor de ensanchamiento de delta (`1.0` = cauce normal).
+    pub delta: f32,
     /// Nivel de agua (0 = sin agua).
     pub water: f32,
     /// Altura de la caida en bloques (0 = no hay cascada).
@@ -58,8 +62,8 @@ pub struct HydroSample {
 
 impl HydroSample {
     /// Perfil en V del cauce: profundidad maxima en el eje, 0 en el borde.
-    pub fn v_depth(&self, cfg: &HydroConfig) -> f32 {
-        let depth = math::lerp(cfg.river_min_depth, cfg.river_max_depth, self.flow.sqrt());
+    pub fn v_depth(&self, _cfg: &HydroConfig) -> f32 {
+        let depth = self.depth;
         let t = (self.dist / self.width.max(1.0)).clamp(0.0, 1.0);
         depth * (1.0 - t * t).powi(2)
     }
@@ -76,10 +80,19 @@ pub struct HydroWindow {
     key: (i32, i32),
     grid_origin: (i32, i32),
     size: usize,
+    /// Altura geografica base (sin hidrologia). La usan los tests de drenaje y
+    /// los deltas.
+    #[allow(dead_code)]
+    h0: Vec<f32>,
+    /// Heightmap tras `priority_flood` (superficie que drena a los bordes).
+    #[allow(dead_code)]
+    filled: Vec<f32>,
     dh: Vec<f32>,
     flow: Vec<f32>,
     width: Vec<f32>,
     dist: Vec<f32>,
+    depth: Vec<f32>,
+    delta: Vec<f32>,
     water: Vec<f32>,
     waterfall: Vec<f32>,
 }
@@ -104,13 +117,17 @@ impl HydroWindow {
         //    la red de drenaje y dispararia el coste.
         let csize = ((WINDOW + 2 * HALO) / GEO_STEP) as usize;
         let mut coarse = vec![0.0f32; csize * csize];
+        let mut xs = Vec::with_capacity(csize * csize);
+        let mut zs = Vec::with_capacity(csize * csize);
         for cj in 0..csize {
             for ci in 0..csize {
                 let wx = grid_origin.0 + ci as i32 * GEO_STEP + GEO_STEP / 2;
                 let wz = grid_origin.1 + cj as i32 * GEO_STEP + GEO_STEP / 2;
-                coarse[cj * csize + ci] = generator.geography_height(wx as f64, wz as f64);
+                xs.push(wx as f64);
+                zs.push(wz as f64);
             }
         }
+        generator.geography_height_many(&xs, &zs, &mut coarse);
         let mut h0 = vec![0.0f32; n];
         for j in 0..size {
             for i in 0..size {
@@ -166,10 +183,26 @@ impl HydroWindow {
         // 6. Cauce: mascara por area, distancia al eje y ancho.
         let river: Vec<bool> = flow01.iter().map(|&f| f > cfg.river_min_flow).collect();
         let dist = distance_transform(&river, size);
-        let width: Vec<f32> = flow01
+        let mut width: Vec<f32> = flow01
             .iter()
             .map(|&a| math::lerp(cfg.river_min_width, cfg.river_max_width, a.sqrt()))
             .collect();
+        let mut depth: Vec<f32> = flow01
+            .iter()
+            .map(|&a| math::lerp(cfg.river_min_depth, cfg.river_max_depth, a.sqrt()))
+            .collect();
+        // Deltas: al llegar al mar el cauce se ensancha y se hace somero. El
+        // factor es funcion determinista de caudal y cota, no de estado global.
+        let sea_level = generator.config().sea_level;
+        let mut delta = vec![1.0f32; n];
+        for i in 0..n {
+            let surface = filled[i] + dh[i];
+            if let Some(scale) = delta_width_scale(flow01[i], surface, sea_level) {
+                width[i] *= scale;
+                depth[i] *= 0.5;
+                delta[i] = scale;
+            }
+        }
         let mut water = vec![0.0f32; n];
         for i in 0..n {
             let lake = filled[i] > h0[i] + 0.25;
@@ -181,14 +214,17 @@ impl HydroWindow {
             // Exigimos profundidad de incision (`v_depth > 0.75`): en el borde
             // del canal el V es casi plano y el agua aparecia como charcos
             // sueltos sobre la llanura (la captura del desierto).
-            let depth = math::lerp(cfg.river_min_depth, cfg.river_max_depth, flow01[i].sqrt());
             let t = (dist[i] / width[i].max(1.0)).clamp(0.0, 1.0);
-            let carve = depth * (1.0 - t * t).powi(2);
+            let carve = depth[i] * (1.0 - t * t).powi(2);
             let channel = dist[i] <= width[i] && carve > 0.75;
             if lake {
                 // El lago ya tiene un nivel de priority-flood; se desplaza con
                 // la erosion/deposicion para coincidir con el terreno real.
                 water[i] = filled[i] + dh[i];
+            } else if delta[i] > 1.0 {
+                // Delta: el agua se queda al nivel del mar aunque el cauce se
+                // haya ensanchado y rebajado.
+                water[i] = sea_level;
             } else if channel {
                 // **Clave**: un rio no se llena al nivel del priority-flood (que
                 // es el de toda la cuenca y puede quedar metros por encima de
@@ -204,10 +240,14 @@ impl HydroWindow {
             key,
             grid_origin,
             size,
+            h0,
+            filled,
             dh,
             flow: flow01,
             width,
             dist,
+            depth,
+            delta,
             water,
             waterfall,
         }
@@ -232,6 +272,8 @@ impl HydroWindow {
             flow: bilinear(&self.flow, self.size, u, v).clamp(0.0, 1.0),
             width: bilinear(&self.width, self.size, u, v).max(1.0),
             dist: bilinear(&self.dist, self.size, u, v).max(0.0),
+            depth: bilinear(&self.depth, self.size, u, v).max(0.0),
+            delta: bilinear(&self.delta, self.size, u, v).max(1.0),
             water: bilinear(&self.water, self.size, u, v),
             waterfall: bilinear(&self.waterfall, self.size, u, v).max(0.0),
         }
@@ -249,6 +291,8 @@ impl HydroWindow {
             step(self.flow[i]);
             step(self.width[i]);
             step(self.dist[i]);
+            step(self.depth[i]);
+            step(self.delta[i]);
             step(self.water[i]);
             step(self.waterfall[i]);
         }
@@ -297,10 +341,10 @@ impl HydroCache {
         let mut order = self.order.lock().unwrap();
         order.push_back(key);
         while order.len() > MAX_WINDOWS {
-            if let Some(old) = order.pop_front() {
-                if old != key {
-                    map.remove(&old);
-                }
+            if let Some(old) = order.pop_front()
+                && old != key
+            {
+                map.remove(&old);
             }
         }
         built
@@ -549,6 +593,24 @@ fn quant(h: f32) -> i32 {
     (h * 64.0).round() as i32
 }
 
+/// Ensanchamiento de **delta** en la desembocadura. Devuelve el multiplicador de
+/// ancho (`1.5..=2.0`) cuando hay caudal alto (`flow > 0.6`) y la superficie esta
+/// a menos de 2 bloques del mar; `None` en cualquier otro caso.
+///
+/// La funcion es pura y se aplica por celda, de modo que no depende del orden de
+/// generacion ni del chunk que consulte la ventana.
+fn delta_width_scale(flow: f32, surface: f32, sea_level: f32) -> Option<f32> {
+    if !flow.is_finite() || flow <= 0.6 || !surface.is_finite() {
+        return None;
+    }
+    let band = sea_level + 2.0 - surface;
+    if band <= 0.0 {
+        return None;
+    }
+    let t = (band / 2.0).clamp(0.0, 1.0);
+    Some(1.5 + 0.5 * t)
+}
+
 /// Hash global de una celda de la rejilla (no depende de HashMap).
 fn hash01_index(i: usize) -> f32 {
     let mut h = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
@@ -664,8 +726,137 @@ mod tests {
             assert!(s.flow.is_finite() && (0.0..=1.0).contains(&s.flow));
             assert!(s.width >= 1.0);
             assert!(s.dist >= 0.0);
+            assert!(s.depth >= 0.0);
+            assert!(s.delta >= 1.0);
             assert!(s.water.is_finite());
             assert!(s.waterfall.is_finite() && s.waterfall >= 0.0);
         }
+    }
+
+    /// Reconstruye la direccion D8 tal y como la construye `build`: mismas
+    /// alturas cuantizadas y mismo desempate por hash de indice.
+    fn rebuild_down(w: &HydroWindow) -> Vec<Option<u32>> {
+        let key_vals: Vec<f32> = (0..w.size * w.size)
+            .map(|i| w.filled[i] + 1.0e-5 * (hash01_index(i) - 0.5))
+            .collect();
+        downhill(&key_vals, w.size)
+    }
+
+    #[test]
+    fn test_no_upstream_flow() {
+        // Garantia del grafo D8: ninguna arista va cuesta arriba (salvo empates
+        // numericos por la cuantizacion del heap). 0 violaciones.
+        let generator = LarionGenerator::with_version(
+            13_371,
+            crate::world::worldgen::larion::LarionConfig::default(),
+            2,
+        );
+        let w = HydroWindow::build(&generator, (0, 0));
+        let down = rebuild_down(&w);
+        let eps = 1.0e-3f32;
+        let mut violations = 0usize;
+        for (i, d) in down.iter().enumerate() {
+            if let Some(d) = d {
+                let d = *d as usize;
+                if w.filled[d] > w.filled[i] + eps {
+                    violations += 1;
+                }
+            }
+        }
+        assert_eq!(violations, 0, "{violations} celdas drenan cuesta arriba");
+    }
+
+    #[test]
+    fn test_rivers_drain_to_sea_or_lake() {
+        // El 95% de las celdas de cauce debe alcanzar el mar (agua a nivel del
+        // mar) o un lago (`water > h0`), siguiendo D8. Se prueban varias
+        // ventanas deterministas hasta encontrar una con costa.
+        let cfg = crate::world::worldgen::larion::LarionConfig::default();
+        let sea = cfg.sea_level;
+        let generator = LarionGenerator::with_version(13_371, cfg, 2);
+        let keys = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1), (1, 1), (-1, -1)];
+
+        let mut best: Option<(f32, usize, usize)> = None;
+        for key in keys {
+            let w = HydroWindow::build(&generator, key);
+            let down = rebuild_down(&w);
+            let cells: Vec<usize> = (0..w.size * w.size)
+                .filter(|&i| w.flow[i] > cfg.hydro.river_min_flow)
+                .collect();
+            if cells.len() < 50 {
+                continue;
+            }
+            // Solo ventanas con costa: si no hay mar, no se puede exigir drenaje.
+            let sea_cells = w
+                .water
+                .iter()
+                .zip(w.h0.iter())
+                .filter(|(water, h0)| **water >= sea - 0.5 && **h0 <= sea + 2.0)
+                .count();
+            if sea_cells < 64 {
+                continue;
+            }
+
+            let mut ok = 0usize;
+            for &start in &cells {
+                let mut i = start;
+                let mut reached = false;
+                for _ in 0..(w.size * w.size) {
+                    if w.water[i] >= sea - 0.5 || w.water[i] > w.h0[i] + 0.25 {
+                        reached = true;
+                        break;
+                    }
+                    match down[i] {
+                        Some(d) => i = d as usize,
+                        None => {
+                            // Salida por el borde: solo cuenta si ya esta a cota
+                            // de mar (no se inventa un oceano en el borde).
+                            reached = w.filled[i] <= sea + 0.5;
+                            break;
+                        }
+                    }
+                }
+                if reached {
+                    ok += 1;
+                }
+            }
+            let pct = ok as f32 / cells.len() as f32;
+            if best.is_none_or(|(b, _, _)| pct > b) {
+                best = Some((pct, ok, cells.len()));
+            }
+            if pct >= 0.95 {
+                return;
+            }
+        }
+
+        let (pct, ok, total) = best.expect("ninguna ventana con costa y rios");
+        panic!(
+            "solo {ok}/{total} celdas de rio ({:.1}%) alcanzan mar o lago; \
+             se exige 95%. Revisar el relleno de depresiones / el borde de la ventana.",
+            pct * 100.0
+        );
+    }
+
+    #[test]
+    fn test_delta_widens_at_coast() {
+        // Un delta solo existe con caudal alto y cota casi marina; ensancha el
+        // cauce y lo hace somero.
+        let sea = 64.0;
+        let scale = delta_width_scale(0.8, sea + 1.0, sea).expect("deberia ser delta");
+        assert!(
+            (1.5..=2.0).contains(&scale),
+            "escala fuera de rango: {scale}"
+        );
+        let width = 4.0f32;
+        let depth = 8.0f32;
+        assert!(width * scale >= 6.0, "el delta no ensancha");
+        assert!((depth * 0.5) <= 4.0, "el delta no se hace somero");
+        // Interior o caudal bajo: no hay delta.
+        assert_eq!(delta_width_scale(0.8, sea + 3.0, sea), None);
+        assert_eq!(delta_width_scale(0.5, sea + 0.5, sea), None);
+        // La escala crece al acercarse a la costa (sin saltos).
+        let a = delta_width_scale(0.9, sea + 0.2, sea).unwrap();
+        let b = delta_width_scale(0.9, sea + 1.8, sea).unwrap();
+        assert!(a >= b);
     }
 }

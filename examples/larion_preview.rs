@@ -5,8 +5,8 @@
 //!
 //! Uso:
 //! ```text
-//! cargo run --release --example larion_preview -- [seed] [pixels] [step] [layer]
-//! cargo run --release --example larion_preview -- 13371 512 6 height
+//! cargo run --release --example larion_preview -- [seed] [pixels] [step] [layer] [version]
+//! cargo run --release --example larion_preview -- 13371 512 6 height 2
 //! ```
 //!
 //! `layer`:
@@ -59,11 +59,12 @@ fn main() {
     let pixels = arg_or(&args, 2, 512).clamp(16, 4096) as usize;
     let step = arg_or(&args, 3, 6).clamp(1, 128) as i32;
     let layer = args.get(4).cloned().unwrap_or_else(|| "height".to_string());
+    let version = arg_or(&args, 5, 1).clamp(1, 2) as u32;
 
-    let g = LarionGenerator::new(seed);
+    let g = LarionGenerator::with_version(seed, LarionConfig::default(), version);
     let cfg = *g.config();
     println!(
-        "[larion] seed={seed} pixels={pixels} step={step} layer={layer} (LARION_CONFIG_VERSION {})",
+        "[larion] seed={seed} pixels={pixels} step={step} layer={layer} version={version} (LARION_CONFIG_VERSION {})",
         solaria_voxel::world::worldgen::larion::LARION_CONFIG_VERSION
     );
 
@@ -75,7 +76,7 @@ fn main() {
         _ => render_map(&g, &cfg, &mut img, pixels, step, origin, &layer),
     }
 
-    let path = format!("screenshots/larion_{seed}_{layer}.png");
+    let path = format!("screenshots/larion_{seed}_{layer}_v{version}.png");
     std::fs::create_dir_all("screenshots").ok();
     let file = std::fs::File::create(&path).expect("crear PNG");
     let mut enc = png::Encoder::new(BufWriter::new(file), pixels as u32, pixels as u32);

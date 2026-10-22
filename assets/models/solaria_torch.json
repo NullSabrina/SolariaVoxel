@@ -1,0 +1,33 @@
+{
+  "texture_size": 32,
+  "textures": {
+    "torch": "8"
+  },
+  "elements": [
+    {
+      "name": "stick",
+      "from": [7, 0, 7],
+      "to": [9, 10, 9],
+      "faces": {
+        "north": { "texture": "#torch", "uv": [13, 16, 19, 32] },
+        "south": { "texture": "#torch", "uv": [13, 16, 19, 32] },
+        "east":  { "texture": "#torch", "uv": [13, 16, 19, 32] },
+        "west":  { "texture": "#torch", "uv": [13, 16, 19, 32] },
+        "up":    { "texture": "#torch", "uv": [13, 13, 19, 16] },
+        "down":  { "texture": "#torch", "uv": [13, 16, 19, 19] }
+      }
+    },
+    {
+      "name": "flame",
+      "from": [6.5, 10, 6.5],
+      "to": [9.5, 15, 9.5],
+      "faces": {
+        "north": { "texture": "#torch", "uv": [8, 2, 24, 15] },
+        "south": { "texture": "#torch", "uv": [8, 2, 24, 15] },
+        "east":  { "texture": "#torch", "uv": [8, 2, 24, 15] },
+        "west":  { "texture": "#torch", "uv": [8, 2, 24, 15] },
+        "up":    { "texture": "#torch", "uv": [10, 2, 22, 10] }
+      }
+    }
+  ]
+}

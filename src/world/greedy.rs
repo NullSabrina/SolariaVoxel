@@ -224,10 +224,8 @@ where
         }
     }
 
-    // Antorchas: geometria propia (dos quads cruzados), no entra en el greedy
-    // porque cada una es un objeto fino, no una cara de cubo. Las caras de los
-    // bloques solidos vecinos ya se han emitido arriba: una antorcha no ocluye
-    // (el vecino solo oculta si es solido).
+    // Antorchas: modelo 3D (palo + llama), no entra en el greedy porque cada
+    // una es un objeto fino, no una cara de cubo.
     for y in y_start..y_end {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
@@ -288,7 +286,7 @@ where
         // Los liquidos (agua, lava) son visibles pero no solidos: solo asoma
         // su cara contra **aire** (no contra liquido ni contra un solido, que
         // la ocluye).
-        if neighbor.is_liquid() || neighbor.is_solid() {
+        if neighbor.is_liquid() || neighbor.occludes() {
             return None;
         }
     } else if block == Block::Leaves {
@@ -299,7 +297,7 @@ where
         if neighbor != Block::Air {
             return None;
         }
-    } else if !block.is_solid() || neighbor.is_solid() {
+    } else if !block.is_solid() || neighbor.occludes() {
         // La antorcha (visible no solida) y el aire no entran en el greedy de
         // cubos; solo se oculta una cara si el vecino es SOLIDO.
         return None;
@@ -524,8 +522,6 @@ mod tests {
         let mut column = Column::empty();
         column.set(8, 8, 8, Block::Torch);
         let (vertices, indices) = greedy_column(&column, [0.0; 3]);
-        // Dos planos x 4 vertices; cada plano con las dos orientaciones (4 tri).
-        // Dos planos cruzados; cada uno con las dos orientaciones.
         assert_eq!(vertices.len(), 8, "dos planos cruzados");
         assert_eq!(indices.len(), 24);
         assert!(vertices.iter().all(|v| v.tile == 8));

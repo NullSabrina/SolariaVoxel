@@ -556,10 +556,12 @@ impl App {
         // El giro es **por frame**: el delta del raton es de este frame, no de un
         // paso de simulacion. Se consume una sola vez.
         let (dx, dy) = self.input.take_mouse_delta();
-        if self.mouse_locked && playing && (dx != 0.0 || dy != 0.0) {
-            if let Some(camera) = self.camera.as_mut() {
-                camera.add_look(dx, dy);
-            }
+        if self.mouse_locked
+            && playing
+            && (dx != 0.0 || dy != 0.0)
+            && let Some(camera) = self.camera.as_mut()
+        {
+            camera.add_look(dx, dy);
         }
 
         // En demo o en menus la simulacion se congela. Con el inventario/mesa
@@ -837,10 +839,10 @@ impl App {
         let target = [hit.block[0] + ox, hit.block[1] + oy, hit.block[2] + oz];
 
         // Evitamos colocar un bloque dentro del propio jugador.
-        if let Some(camera) = self.camera.as_ref() {
-            if crate::player::block_overlaps_player(target, camera.position) {
-                return;
-            }
+        if let Some(camera) = self.camera.as_ref()
+            && crate::player::block_overlaps_player(target, camera.position)
+        {
+            return;
         }
         let block = self.hotbar_block_sel();
         if let Some(renderer) = self.renderer.as_mut() {
@@ -1747,17 +1749,17 @@ impl App {
                         .name("solaria-world-delete".to_string())
                         .spawn(move || {
                             let _ = join.join();
-                            if let Err(e) = std::fs::remove_dir_all(&dir) {
-                                if e.kind() != std::io::ErrorKind::NotFound {
-                                    eprintln!("[world] no se pudo borrar {dir:?}: {e}");
-                                }
+                            if let Err(e) = std::fs::remove_dir_all(&dir)
+                                && e.kind() != std::io::ErrorKind::NotFound
+                            {
+                                eprintln!("[world] no se pudo borrar {dir:?}: {e}");
                             }
                         })
                         .ok();
-                } else if let Err(e) = std::fs::remove_dir_all(&dir) {
-                    if e.kind() != std::io::ErrorKind::NotFound {
-                        eprintln!("[world] no se pudo borrar {dir:?}: {e}");
-                    }
+                } else if let Err(e) = std::fs::remove_dir_all(&dir)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    eprintln!("[world] no se pudo borrar {dir:?}: {e}");
                 }
                 // Quita el mundo de la lista YA (no esperar al disco).
                 self.worlds.retain(|w| w.slug != slug);
@@ -3197,6 +3199,25 @@ impl ApplicationHandler for App {
 mod tests {
     use super::*;
     use crate::world::WorldSave;
+
+    #[test]
+    fn el_inventario_no_pausa_el_reloj_del_mundo() {
+        // El overlay creativo congela el input del jugador, NO el tiempo del
+        // mundo: dia, agua y autosave deben seguir avanzando.
+        let mut app = App {
+            screens: ScreenStack::with_playing(),
+            demo: false,
+            inventory_open: true,
+            autosave_period: 1.0e9,
+            ..Default::default()
+        };
+        let before = app.water_timer;
+        app.update(0.05);
+        assert!(
+            app.water_timer > before,
+            "el agua se congelo con el inventario"
+        );
+    }
 
     #[test]
     fn el_timestep_fijo_da_pasos_constantes() {

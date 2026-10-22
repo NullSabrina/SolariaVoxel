@@ -8,8 +8,25 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.48.0` — integridad de guardado y auditoría
+## Estado actual: `v0.52.0` — atlas CC0 y worldgen orgánico
 
+- **Atlas 32x32 CC0** (`v0.52.0`): el atlas pasa de 16x16 procedural a **32x32**
+  compuesto desde texturas CC0 de Minetest Game (`tools/gen_atlas.ps1`), cargado
+  como **texture array** con mipmaps por capa (`atlas::mip_chain`). Hojas
+  densificadas (~13% de huecos) y cara lateral de hierba compuesta
+  (tierra + overlay), sin transparencias accidentales. Bloque de antorcha con
+  **modelo cuboide JSON** (`world/block_model.rs`).
+- **Árboles orgánicos P0.3** (`generator_config = 2`): colocación **Poisson
+  determinista** + esqueleto de ramas por *Space Colonization* voxelizado. La
+  copa ya no es un elipsoide: tiene troncos ramificados de 1–2 bloques y cruza
+  chunks entera. El camino legacy (`v1`) se conserva byte a byte.
+- **Cuevas P1.4**: red de **worms** (Bézier + conectores) que garantiza
+  conectividad entre sistemas; `examples/cave_connectivity.rs` mide la componente
+  mayor. `CaveSystem::new_with_worms` se activa con `generator_config = 2`.
+- **Larion v2 / P1.1 y P1.3**: ruido 2D por lotes con **SIMD** (`quick-noise`,
+  despacho runtime AVX2/AVX512/SSE) cuantizado para determinismo, geografía por
+  rejilla y `density_youth` (banda y amplitud variables: voladizos solo en
+  montaña joven). `Legacy16` y `Graph` **no cambian**.
 - **Auditoría P0/P1/P2 cerrada** (`v0.48.0`): un `world.vf` ilegible ya **no** se
   abre como mundo vacío ni sobrescribe el `.bak`; se recupera automáticamente
   desde `world.vf.bak` (el dañado queda en `world.vf.corrupt`). Además:
@@ -46,7 +63,7 @@ versionado del mundo y la generacion procedural.
   camino `graph`.
 
 Versiones: `GENERATOR_VERSION = 22` · `FORMAT_VERSION = 7` ·
-`LARION_CONFIG_VERSION = 1` · `Cargo.toml = 0.48.0`.
+`LARION_CONFIG_VERSION = 1` · `Cargo.toml = 0.52.0`.
 
 - **Overlay F3** (`v0.27.0`): pantalla de diagnostico en pantalla (dos columnas)
   con una **fuente bitmap 5x7** propia.

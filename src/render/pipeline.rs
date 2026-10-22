@@ -83,8 +83,8 @@ impl ScenePipeline {
             source: wgpu::ShaderSource::Wgsl(include_str!("scene.wgsl").into()),
         });
 
-        // 2. La textura del atlas (generada por codigo) y su sampler. El sampler
-        //    es "nearest" para que la pixel-art se vea nitida y no borrosa.
+        // 2. La textura del atlas (32x32) y su sampler. El array de capas evita
+        //    el sangrado; los mipmaps se generan por capa en CPU.
         let (atlas_texture, atlas_view) = Self::create_atlas_texture(device, queue);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene.atlas.sampler"),
@@ -92,8 +92,8 @@ impl ScenePipeline {
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
 
@@ -281,6 +281,8 @@ impl ScenePipeline {
         queue: &wgpu::Queue,
     ) -> (wgpu::Texture, wgpu::TextureView) {
         use crate::world::atlas::{TILE, TILES};
+        let mips = atlas::mip_chain(&atlas::load_pixels());
+        let mip_count = mips.len() as u32;
         let size = wgpu::Extent3d {
             width: TILE,
             height: TILE,
@@ -289,7 +291,7 @@ impl ScenePipeline {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene.atlas"),
             size,
-            mip_level_count: 1,
+            mip_level_count: mip_count,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -297,25 +299,33 @@ impl ScenePipeline {
             view_formats: &[],
         });
 
-        let tiles = atlas::split_tiles(&atlas::load_pixels());
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &tiles,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(TILE * 4),
-                rows_per_image: Some(TILE),
-            },
-            size,
-        );
+        let mut level_size = TILE;
+        for (level, data) in mips.iter().enumerate() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: level as u32,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(level_size * 4),
+                    rows_per_image: Some(level_size),
+                },
+                wgpu::Extent3d {
+                    width: level_size,
+                    height: level_size,
+                    depth_or_array_layers: TILES,
+                },
+            );
+            level_size = (level_size / 2).max(1);
+        }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
+            mip_level_count: Some(mip_count),
             ..Default::default()
         });
         (texture, view)
