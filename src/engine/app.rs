@@ -2127,7 +2127,9 @@ impl App {
             // Menus "de verdad": fondo de tierra tileado (como Minecraft), sin
             // el mundo detras. Solo el titulo y la pausa muestran la escena.
             let tile = Block::Dirt.face_tile(Face::PosY) as i32;
-            const TILE_PX: f32 = 64.0;
+            // Tiles mas grandes que antes: con 64 px el patron se leia como una
+            // alfombra ruidosa. 128 px deja ver el pixel-art sin fatigar.
+            const TILE_PX: f32 = 128.0;
             let mut y = 0.0;
             while y < win_h {
                 let mut x = 0.0;
@@ -2141,9 +2143,28 @@ impl App {
                 }
                 y += TILE_PX;
             }
+            // Dos capas de DIM: el fondo queda oscuro y el texto respira.
+            for _ in 0..2 {
+                quads.push(UiQuad {
+                    rect: [0.0, 0.0, win_w, win_h],
+                    uv: region_uv(gui::DIM),
+                    layer: -1,
+                });
+            }
+        }
+
+        // Panel central de madera: agrupa titulo, lista y botones, y evita que
+        // el texto flote sobre el ruido de la tierra.
+        // Panel central solo en los menus de pantalla completa; el titulo y la
+        // pausa dejan ver el mundo detras (solo con el DIM).
+        if top != Screen::Title && top != Screen::Pause {
+            let panel_w = (win_w - 80.0).clamp(360.0, 720.0);
+            let panel_h = (win_h - 48.0).clamp(320.0, 760.0);
+            let panel_x = ((win_w - panel_w) * 0.5).floor();
+            let panel_y = ((win_h - panel_h) * 0.5).floor();
             quads.push(UiQuad {
-                rect: [0.0, 0.0, win_w, win_h],
-                uv: region_uv(gui::DIM),
+                rect: [panel_x, panel_y, panel_w, panel_h],
+                uv: region_uv(gui::PANEL),
                 layer: -1,
             });
         }
@@ -2172,6 +2193,13 @@ impl App {
             40.0,
             scale,
         ));
+        // Separador fino bajo el titulo.
+        let line_w = (tw + 40.0).min(win_w - 100.0);
+        quads.push(UiQuad {
+            rect: [((win_w - line_w) * 0.5).floor(), 82.0, line_w, 1.0],
+            uv: region_uv(gui::SELECTION),
+            layer: -1,
+        });
 
         // Lista de mundos (selector).
         if top == Screen::WorldSelect {
@@ -2179,12 +2207,22 @@ impl App {
             let mut ly = 96.0;
             for (i, w) in self.worlds.iter().take(6).enumerate() {
                 let selected = i == self.world_sel;
-                let color = if selected { gui::SELECTION } else { gui::DIM };
+                // Fila siempre oscura; el seleccionado lleva marco dorado. Antes
+                // era fondo claro + texto blanco (ilegible).
                 quads.push(UiQuad {
                     rect: [list_x, ly, 360.0, 18.0],
-                    uv: region_uv(color),
+                    uv: region_uv(gui::DIM),
                     layer: -1,
                 });
+                if selected {
+                    for y in [ly, ly + 17.0] {
+                        quads.push(UiQuad {
+                            rect: [list_x, y, 360.0, 1.0],
+                            uv: region_uv(gui::SELECTION),
+                            layer: -1,
+                        });
+                    }
+                }
                 let tag = if w.corrupt { " (corrupto)" } else { "" };
                 let line = format!(
                     "{}{}  semilla {}  [{}]",
@@ -2198,6 +2236,31 @@ impl App {
                     "No hay mundos. Crea uno.",
                     list_x + 4.0,
                     ly,
+                    UI_SCALE,
+                ));
+            } else {
+                // Ficha del mundo seleccionado: rellena el hueco entre la lista
+                // y los botones y da contexto antes de entrar.
+                let card_y = ly + 8.0;
+                quads.push(UiQuad {
+                    rect: [list_x, card_y, 360.0, 54.0],
+                    uv: region_uv(gui::DIM),
+                    layer: -1,
+                });
+                let w = &self.worlds[self.world_sel.min(self.worlds.len() - 1)];
+                quads.extend(font::text_quads(
+                    &format!(
+                        "Semilla {}   |   {}   |   formato v{}",
+                        w.meta.seed, w.meta.generator_kind, w.meta.generator_config
+                    ),
+                    list_x + 8.0,
+                    card_y + 8.0,
+                    UI_SCALE,
+                ));
+                quads.extend(font::text_quads(
+                    "Pulsa Jugar o Enter para entrar",
+                    list_x + 8.0,
+                    card_y + 28.0,
                     UI_SCALE,
                 ));
             }
@@ -2299,8 +2362,32 @@ impl App {
             ));
         }
 
-        // Version del motor abajo a la izquierda.
+        // Version del motor abajo a la izquierda, sobre una banda oscura.
+        // Ayuda contextual en el pie del panel.
+        let hint = match top {
+            Screen::WorldSelect => "Enter = jugar   |   Esc = volver",
+            Screen::CreateWorld => "TAB = cambiar campo   |   Enter = aceptar",
+            Screen::Options => "Flechas = cambiar valor   |   Esc = volver",
+            Screen::Controls => "Enter = reasignar tecla   |   Esc = volver",
+            _ => "",
+        };
+        if !hint.is_empty() {
+            let hw = font::text_width(hint, UI_SCALE);
+            quads.extend(font::text_quads(
+                hint,
+                ((win_w - hw) * 0.5).floor(),
+                win_h - 52.0,
+                UI_SCALE,
+            ));
+        }
+
         let v = concat!("v", env!("CARGO_PKG_VERSION"));
+        let vw = font::text_width(v, UI_SCALE);
+        quads.push(UiQuad {
+            rect: [2.0, win_h - 16.0, vw + 8.0, 16.0],
+            uv: region_uv(gui::DIM),
+            layer: -1,
+        });
         quads.extend(font::text_quads(v, 6.0, win_h - 14.0, UI_SCALE));
         quads
     }
@@ -3140,7 +3227,7 @@ mod tests {
         let mut app = App::default();
         app.screens.replace(Screen::WorldSelect);
         let quads = app.build_menu_ui(1280.0, 720.0);
-        assert_eq!(quads[0].rect, [0.0, 0.0, 64.0, 64.0]);
+        assert_eq!(quads[0].rect, [0.0, 0.0, 128.0, 128.0]);
         assert_eq!(
             quads[0].layer,
             Block::Dirt.face_tile(Face::PosY) as i32,
