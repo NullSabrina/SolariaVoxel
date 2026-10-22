@@ -185,8 +185,18 @@ impl HydroWindow {
             let t = (dist[i] / width[i].max(1.0)).clamp(0.0, 1.0);
             let carve = depth * (1.0 - t * t).powi(2);
             let channel = dist[i] <= width[i] && carve > 0.75;
-            if lake || channel {
-                water[i] = filled[i];
+            if lake {
+                // El lago ya tiene un nivel de priority-flood; se desplaza con
+                // la erosion/deposicion para coincidir con el terreno real.
+                water[i] = filled[i] + dh[i];
+            } else if channel {
+                // **Clave**: un rio no se llena al nivel del priority-flood (que
+                // es el de toda la cuenca y puede quedar metros por encima de
+                // las orillas). Se llena hasta la superficie local **previa al
+                // corte en V** (`h0 + dh`); el V excavado queda por debajo y el
+                // agua queda contenida por los bancos. Antes `filled` producia
+                // una pared de agua vertical (captura v0.50).
+                water[i] = h0[i] + dh[i];
             }
         }
 

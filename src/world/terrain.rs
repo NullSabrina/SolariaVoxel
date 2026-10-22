@@ -546,7 +546,7 @@ impl TerrainGenerator {
                         let block = if coastal {
                             coastal_block(y, surface, variant)
                         } else {
-                            surface_block(y, surface, biome, variant, ecotone, slope, cfg)
+                            surface_block(y, surface, biome, variant, ecotone, slope, cfg, false)
                         };
                         column.set(x, y, z, block);
                     }
@@ -719,7 +719,7 @@ impl TerrainGenerator {
                     let block = if coastal {
                         coastal_block(y, height, variant)
                     } else {
-                        surface_block(y, height, biome, variant, ecotone, slope, cfg)
+                        surface_block(y, height, biome, variant, ecotone, slope, cfg, false)
                     };
                     column.set(x, y, z, block);
                 }
@@ -924,6 +924,7 @@ impl TerrainGenerator {
                         cfg,
                         s.temperature,
                         lcfg.snow_temperature,
+                        self.generator_config >= 2,
                     );
                     column.set(x, y, z, block);
                     top_solid = Some(y);
@@ -1144,6 +1145,7 @@ fn larion_surface_block(
     cfg: &WorldGenConfig,
     temperature: f32,
     snow_temperature: f32,
+    coherent: bool,
 ) -> Block {
     if y + 1 == height && height > 200 {
         return if temperature < snow_temperature {
@@ -1152,7 +1154,7 @@ fn larion_surface_block(
             Block::Stone
         };
     }
-    surface_block(y, height, biome, variant, 0.0, slope, cfg)
+    surface_block(y, height, biome, variant, 0.0, slope, cfg, coherent)
 }
 
 /// Fuerza del **ecotono** en `cell_edge` (0 en la frontera de celda, ~1 en el
@@ -1180,6 +1182,7 @@ fn transition_block(biome: Biome) -> Block {
 /// del borde de la celda de bioma, dithered por `variant` para que la frontera
 /// sea organica en vez de un parche cuadrado. `slope` (diferencia de altura con
 /// las 4 vecinas) hace aflorar roca en laderas y sedimento en los valles.
+#[allow(clippy::too_many_arguments)]
 fn surface_block(
     y: usize,
     height: usize,
@@ -1188,10 +1191,18 @@ fn surface_block(
     ecotone: f32,
     slope: i32,
     cfg: &WorldGenConfig,
+    coherent: bool,
 ) -> Block {
     if y + 1 == height {
         // Ladera empinada: aflora roca (piedra/grava) en vez de material blando.
-        if slope as f32 >= cfg.rock_slope {
+        // En v2 se exige mas pendiente: con `rock_slope = 3` las orillas de un
+        // rio se llenaban de parches de piedra/grava sueltos.
+        let rock_slope = if coherent {
+            cfg.rock_slope.max(5.0)
+        } else {
+            cfg.rock_slope
+        };
+        if slope as f32 >= rock_slope {
             return if variant > 0.0 {
                 Block::Stone
             } else {
@@ -1199,14 +1210,30 @@ fn surface_block(
             };
         }
         // Valle bajo y llano: sedimento, mezclado por ruido (no un manto uniforme).
+        // En v2 solo desierto/sabana reciben sedimento; antes una llanura o
+        // bosque bajo se cubria de arena/tierra gruesa por columnas (el tablero
+        // de ajedrez de la captura).
         if height as f32 <= cfg.sediment_height
             && slope <= 1
             && (1.0 - variant.abs() as f32) > cfg.sediment_chance
         {
-            return match biome {
-                Biome::Desert | Biome::Savanna => Block::Sand,
-                _ => Block::CoarseDirt,
+            let sediment = if coherent {
+                match biome {
+                    Biome::Desert => Some(Block::Sand),
+                    // Sabana: tierra gruesa, no arena (la arena de sabana era
+                    // otro foco de tablero de ajedrez).
+                    Biome::Savanna => Some(Block::CoarseDirt),
+                    _ => None,
+                }
+            } else {
+                Some(match biome {
+                    Biome::Desert | Biome::Savanna => Block::Sand,
+                    _ => Block::CoarseDirt,
+                })
             };
+            if let Some(block) = sediment {
+                return block;
+            }
         }
         // Ecotono: si estamos cerca de la frontera y el ruido local no es
         // extremo, sembramos el sustrato de transicion.
@@ -1576,17 +1603,17 @@ mod tests {
         let cfg = WorldGenConfig::default();
         // Ladera empinada -> roca (piedra/grava segun el ruido).
         assert!(matches!(
-            surface_block(69, 70, Biome::Plains, 0.3, 0.0, 5, &cfg),
+            surface_block(69, 70, Biome::Plains, 0.3, 0.0, 5, &cfg, false),
             Block::Stone | Block::Gravel
         ));
         // Valle bajo y llano -> sedimento (en bosque, tierra gruesa).
         assert_eq!(
-            surface_block(69, 70, Biome::Forest, 0.0, 0.0, 0, &cfg),
+            surface_block(69, 70, Biome::Forest, 0.0, 0.0, 0, &cfg, false),
             Block::CoarseDirt
         );
         // Llano alto, interior, ruido neutro -> material del bioma (hierba).
         assert_eq!(
-            surface_block(119, 120, Biome::Forest, 0.0, 0.0, 0, &cfg),
+            surface_block(119, 120, Biome::Forest, 0.0, 0.0, 0, &cfg, false),
             Block::Grass
         );
     }
