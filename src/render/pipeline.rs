@@ -235,7 +235,16 @@ impl ScenePipeline {
                 depth_write_enabled: Some(false),
                 depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
+                // P0.2: el agua es transparente y esta a `y + 0.875`; en la
+                // orilla roza la cara superior del bloque solido y el test de
+                // profundidad puede alternar pixel a pixel (lineas que dejan
+                // ver el fondo). Un bias negativo leve la acerca a la camara
+                // sin escribir depth.
+                bias: wgpu::DepthBiasState {
+                    constant: -2,
+                    slope_scale: -1.0,
+                    clamp: 0.0,
+                },
             }),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {

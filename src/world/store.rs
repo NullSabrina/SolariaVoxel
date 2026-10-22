@@ -107,8 +107,29 @@ impl World {
         kind: super::generator::GeneratorKind,
         restored: Vec<(ChunkPos, ChunkRecord)>,
     ) -> Self {
+        Self::with_kind_and_config(
+            seed,
+            view,
+            kind,
+            super::generator::LEGACY_GENERATOR_CONFIG,
+            restored,
+        )
+    }
+
+    /// Como [`World::with_kind`] pero eligiendo la version del pipeline Larion.
+    pub fn with_kind_and_config(
+        seed: u32,
+        view: ViewSettings,
+        kind: super::generator::GeneratorKind,
+        generator_config: u32,
+        restored: Vec<(ChunkPos, ChunkRecord)>,
+    ) -> Self {
         let mut world = Self {
-            generator: Arc::new(TerrainGenerator::with_kind(seed, kind)),
+            generator: Arc::new(TerrainGenerator::with_kind_and_config(
+                seed,
+                kind,
+                generator_config,
+            )),
             columns: HashMap::new(),
             modified: HashMap::new(),
             dirty: HashSet::new(),
@@ -437,10 +458,16 @@ impl World {
     fn wake_column_water(&mut self, pos: ChunkPos) {
         let mut cells: Vec<[i32; 3]> = Vec::new();
         self.collect_own_water(pos, &mut cells);
-        // Vecinos: agua en la cara compartida (incluye fuentes colocadas por el
-        // jugador, que no estan en `water_surface`).
+        // Vecinos: **solo** se despierta la cara compartida si esa columna fue
+        // editada (jugador o simulacion previa). El agua puramente generada es
+        // estatica, como en Minecraft: si se despertara al cargar el chunk
+        // vecino, un lago de worldgen con un borde abierto se derramaria por el
+        // canyon y "creceria" mientras el jugador camina (bug visto en P0.2).
         for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
             let n = ChunkPos::new(pos.x + dx, pos.z + dz);
+            if !self.dirty.contains(&n) && !self.modified.contains_key(&n) {
+                continue;
+            }
             let Some(column) = self.columns.get(&n) else {
                 continue;
             };
@@ -470,18 +497,16 @@ impl World {
         }
     }
 
-    /// Agua "propia" de una columna: la superficie generada y las celdas con
-    /// flujo restaurado. Las celdas de flujo salen de una cache por columna, sin
-    /// escanear las 98 304 celdas (P1-8).
+    /// Agua **dinamica** de una columna: solo las celdas con flujo restaurado.
+    /// La superficie de worldgen (`water_surface`) NO se despierta: es estatica.
+    /// Las celdas de flujo salen de una cache por columna, sin escanear las
+    /// 98 304 celdas (P1-8).
     fn collect_own_water(&mut self, pos: ChunkPos, out: &mut Vec<[i32; 3]>) {
         let ox = pos.x * CHUNK_SIZE as i32;
         let oz = pos.z * CHUNK_SIZE as i32;
         let Some(column) = self.columns.get_mut(&pos) else {
             return;
         };
-        for &[x, z, y] in column.water_surface() {
-            out.push([ox + x as i32, y as i32, oz + z as i32]);
-        }
         for &idx in column.flow_cells() {
             let (x, y, z) = Column::cell_of_index(idx);
             out.push([ox + x as i32, y as i32, oz + z as i32]);
@@ -1784,6 +1809,41 @@ mod tests {
             world.pending_water_cells(),
             0,
             "el agua generada no convergio en {ticks} ticks"
+        );
+    }
+
+    #[test]
+    fn el_agua_generada_no_se_despierta_al_cargar_el_chunk_vecino() {
+        // P0.2: un lago de worldgen con un borde abierto se derramaba porque
+        // `wake_column_water` encolaba TODA su superficie al cargar el vecino.
+        // Ahora solo se despierta el agua con flujo restaurado o de columnas
+        // editadas; la generada queda estatica como en Minecraft.
+        use super::super::block::Block;
+        let mut world = World::new(7, 1, vec![]);
+        world.update_streaming([8.0, 120.0, 8.0]);
+        let pos = ChunkPos::new(0, 0);
+        {
+            let column = world.columns.get_mut(&pos).unwrap();
+            column.set(8, 101, 8, Block::Water);
+            column.push_water_surface(8, 8, 101);
+        }
+        world.wake_column_water(pos);
+        assert_eq!(
+            world.pending_water_cells(),
+            0,
+            "la superficie generada no debe encolarse"
+        );
+
+        // Una celda de flujo restaurada si debe despertarse.
+        {
+            let column = world.columns.get_mut(&pos).unwrap();
+            column.set(9, 101, 8, Block::Water);
+            column.set_flow(9, 101, 8, 7);
+        }
+        world.wake_column_water(pos);
+        assert!(
+            world.pending_water_cells() > 0,
+            "el flujo restaurado debe encolarse"
         );
     }
 

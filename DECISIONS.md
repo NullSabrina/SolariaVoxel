@@ -4644,6 +4644,43 @@ acentos y guiones tipograficos legitimos). No se reescribio nada por ese punto.
 `GENERATOR_VERSION` intacto (21). **459 tests + 1 ignored (+1 doctest); clippy
 limpio.**
 
+## v0.48.0 - P0.0/P0.1: versionado de pipeline e hidrologia global
+
+### 2026-10-21 - `generator_config` en `level.json` (no en el header bincode)
+
+**Decision.** `WorldMeta` gana `generator_config: u32` con default 1. Los mundos
+nuevos nacen en **2**; los existentes sin el campo se leen como **1** y se avisa
+una vez por proceso. `GENERATOR_VERSION -> 22`. `LarionGenerator::with_version`
+conserva v1 byte a byte y activa la hidrologia en v2. El campo **no** se añade al
+`WorldHeader` bincode: hacerlo habria obligado a subir `FORMAT_VERSION` de 7 a 8
+por un dato que ya vive en los metadatos legibles.
+
+**Motivo.** `WorldHeader.generator_version` se guardaba pero no se pasaba al
+generador; cambiar Larion producia costuras en chunks no generados de mundos
+existentes.
+
+**Consecuencia.** `WorldMeta`, `World::with_kind_and_config`,
+`TerrainGenerator::with_kind_and_config`, `Renderer::new_with_generator_config`.
+Test `test_column_hash_unchanged_v1` con hash hardcodeado del baseline.
+
+### 2026-10-21 - `HydroWindow`: erosión hídrica y red de drenaje
+
+**Decision.** `larion/hydro.rs` construye una ventana global coarse
+(`CELL = 4`, `WINDOW = 2048`, `HALO = 128`, `MAX_WINDOWS = 2`) con
+priority-flood determinista, D8, acumulación topológica, *stream power* y
+deposición. Las columnas resuelven **una** ventana (el halo cubre la columna y
+su margen) y muestrean bilinealmente. La caché es `RwLock<HashMap>` + FIFO y
+construye fuera del lock. `LarionSample` gana `hydro_erosion`.
+
+**Motivo.** `rivers.rs` era una cresta local, no una red; `erosion.rs` era un
+campo de erodibilidad, no erosión. La generación es pura por columna en 4
+workers, así que el flujo global debe cachearse por ventana.
+
+**Consecuencia.** v2 mide **9.25 ms/columna** frente a **9.13 ms** de v1 en
+release (ratio ~1.01×; ventana 89 ms amortizada). Tests:
+`test_column_hash_unchanged_v1`, `test_window_deterministic_1_vs_4_workers`,
+`larion_v2_activa_la_hidrologia_y_sigue_siendo_determinista`.
+
 ## Plantilla para nuevas entradas
 
 ```

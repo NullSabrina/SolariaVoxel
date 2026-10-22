@@ -19,6 +19,11 @@ versionado del mundo y la generacion procedural.
   7`), agua que no se seca en bordes de columnas descargadas y varias
   optimizaciones de agua/meshing. Detalle en
   [`docs/audit/`](./docs/audit/) y enlazado desde [`AUDIT.md`](./AUDIT.md).
+- **Hidrología P0.1** (`generator_config = 2`): ventana global de drenaje
+  (priority-flood + D8 + acumulación + *stream power* + deposición) cacheada y
+  muestreada bilinealmente, sin costuras dentro de la ventana. Los mundos
+  existentes sin `generator_config` siguen en **1** (pipeline histórico byte a
+  byte); los nuevos nacen en 2.
 - **Generador Larion** (`v0.47.0`, MEGA PROMPT 4): tercer camino de generación
   (`GeneratorKind::Larion`, en `world/worldgen/larion/`) con **continentalidad +
   domain warping horizontal**, **erosión** que decide la forma del relieve,
@@ -40,7 +45,7 @@ versionado del mundo y la generacion procedural.
 - **Pendiente honesto**: validación visual en GPU de Larion; ríos/acuífero del
   camino `graph`.
 
-Versiones: `GENERATOR_VERSION = 21` · `FORMAT_VERSION = 7` ·
+Versiones: `GENERATOR_VERSION = 22` · `FORMAT_VERSION = 7` ·
 `LARION_CONFIG_VERSION = 1` · `Cargo.toml = 0.48.0`.
 
 - **Overlay F3** (`v0.27.0`): pantalla de diagnostico en pantalla (dos columnas)
@@ -146,7 +151,7 @@ SOLARIA_RIVER=1 SOLARIA_VIEW_RADIUS=8 SOLARIA_DEMO=1 cargo run
 cargo test
 ```
 
-459 tests de unidad e integracion (+1 benchmark ignorado por defecto:
+467 tests de unidad e integracion (+1 benchmark ignorado por defecto:
 `cargo test --release -- --ignored el_coste_por_columna`) y 1 doctest, cubriendo
 determinismo, persistencia, meshing, luz, fluidos estilo Minecraft, raycast,
 worldgen por etapas, **generador Larion** (continuidad entre chunks, cobertura de

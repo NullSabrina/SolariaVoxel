@@ -312,6 +312,71 @@ mod tests {
     }
 
     #[test]
+    fn test_uv_en_mundo_es_continua_entre_chunks_adyacentes() {
+        // Dos columnas de agua de 16x16 adyacentes en X. El mesher de cada
+        // chunk usa su propio `origin`, pero la UV debe ser la MISMA en los
+        // vertices del borde compartido (x = 16): si fuera local, A daria 16 y
+        // B daria 0 y al animar el shader apareceria una costura vertical.
+        let level_at = |offset: i32| {
+            move |x: i32, y: i32, z: i32| -> u8 {
+                let wx = x + offset;
+                if y == 0 && (0..32).contains(&wx) && (0..4).contains(&z) {
+                    8
+                } else {
+                    0
+                }
+            }
+        };
+        let query = |_x: i32, _y: i32, _z: i32| Block::Air;
+        let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
+        let level_a = level_at(0);
+        let level_b = level_at(16);
+        let (va, _) = fluid_section(&level_a, &query, &light, 0, [0.0, 0.0, 0.0]);
+        let (vb, _) = fluid_section(&level_b, &query, &light, 0, [16.0, 0.0, 0.0]);
+
+        // Vertices de la cara superior sobre el plano x = 16, como
+        // `[y, z, u, v]` (la UV de mundo es exactamente x, z).
+        let boundary = |verts: &[Vertex]| -> Vec<[f32; 4]> {
+            verts
+                .iter()
+                .filter(|v| {
+                    // Solo la cara superior: sus UV son de mundo (x,z). Las
+                    // laterales usan 0..1 por bloque y no comparten convenio.
+                    (v.position[0] - 16.0).abs() < 1e-4 && v.position[1] > 0.5 && v.uv[0] > 1.5
+                })
+                .map(|v| [v.position[1], v.position[2], v.uv[0], v.uv[1]])
+                .collect()
+        };
+        let mut a = boundary(&va);
+        let mut b = boundary(&vb);
+        assert!(!a.is_empty(), "el borde de A no tiene vertices de agua");
+        let cmp = |l: &[f32; 4], r: &[f32; 4]| {
+            l.iter()
+                .zip(r)
+                .map(|(x, y)| x.total_cmp(y))
+                .find(|o| o.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        };
+        a.sort_by(cmp);
+        b.sort_by(cmp);
+        assert_eq!(a.len(), b.len(), "bordes con distinto numero de vertices");
+        for (l, r) in a.iter().zip(&b) {
+            for k in 0..4 {
+                assert!(
+                    (l[k] - r[k]).abs() < 1e-6,
+                    "vertice del borde discontinuo: A={l:?} B={r:?}"
+                );
+            }
+            // La UV del borde es la coordenada de mundo, no 0/1 local.
+            assert!(
+                (l[2] - 16.0).abs() < 1e-6,
+                "UV local en el borde: {} (se esperaba 16)",
+                l[2]
+            );
+        }
+    }
+
+    #[test]
     fn una_cascada_no_deja_rendijas_entre_bloques() {
         // Columna de caida (0,0,0) y (0,1,0): la cara lateral del bloque de abajo
         // debe subir hasta y=1.0 (borde del bloque), sin la rendija de 0.875.

@@ -7,6 +7,15 @@
 //! siguen siendo `Legacy16` sin migrar el archivo, y no hay que tocar
 //! `FORMAT_VERSION`/`GENERATOR_VERSION`.
 
+/// Version del pipeline para los mundos **nuevos** (P0.0). Los mundos
+/// existentes sin `generator_config` en `level.json` se quedan en
+/// [`LEGACY_GENERATOR_CONFIG`].
+pub const CURRENT_GENERATOR_CONFIG: u32 = 2;
+
+/// Version del pipeline historico (v0.48.0): conserva byte a byte la generacion
+/// Larion anterior a P0.1.
+pub const LEGACY_GENERATOR_CONFIG: u32 = 1;
+
 /// Generador de terreno de un mundo.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum GeneratorKind {

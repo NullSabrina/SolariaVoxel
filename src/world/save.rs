@@ -100,7 +100,12 @@ pub const FORMAT_VERSION: u32 = 7;
 ///   (continentalidad con domain warping horizontal, erosion que decide la forma,
 ///   crestas multifractales, densidad 3D en banda, clima en bandas, rios sinuosos
 ///   y biomas multi-parametricos). `Legacy16` y `Graph` **no cambian**.
-pub const GENERATOR_VERSION: u32 = 21;
+/// * v22: **P0.1**: hidrologia global opcional (`generator_config = 2`). El
+///   pipeline historico (`generator_config = 1`) conserva byte a byte el terreno
+///   de v21. La version del pipeline vive en `level.json`
+///   (`WorldMeta::generator_config`), no en este header bincode, para no romper
+///   `FORMAT_VERSION = 7`.
+pub const GENERATOR_VERSION: u32 = 22;
 
 /// El "magic number" que identifica un archivo de mundo de Solaria.
 pub const MAGIC: [u8; 4] = *b"VFWD";
@@ -122,6 +127,10 @@ impl ChunkPos {
 }
 
 /// Ficha del mundo.
+///
+/// La version del **pipeline** Larion (`generator_config = 1/2`) no vive aqui:
+/// esta en `WorldMeta` (`level.json`) para no cambiar el layout bincode de
+/// `FORMAT_VERSION = 7`. `generator_version` sigue siendo informativo.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct WorldHeader {
     pub magic: [u8; 4],

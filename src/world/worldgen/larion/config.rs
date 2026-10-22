@@ -9,6 +9,58 @@
 /// Version de la configuracion del generador Larion.
 pub const LARION_CONFIG_VERSION: u32 = 1;
 
+/// Parametros de la erosion hidrica y la red de drenaje (P0.1).
+///
+/// El modelo es *stream power*: `incision = K · A^m · S^n`, con deposicion en
+/// pendientes bajas. Se aplica sobre la ventana coarse de [`super::hydro`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HydroConfig {
+    /// Coeficiente de incisión.
+    pub k: f32,
+    /// Exponente del area de drenaje.
+    pub m: f32,
+    /// Exponente de la pendiente.
+    pub n: f32,
+    /// Incisión maxima por celda (bloques).
+    pub max_incision: f32,
+    /// Coeficiente de deposición.
+    pub deposition: f32,
+    /// Pendiente por debajo de la cual se deposita sedimento.
+    pub slope_dep: f32,
+    /// Deposición maxima por celda (bloques).
+    pub max_deposition: f32,
+    /// Fraccion de area (0..1) a partir de la cual una celda es cauce.
+    pub river_min_flow: f32,
+    /// Ancho minimo/maximo del cauce (bloques).
+    pub river_min_width: f32,
+    pub river_max_width: f32,
+    /// Profundidad minima/maxima del cauce (bloques).
+    pub river_min_depth: f32,
+    pub river_max_depth: f32,
+    /// Caida minima (bloques) para marcar una cascada en `HydroSample`.
+    pub waterfall_min: f32,
+}
+
+impl Default for HydroConfig {
+    fn default() -> Self {
+        Self {
+            k: 20.0,
+            m: 0.5,
+            n: 1.0,
+            max_incision: 14.0,
+            deposition: 1.0,
+            slope_dep: 0.08,
+            max_deposition: 5.0,
+            river_min_flow: 0.02,
+            river_min_width: 2.0,
+            river_max_width: 28.0,
+            river_min_depth: 2.0,
+            river_max_depth: 26.0,
+            waterfall_min: 1.0,
+        }
+    }
+}
+
 /// Parametros del pipeline Larion. Los valores por defecto son el punto de
 /// partida calibrado con `examples/larion_preview.rs` (galeria de semillas).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -106,6 +158,10 @@ pub struct LarionConfig {
     /// Factor de profundizacion del cauce en montana (hasta este multiplo).
     pub river_mountain_depth: f32,
 
+    // --- Erosion hidrica y red de drenaje (P0.1) ---
+    /// Parametros de `HydroWindow`: incisión, deposición y geometría del cauce.
+    pub hydro: HydroConfig,
+
     // --- Escala vertical y superficie (5 / 7) ---
     /// Nivel del mar (bloques). Igual que `terrain::SEA_LEVEL`.
     pub sea_level: f32,
@@ -172,6 +228,8 @@ impl Default for LarionConfig {
             river_max_depth: 9.0,
             river_depth_power: 1.7,
             river_mountain_depth: 2.5,
+
+            hydro: HydroConfig::default(),
 
             sea_level: 64.0,
             min_height: 4.0,
@@ -304,6 +362,48 @@ impl LarionConfig {
         }
         if self.rock_slope <= 0.0 {
             return Err(LarionConfigError::NotPositive("rock_slope"));
+        }
+        // Hidrologia (P0.1).
+        for (name, v) in [
+            ("hydro.k", self.hydro.k),
+            ("hydro.m", self.hydro.m),
+            ("hydro.n", self.hydro.n),
+            ("hydro.max_incision", self.hydro.max_incision),
+            ("hydro.deposition", self.hydro.deposition),
+            ("hydro.slope_dep", self.hydro.slope_dep),
+            ("hydro.max_deposition", self.hydro.max_deposition),
+        ] {
+            if v < 0.0 || !v.is_finite() {
+                return Err(LarionConfigError::NotPositive(name));
+            }
+        }
+        if self.hydro.m <= 0.0 || self.hydro.n <= 0.0 {
+            return Err(LarionConfigError::NotPositive("hydro.m/hydro.n"));
+        }
+        if self.hydro.max_incision <= 0.0 || self.hydro.slope_dep <= 0.0 {
+            return Err(LarionConfigError::NotPositive(
+                "hydro.max_incision/slope_dep",
+            ));
+        }
+        if !(0.0..1.0).contains(&self.hydro.river_min_flow) {
+            return Err(LarionConfigError::OutOfRange("hydro.river_min_flow"));
+        }
+        if self.hydro.river_min_width <= 0.0
+            || self.hydro.river_max_width < self.hydro.river_min_width
+        {
+            return Err(LarionConfigError::Unordered(
+                "hydro.river_min_width <= hydro.river_max_width",
+            ));
+        }
+        if self.hydro.river_min_depth <= 0.0
+            || self.hydro.river_max_depth < self.hydro.river_min_depth
+        {
+            return Err(LarionConfigError::Unordered(
+                "hydro.river_min_depth <= hydro.river_max_depth",
+            ));
+        }
+        if self.hydro.waterfall_min < 0.0 || !self.hydro.waterfall_min.is_finite() {
+            return Err(LarionConfigError::OutOfRange("hydro.waterfall_min"));
         }
         Ok(())
     }

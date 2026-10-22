@@ -40,6 +40,12 @@ fn default_generator() -> String {
     "legacy16".to_string()
 }
 
+/// Los mundos creados antes de P0.0 no tienen `generator_config`: se asume la
+/// version 1 del pipeline (la historica).
+fn default_generator_config() -> u32 {
+    super::generator::LEGACY_GENERATOR_CONFIG
+}
+
 /// Metadatos de un mundo (contenido de `level.json`).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct WorldMeta {
@@ -60,6 +66,11 @@ pub struct WorldMeta {
     /// Tipo de generador ("legacy16").
     #[serde(default = "default_generator")]
     pub generator_kind: String,
+    /// Version del **pipeline** del generador (1 = historico, 2 = P0.1).
+    /// Los `level.json` antiguos no lo traen: [`default_generator_config`]
+    /// devuelve 1 y se avisa una vez por consola.
+    #[serde(default = "default_generator_config")]
+    pub generator_config: u32,
 }
 
 /// Un mundo en disco: su slug (carpeta) y sus metadatos.
@@ -294,7 +305,16 @@ fn sync_dir(dir: &Path) {
 pub fn load_meta(dir: &Path) -> Option<WorldMeta> {
     let read = |p: std::path::PathBuf| -> Option<WorldMeta> {
         let data = std::fs::read_to_string(p).ok()?;
-        serde_json::from_str(&data).ok()
+        let value: serde_json::Value = serde_json::from_str(&data).ok()?;
+        // No migrar en silencio: un `level.json` sin el campo es un mundo
+        // historico (v1). Se avisa una sola vez por proceso.
+        if value.get("generator_config").is_none() {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                eprintln!("[world] level.json sin generator_config: se asume v1 (mundo existente)");
+            });
+        }
+        serde_json::from_value(value).ok()
     };
     read(dir.join(LEVEL_FILE)).or_else(|| read(dir.join(format!("{LEVEL_FILE}.bak"))))
 }
@@ -355,6 +375,7 @@ pub fn list_worlds_checked(base: &Path) -> std::io::Result<Vec<WorldEntry>> {
                     last_played: 0,
                     engine_version: String::new(),
                     generator_kind: default_generator(),
+                    generator_config: default_generator_config(),
                 },
                 corrupt: true,
             }),
@@ -404,6 +425,8 @@ pub fn create_world_kind(
         last_played: now,
         engine_version: env!("CARGO_PKG_VERSION").to_string(),
         generator_kind: generator.to_string(),
+        // Mundo nuevo: usa el pipeline vigente (v2 a partir de P0.0).
+        generator_config: super::generator::CURRENT_GENERATOR_CONFIG,
     };
     save_meta(&saves_dir(base).join(&slug), &meta)?;
     Ok(WorldEntry {
@@ -541,6 +564,8 @@ pub fn import_legacy(base: &Path, now: u64) -> std::io::Result<Option<WorldEntry
         last_played: now,
         engine_version: env!("CARGO_PKG_VERSION").to_string(),
         generator_kind: default_generator(),
+        // El `world.vf` legado se genero con el pipeline historico.
+        generator_config: super::generator::LEGACY_GENERATOR_CONFIG,
     };
     save_meta(&dst, &meta)?;
     // Marca de importacion: borrar todos los mundos no debe resucitar el legado.
@@ -769,6 +794,39 @@ mod tests {
         std::fs::create_dir_all(saves_dir(&base).join("mundo-x")).unwrap();
         let w = create_world(&base, "Mundo X", 1, 1).unwrap();
         assert_eq!(w.slug, "mundo-x-2");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn los_metadatos_antiguos_asumen_generator_config_1() {
+        // P0.0: un level.json sin el campo es un mundo historico. No se migra en
+        // silencio; `load_meta` aplica 1.
+        let base = temp_base("gencfg_old");
+        let dir = saves_dir(&base).join("viejo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(LEVEL_FILE),
+            r#"{"display_name":"Viejo","seed":7,"created_at":1,"last_played":1}"#,
+        )
+        .unwrap();
+        let meta = load_meta(&dir).expect("metadatos legibles");
+        assert_eq!(meta.generator_config, 1);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn un_mundo_nuevo_nace_con_generator_config_2() {
+        let base = temp_base("gencfg_new");
+        let w = create_world_kind(&base, "Nuevo", 1, 1, "larion").unwrap();
+        assert_eq!(
+            w.meta.generator_config,
+            crate::world::generator::CURRENT_GENERATOR_CONFIG
+        );
+        let meta = load_meta(&w.dir(&base)).unwrap();
+        assert_eq!(
+            meta.generator_config,
+            crate::world::generator::CURRENT_GENERATOR_CONFIG
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 

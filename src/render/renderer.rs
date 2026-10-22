@@ -315,6 +315,26 @@ impl Renderer {
         view: ViewSettings,
         kind: GeneratorKind,
     ) -> Result<Self, RendererError> {
+        Self::new_with_generator_config(
+            window,
+            seed,
+            restored,
+            view,
+            kind,
+            crate::world::generator::LEGACY_GENERATOR_CONFIG,
+        )
+    }
+
+    /// Como [`Renderer::new`] pero eligiendo la version del pipeline Larion
+    /// (`level.json -> generator_config`).
+    pub fn new_with_generator_config(
+        window: Arc<Window>,
+        seed: u32,
+        restored: Vec<(ChunkPos, ChunkRecord)>,
+        view: ViewSettings,
+        kind: GeneratorKind,
+        generator_config: u32,
+    ) -> Result<Self, RendererError> {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance
@@ -403,7 +423,7 @@ impl Renderer {
             view.fog.name()
         );
         let restored_count = restored.len();
-        let world = World::with_kind(seed, view, kind, restored);
+        let world = World::with_kind_and_config(seed, view, kind, generator_config, restored);
         if restored_count > 0 {
             println!("[world] {restored_count} chunks restaurados de disco");
         }

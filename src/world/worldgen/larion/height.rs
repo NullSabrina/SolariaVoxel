@@ -36,6 +36,9 @@ pub struct LarionSample {
     pub river_proximity: f32,
     /// Nivel hasta el que llenar agua (0 = sin agua).
     pub surface_water: f32,
+    /// Erosion hidrica aplicada (`>= 0`), de la ventana P0.1. En `version=1`
+    /// vale 0: el pipeline historico no tiene esta etapa.
+    pub hydro_erosion: f32,
     /// Bioma principal seleccionado.
     pub biome: Biome,
     /// Bioma principal + secundario + peso de mezcla.

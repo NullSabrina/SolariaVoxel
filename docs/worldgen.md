@@ -13,8 +13,10 @@ determinista: `(seed, x, z)` da siempre el mismo resultado, sin RNG con estado
 | `larion` | `worldgen/larion/` (pipeline multiescala) | 21 | Seleccionable al crear (`SOLARIA_GENERATOR=larion`). Biomas multi-parametricos y rios sinuosos. |
 
 El tipo se guarda en `saves/<slug>/level.json` (`generator_kind`) y **no cambia**
-al reabrir el mundo: un mundo existente conserva su generador. `GENERATOR_VERSION`
-es global (`21`) y sube cuando cambia el terreno de cualquier camino; los mundos
+al reabrir el mundo: un mundo existente conserva su generador. La version del
+**pipeline** Larion vive en `generator_config` (1 = historico, 2 = hidrologia
+P0.1); los `level.json` antiguos sin el campo se leen como 1. `GENERATOR_VERSION`
+es global (`22`) y sube cuando cambia el terreno de cualquier camino; los mundos
 antiguos se siguen leyendo y el terreno ya generado no se regenera. Cambiar de
 generador solo afecta a zonas nuevas.
 
@@ -102,7 +104,7 @@ Escenas demo del motor: `SOLARIA_OCEAN`, `SOLARIA_BIOMES`, `SOLARIA_RIVER`,
 - `GENERATOR_VERSION` (resultado del mundo) y `FORMAT_VERSION` (binario) son
   **independientes**. Cambiar el mundo sube `GENERATOR_VERSION`; cambiar el
   guardado sube `FORMAT_VERSION` con migrador + test.
-- Actual: `GENERATOR_VERSION = 21`, `FORMAT_VERSION = 7`,
+- Actual: `GENERATOR_VERSION = 22`, `FORMAT_VERSION = 7`,
   `WORLDGEN_CONFIG_VERSION = 4`, `LARION_CONFIG_VERSION = 1`.
 
 ## Generador Larion (MEGA PROMPT 4)

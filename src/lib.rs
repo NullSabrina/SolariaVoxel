@@ -8,7 +8,7 @@
 //! ## Estado actual (`v0.48.0`)
 //!
 //! * **Generadores**: `legacy16` (por etapas), `graph` (DAG de densidad) y
-//!   `larion` (pipeline multiescala). `GENERATOR_VERSION = 21`.
+//!   `larion` (pipeline multiescala). `GENERATOR_VERSION = 22`; la version del pipeline se guarda en `level.json` (`generator_config`).
 //! * **Guardado**: formato binario versionado `FORMAT_VERSION = 7` (bincode +
 //!   LZ4 + checksum FNV-1a), con migradores v1..v7, escritura atomica, `.bak` y
 //!   recuperacion automatica. Ver [`world::save`].

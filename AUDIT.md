@@ -41,7 +41,7 @@ se aplicaron las correcciones sobre el código real y se verificaron con la suit
 | **P2-20** mojibake | **Falso positivo.** Los `.rs` son UTF-8 válido; solo hay acentos y guiones tipográficos legítimos. |
 | **P2-21** dos caminos de carga | **Corregido.** `load_world_data` único para arranque y menú. |
 
-**Verificación:** `cargo test` → **459 pasan, 0 fallan, 1 ignorado (+1 doctest)**;
+**Verificación:** `cargo test` → **467 pasan, 0 fallan, 1 ignorado (+1 doctest)**;
 `cargo clippy --all-targets` limpio; `cargo fmt`.
 
 **Además (2026-10-21):** se ejecutó la lista de borrado seguro eliminando

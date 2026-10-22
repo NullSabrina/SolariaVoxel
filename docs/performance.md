@@ -46,6 +46,23 @@ cargo test --release -- --nocapture bench_
 > porque el generador haya cambiado. `terrain_generate_column` aislado da
 > 5.37 ms/col; la diferencia con el run completo es térmica/carga.
 
+### P0.1 — ventana hidro (criterion, release)
+
+`cargo bench --bench worldgen -- --sample-size 10`, mismo equipo:
+
+| benchmark | tiempo | nota |
+|---|---|---|
+| `larion_column/v1` | **9.130 ms/col** | pipeline historico |
+| `larion_column/v2` | **9.249 ms/col** | **1.01×** v1 (dentro de 1.25×) |
+| `hydro/window_build` | **89.3 ms** | una vez por ventana de 2048²; amortizado |
+| `hydro/sample` | **78 ns** | bilineal por columna |
+
+La ventana se construye **una vez por columna** (no por muestra): el halo de
+128 bloques cubre la columna y su margen. Sin eso, una columna en el borde de
+ventana expulsaba las 4 vecinas con `MAX_WINDOWS = 2` y el coste subia a ~1 s
+por columna. El primer chunk de una ventana nueva paga ~89 ms en un worker;
+prefetch en `warm_streaming` queda para P0.2.
+
 ### Memoria en vivo (R12, release)
 
 Con `SOLARIA_VIEW_RADIUS=12` y `SOLARIA_MEM_SECS=5`, tras asentar el streaming

@@ -207,6 +207,8 @@ struct LoadedWorld {
     player_pos: [f32; 3],
     hotbar: Vec<(u8, u8)>,
     kind: crate::world::GeneratorKind,
+    /// Version del pipeline Larion leida de `level.json` (1 = historico).
+    generator_config: u32,
 }
 
 /// Una posicion guardada fuera del mundo (p. ej. de un arranque anterior con
@@ -258,6 +260,7 @@ fn load_world_data(base: &std::path::Path, slug: &str) -> Result<LoadedWorld, St
                 player_pos: crate::world::save::DEFAULT_PLAYER_POS,
                 hotbar: crate::world::save::default_hotbar(),
                 kind,
+                generator_config: meta.generator_config,
             });
         }
         WorldLoad::Loaded(save) => (save, false),
@@ -283,6 +286,7 @@ fn load_world_data(base: &std::path::Path, slug: &str) -> Result<LoadedWorld, St
         player_pos: sane_player_pos(save.player_pos),
         hotbar: save.hotbar,
         kind,
+        generator_config: meta.generator_config,
     })
 }
 
@@ -1539,12 +1543,13 @@ impl App {
         let Some(window) = self.window.clone() else {
             return;
         };
-        match Renderer::new(
+        match Renderer::new_with_generator_config(
             window,
             data.seed,
             data.restored,
             self.options.view_settings().with_env_overrides(),
             data.kind,
+            data.generator_config,
         ) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {
@@ -2414,12 +2419,13 @@ impl ApplicationHandler for App {
             .iter()
             .position(|w| w.slug == data.slug)
             .unwrap_or(0);
-        match Renderer::new(
+        match Renderer::new_with_generator_config(
             window.clone(),
             data.seed,
             data.restored,
             self.options.view_settings().with_env_overrides(),
             data.kind,
+            data.generator_config,
         ) {
             Ok(renderer) => self.renderer = Some(renderer),
             Err(e) => {

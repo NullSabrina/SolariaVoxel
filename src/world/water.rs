@@ -29,7 +29,7 @@
 //! columna **no cargada** no se recalcula: se congela (`is_loaded`), porque un
 //! vecino desconocido **no** es lo mismo que un vecino seco (P1-6).
 
-use std::collections::VecDeque;
+use std::collections::BTreeSet;
 
 /// Nivel de agua maximo (una fuente esta siempre a tope).
 pub const MAX_LEVEL: u8 = 8;
@@ -292,12 +292,16 @@ pub fn step_cell<G: FluidGrid + ?Sized>(grid: &mut G, p: [i32; 3]) -> bool {
     changed
 }
 
-/// Cola de celdas pendientes con deduplicacion (sin allocations en el hot path
-/// mas alla del propio buffer reutilizado).
+/// Cola de celdas pendientes con **orden determinista** y deduplicacion.
+///
+/// La clave es `(x, z, y)`: se procesa primero la columna mas al oeste y, en
+/// empate, la mas al sur. Antes era un `VecDeque` en orden de insercion y, como
+/// las columnas llegan de workers de terreno en orden arbitrario, dos ejecuciones
+/// del mismo mundo podian simular el agua en distinto orden. `BTreeSet` cuesta
+/// `O(log n)` por operacion (n ~ miles) pero elimina esa dependencia.
 #[derive(Default)]
 pub struct DirtyQueue {
-    queue: VecDeque<[i32; 3]>,
-    seen: std::collections::HashSet<[i32; 3]>,
+    queue: BTreeSet<(i32, i32, i32)>,
 }
 
 impl DirtyQueue {
@@ -307,16 +311,13 @@ impl DirtyQueue {
 
     /// Encola una celda si no estaba ya pendiente.
     pub fn push(&mut self, p: [i32; 3]) {
-        if self.seen.insert(p) {
-            self.queue.push_back(p);
-        }
+        self.queue.insert((p[0], p[2], p[1]));
     }
 
-    /// Saca la siguiente celda pendiente (la marca como ya vista).
+    /// Saca la siguiente celda pendiente (menor `(x, z, y)`).
     pub fn pop(&mut self) -> Option<[i32; 3]> {
-        let p = self.queue.pop_front()?;
-        self.seen.remove(&p);
-        Some(p)
+        let (x, z, y) = self.queue.pop_first()?;
+        Some([x, y, z])
     }
 
     pub fn is_empty(&self) -> bool {
@@ -330,7 +331,6 @@ impl DirtyQueue {
     #[cfg(test)]
     fn clear(&mut self) {
         self.queue.clear();
-        self.seen.clear();
     }
 }
 
@@ -553,6 +553,60 @@ mod tests {
     }
 
     #[test]
+    fn test_water_spreads_7_blocks() {
+        // P0.2 (Fase B): una fuente en una llanura llega 7 bloques en horizontal
+        // con nivel decreciente (8 en la fuente, 1 en la ultima celda).
+        let mut g = TestGrid::new(0);
+        g.set([0, 1, 0], Fluid::Source);
+        for _ in 0..80 {
+            tick_all(&mut g);
+        }
+        for d in 1..MAX_LEVEL {
+            assert_eq!(
+                g.fluid([d as i32, 1, 0]).level(),
+                MAX_LEVEL - d,
+                "nivel a {d} bloques"
+            );
+        }
+        assert_eq!(g.fluid([7, 1, 0]).level(), 1);
+        assert_eq!(g.fluid([8, 1, 0]), Fluid::None, "no debe pasar de 7");
+    }
+
+    #[test]
+    fn test_water_falls() {
+        // P0.2 (Fase B): una fuente sobre un acantilado cae hasta el fondo.
+        let mut g = TestGrid::new(0);
+        g.set([0, 8, 0], Fluid::Source);
+        for _ in 0..40 {
+            tick_all(&mut g);
+        }
+        for y in 1..=8 {
+            assert!(g.fluid([0, y, 0]).is_water(), "falta agua en y={y}");
+        }
+    }
+
+    #[test]
+    fn test_break_block_triggers_flow() {
+        // P0.2 (Fase B): un muro contiene la fuente; al romperlo, el siguiente
+        // tick riega la celda que antes estaba bloqueada.
+        let mut g = TestGrid::new(0);
+        g.wall([1, 1, 0]);
+        g.set([0, 1, 0], Fluid::Source);
+        for _ in 0..10 {
+            tick_all(&mut g);
+        }
+        assert_eq!(g.fluid([1, 1, 0]), Fluid::None, "el muro debe contener");
+
+        // "Romper" el bloque: deja de ser solido.
+        g.walls.remove(&[1, 1, 0]);
+        step_cell(&mut g, [0, 1, 0]);
+        assert!(
+            g.fluid([1, 1, 0]).is_water(),
+            "el agua debe entrar al romper el bloque"
+        );
+    }
+
+    #[test]
     fn un_flujo_sin_fuente_desaparece() {
         let mut g = TestGrid::new(0);
         g.set([0, 1, 0], Fluid::Flow(5));
@@ -672,6 +726,23 @@ mod tests {
             }
         }
         assert!(q.is_empty(), "el agua en equilibrio no debe reencolarse");
+    }
+
+    #[test]
+    fn test_dirty_queue_orden_por_xz() {
+        // El orden no depende de la insercion: (x, z, y) ascendente.
+        let mut q = DirtyQueue::new();
+        for p in [[3, 0, 1], [1, 5, 2], [1, 0, 4], [1, 2, 2]] {
+            q.push(p);
+        }
+        q.push([3, 0, 1]); // duplicado: no debe repetirse
+        assert_eq!(q.len(), 4);
+        // Claves (x, z, y): (1,2,2) < (1,2,5) < (1,4,0) < (3,1,0).
+        assert_eq!(q.pop(), Some([1, 2, 2]));
+        assert_eq!(q.pop(), Some([1, 5, 2]));
+        assert_eq!(q.pop(), Some([1, 0, 4]));
+        assert_eq!(q.pop(), Some([3, 0, 1]));
+        assert!(q.is_empty());
     }
 
     #[test]

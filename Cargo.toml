@@ -11,6 +11,9 @@ readme = "README.md"
 keywords = ["voxel", "wgpu", "winit", "game-engine", "procedural-generation"]
 categories = ["game-development", "graphics", "rendering"]
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
 [dependencies]
 # ---------------------------------------------------------------------------
 # Capa de plataforma y GPU (NO es un motor de juego, es la capa minima de
@@ -46,6 +49,26 @@ serde_json = "1"
 # ---------------------------------------------------------------------------
 [profile.dev]
 opt-level = 1
+# Solo tablas de linea. Con el valor por defecto (DWARF completo) `target/debug`
+# pasaba de 5 GB (2.5 GB de incremental + 2 GB de deps). Para depurar sigue
+# habiendo ficheros y lineas; los tipos/variables locales se pierden.
+debug = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+# Las dependencias no necesitan simbolos de depuracion: era el grueso de
+# `target/debug/deps`. Si hay que entrar con gdb en wgpu, subir a 1/2 a mano.
+debug = false
+
+[profile.release]
+# Los binarios de release no se depuran en produccion: menos disco y binario.
+debug = false
+strip = "symbols"
+
+[[bench]]
+name = "worldgen"
+harness = false
+
+[[bench]]
+name = "fluid"
+harness = false
