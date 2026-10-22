@@ -116,7 +116,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let flow_b = surf_uv * 0.21 + vec2<f32>(-t * 0.040, t * 0.055);
     let ripple = (value_noise(flow_a) - 0.5) * 0.35
         + (value_noise(flow_b) - 0.5) * 0.25;
-    var color = base.rgb * (1.0 + ripple);
+    // Color base con un minimo azul: en sombra/noche el tile puede quedar casi
+    // negro y el agua se lee como un agujero.
+    var color = max(base.rgb, vec3<f32>(0.06, 0.15, 0.30)) * (1.0 + ripple);
 
     // Tinte por nivel de agua: la fuente (nivel 8) llega con `fract(y) ~ 0.875`
     // y se ve mas clara; el flujo (1..7) queda mas oscuro. Solo en la cara
@@ -141,7 +143,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Luz (cielo por dia/noche + bloque) y oscurecido en cuevas: con poca luz
     // el agua se ve mas oscura y apagada.
     let lum = max(input.sky * uniforms.day_factor, input.block);
-    let shade = mix(0.30, 1.0, lum);
+    // El agua conserva algo de azul incluso a la sombra (en Minecraft el agua
+    // no se vuelve negra en un canon); antes el suelo era 0.30 y se veia negro.
+    let shade = mix(0.55, 1.0, lum);
     color = color * shade
         + vec3<f32>(1.0, 1.0, 1.0) * spec * 0.5 * (0.25 + 0.75 * lum);
 

@@ -58,6 +58,8 @@ pub struct App {
     want_capture: bool,
     /// Modo vuelo (F): sin gravedad, para explorar.
     flying: bool,
+    /// Ventana de doble pulsacion de Espacio para alternar el vuelo (Minecraft).
+    space_tap_timer: f32,
     /// Bloque apuntado por la camara en el ultimo frame (y su cara).
     selection: Option<crate::world::RayHit>,
     /// Inventario y hotbar (stacks, cursor, arrastre). Logica en `ui`.
@@ -490,8 +492,10 @@ impl App {
     /// el giro de camara (por frame) y corre la fisica del jugador a **timestep
     /// fijo** (acumulador).
     fn update(&mut self, frame_dt: f32) {
-        // Reloj del inventario (ventana de doble click).
+        // Reloj del inventario (ventana de doble click) y de la doble
+        // pulsacion de Espacio para volar.
         self.inventory.tick(frame_dt);
+        self.space_tap_timer = (self.space_tap_timer - frame_dt).max(0.0);
         // Rebote de la hotbar: decae con el tiempo de frame (o se apaga con
         // "reducir movimiento").
         if self.options.reduce_motion {
@@ -558,11 +562,13 @@ impl App {
             }
         }
 
-        // En demo, con un menu abierto, o con el inventario/mesa abiertos la
-        // camara y el jugador quedan fijos (como en Minecraft: no se anda).
-        if self.demo || !playing || self.inventory_open || self.crafting_open {
+        // En demo o en menus la simulacion se congela. Con el inventario/mesa
+        // abiertos NO: el mundo sigue (caida, agua, dia), solo se anulan las
+        // teclas de movimiento, como en Minecraft.
+        if self.demo || !playing {
             return;
         }
+        let input_frozen = self.inventory_open || self.crafting_open;
 
         // Fisica a **timestep fijo**: se acumula el tiempo real y se ejecutan
         // pasos de duracion constante. Desacopla el movimiento del framerate
@@ -570,7 +576,7 @@ impl App {
         self.prev_player_pos = self.player_pos;
         let steps = fixed_steps(&mut self.accumulator, frame_dt);
         for _ in 0..steps {
-            self.simulate_player(FIXED_DT);
+            self.simulate_player(FIXED_DT, input_frozen);
         }
         // Posicion de **render**: interpolada entre los dos ultimos pasos de
         // fisica con la fraccion de tiempo acumulada (`alpha`). Con la fisica a
@@ -608,13 +614,18 @@ impl App {
     }
 
     /// Un paso de fisica del jugador de duracion `dt` (fija).
-    fn simulate_player(&mut self, dt: f32) {
+    fn simulate_player(&mut self, dt: f32, input_frozen: bool) {
         // Movimiento con las teclas **asignadas** (reasignables en Controles).
-        let forward = self.move_forward_axis();
-        let right = self.move_right_axis();
-        let jump = self
-            .input
-            .is_pressed(self.binding_code("jump", KeyCode::Space));
+        // Con el inventario abierto no se anda, pero la gravedad/agua siguen.
+        let (forward, right) = if input_frozen {
+            (0.0, 0.0)
+        } else {
+            (self.move_forward_axis(), self.move_right_axis())
+        };
+        let jump = !input_frozen
+            && self
+                .input
+                .is_pressed(self.binding_code("jump", KeyCode::Space));
         let jump_held = jump;
         let flying = self.flying;
 
@@ -634,6 +645,7 @@ impl App {
         // Movimiento horizontal CON colision (no atravesamos paredes).
         if forward != 0.0 || right != 0.0 {
             let mut player = self.player;
+            player.flying = flying;
             player.move_horizontal(camera, is_solid, forward, right, dt);
             self.player = player;
         }
@@ -2594,7 +2606,9 @@ impl ApplicationHandler for App {
         self.window = Some(window);
 
         println!("[engine] click = capturar raton | WASD = andar | Espacio = saltar");
-        println!("[engine] 1-9/rueda = ranura | E = inventario | F = volar | Escape = salir");
+        println!(
+            "[engine] 1-9/rueda = ranura | E = inventario | doble Espacio (o F) = volar | Escape = salir"
+        );
     }
 
     /// Eventos de la ventana (foco, teclado, botones, resize...).
@@ -2633,6 +2647,23 @@ impl ApplicationHandler for App {
                             self.menu_key(code, event.text.as_deref());
                         }
                     } else if pressed {
+                        // Doble pulsacion de Espacio alterna el vuelo creativo
+                        // (estilo Minecraft). `F` queda como atajo de respaldo.
+                        if code == self.binding_code("jump", KeyCode::Space)
+                            && !self.inventory_open
+                            && !self.crafting_open
+                        {
+                            if self.space_tap_timer > 0.0 {
+                                self.flying = !self.flying;
+                                self.space_tap_timer = 0.0;
+                                println!(
+                                    "[engine] modo vuelo: {}",
+                                    if self.flying { "ON" } else { "OFF" }
+                                );
+                            } else {
+                                self.space_tap_timer = 0.28;
+                            }
+                        }
                         match code {
                             // E (o la tecla asignada a "inventario"): abre/cierra
                             // el inventario o la mesa; cierra recapturando cursor.

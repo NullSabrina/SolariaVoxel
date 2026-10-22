@@ -45,6 +45,12 @@ pub const STEP_HEIGHT: f32 = 1.0;
 /// Velocidad de ascenso al **nadar** (Espacio dentro del agua), en bloques/s.
 pub const SWIM_UP_SPEED: f32 = 3.5;
 
+/// Velocidad horizontal del vuelo creativo (Minecraft: ~10.9 bloques/s).
+pub const FLY_SPEED: f32 = 10.9;
+
+/// Velocidad vertical del vuelo creativo (Espacio/Shift), en bloques/s.
+pub const FLY_VERTICAL_SPEED: f32 = 7.5;
+
 /// Factor que reduce la velocidad maxima de caida dentro del agua.
 const WATER_FALL_SCALE: f32 = 0.40;
 
@@ -59,6 +65,8 @@ pub struct PlayerController {
     pub vertical_velocity: f32,
     /// ¿Esta el jugador tocando el suelo?
     pub on_ground: bool,
+    /// Modo vuelo (lo fija la app antes de mover; `update` tambien lo refresca).
+    pub flying: bool,
 }
 
 impl PlayerController {
@@ -85,11 +93,36 @@ impl PlayerController {
         in_water: bool,
         dt: f32,
     ) {
+        camera.decay_view_offset(dt);
+        self.flying = flying;
         let feet_y = camera.position.y - EYE_HEIGHT;
 
         if flying {
-            // Vuelo: movimiento vertical directo, sin gravedad ni suelo.
-            camera.position.y += fly_up * camera.speed * dt;
+            // Vuelo creativo: vertical directo pero **con colision** (no se
+            // atraviesan techos ni suelos), como en Minecraft.
+            let delta = fly_up * FLY_VERTICAL_SPEED * dt;
+            let candidate = feet_y + delta;
+            if delta > 0.0 {
+                if !Self::ceiling_hits(
+                    camera.position.x,
+                    camera.position.z,
+                    candidate + PLAYER_HEIGHT,
+                    &is_solid,
+                ) {
+                    camera.position.y = candidate + EYE_HEIGHT;
+                }
+            } else if delta < 0.0 {
+                if let Some(surface) = Self::landing_surface(
+                    camera.position.x,
+                    camera.position.z,
+                    candidate,
+                    &is_solid,
+                ) {
+                    camera.position.y = surface + EYE_HEIGHT;
+                } else {
+                    camera.position.y = candidate + EYE_HEIGHT;
+                }
+            }
             self.vertical_velocity = 0.0;
             self.on_ground = false;
             camera.update_view();
@@ -185,6 +218,7 @@ impl PlayerController {
         right: f32,
         dt: f32,
     ) {
+        camera.decay_view_offset(dt);
         let yaw = camera.yaw_deg.to_radians();
         // "Adelante" horizontal (sin componente vertical), como `Camera::walk`.
         let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
@@ -193,7 +227,9 @@ impl PlayerController {
         if dir.length_squared() > 0.0 {
             dir = dir.normalize();
         }
-        let delta = dir * (camera.speed * dt);
+        let speed = if self.flying { FLY_SPEED } else { camera.speed };
+        let delta = dir * (speed * dt);
+        let can_step = !self.flying;
 
         // Eje X.
         if delta.x != 0.0 {
@@ -204,10 +240,13 @@ impl PlayerController {
             );
             if !Self::collides(candidate, &is_solid) {
                 camera.position.x = candidate.x;
-            } else if let Some(raised) = Self::try_step_up(candidate, &is_solid) {
-                // Escalon de 1 bloque: subimos ademas de avanzar.
+            } else if can_step && let Some(raised) = Self::try_step_up(candidate, &is_solid) {
+                // Escalon de 1 bloque: subimos ademas de avanzar. La vista se
+                // queda abajo y sube suave (`view_offset_y`).
+                let before = camera.position.y;
                 camera.position.x = candidate.x;
                 camera.position.y = raised;
+                camera.add_view_offset(before - raised);
                 self.on_ground = true;
             }
         }
@@ -220,9 +259,11 @@ impl PlayerController {
             );
             if !Self::collides(candidate, &is_solid) {
                 camera.position.z = candidate.z;
-            } else if let Some(raised) = Self::try_step_up(candidate, &is_solid) {
+            } else if can_step && let Some(raised) = Self::try_step_up(candidate, &is_solid) {
+                let before = camera.position.y;
                 camera.position.z = candidate.z;
                 camera.position.y = raised;
+                camera.add_view_offset(before - raised);
                 self.on_ground = true;
             }
         }
@@ -341,6 +382,7 @@ impl PlayerController {
     /// Mirar solo la columna del centro seria un error: con terreno por bloque, el
     /// jugador puede aparecer sobre un borde y su caja solaparia el escalon vecino.
     pub fn settle(&mut self, camera: &mut Camera, is_solid: impl Fn(Vec3) -> bool) {
+        camera.reset_view_offset();
         let x = camera.position.x;
         let z = camera.position.z;
         let from_y = (camera.position.y - EYE_HEIGHT).floor() as i32;
@@ -682,6 +724,66 @@ mod tests {
         assert!(
             (camera.position.y - (5.0 + EYE_HEIGHT)).abs() < 0.05,
             "quedo a la altura equivocada, y={}",
+            camera.position.y
+        );
+    }
+
+    #[test]
+    fn el_escalon_sube_la_vista_suave() {
+        // La fisica sube 1 bloque de golpe, pero la vista arranca 1 bloque por
+        // debajo (offset -1) y decae: sin el, la camara "salta" de golpe.
+        let mut camera = test_camera_at(0.5, 0.5);
+        camera.position.y = 4.0 + EYE_HEIGHT;
+        camera.update_view();
+        let mut player = PlayerController::new();
+        let step = |p: Vec3| p.y < 4.0 || (p.x >= 1.0 && (4.0..5.0).contains(&p.y));
+        // Solo los pasos justos para entrar en el escalon (el offset decae con
+        // cada llamada; si seguimos andando se borra y el test no mediria nada).
+        for _ in 0..4 {
+            player.move_horizontal(&mut camera, step, 0.0, 1.0, 1.0 / 60.0);
+        }
+        assert!(
+            (camera.position.y - (5.0 + EYE_HEIGHT)).abs() < 0.05,
+            "la fisica no subio: y={}",
+            camera.position.y
+        );
+        assert!(
+            camera.view_offset_y() < -0.2,
+            "la vista no se compenso: offset={}",
+            camera.view_offset_y()
+        );
+        // Tras ~0.3 s el offset desaparece.
+        for _ in 0..36 {
+            camera.decay_view_offset(1.0 / 120.0);
+        }
+        assert!(
+            camera.view_offset_y().abs() < 0.02,
+            "el offset no decae: {}",
+            camera.view_offset_y()
+        );
+    }
+
+    #[test]
+    fn el_vuelo_no_atraviesa_el_techo_ni_el_suelo() {
+        // Techo solido en y=10..11, suelo en y<4.
+        let world = |p: Vec3| p.y < 4.0 || (10.0..11.0).contains(&p.y);
+        let mut camera = Camera::new(Vec3::new(0.5, 8.0 + EYE_HEIGHT, 0.5));
+        camera.update_view();
+        let mut player = PlayerController::new();
+        for _ in 0..240 {
+            player.update(&mut camera, world, 1.0, true, false, false, 1.0 / 60.0);
+        }
+        assert!(
+            camera.position.y - EYE_HEIGHT + PLAYER_HEIGHT <= 10.0 + 0.01,
+            "la cabeza entro en el techo: y={}",
+            camera.position.y
+        );
+        for _ in 0..480 {
+            player.update(&mut camera, world, -1.0, true, false, false, 1.0 / 60.0);
+        }
+        assert!(
+            (camera.position.y - (4.0 + EYE_HEIGHT)).abs() < 0.05,
+            "el vuelo atraveso el suelo: y={}",
             camera.position.y
         );
     }

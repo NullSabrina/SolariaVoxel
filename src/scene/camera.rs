@@ -37,6 +37,10 @@ pub struct Camera {
     pub speed: f32,
     /// Sensibilidad del raton en grados de giro por pixel movido.
     pub sensitivity_deg_per_px: f32,
+    /// Desplazamiento **visual** del ojo (solo para la vista). Al subir un
+    /// escalon la posicion fisica salta +1; este offset arranca en -1 y decae a
+    /// 0 para que la camara suba suave en vez de teletransportarse.
+    view_offset_y: f32,
 
     /// Matriz de vista cacheada (se recalcula con `update_view`).
     view: Mat4,
@@ -56,6 +60,7 @@ impl Camera {
             far: 1000.0,
             speed: 8.0,
             sensitivity_deg_per_px: 0.12,
+            view_offset_y: 0.0,
             view: Mat4::IDENTITY,
             projection: Mat4::IDENTITY,
         };
@@ -122,8 +127,37 @@ impl Camera {
 
     /// Recalcula la matriz de vista a partir de posicion y orientacion.
     pub fn update_view(&mut self) {
-        let target = self.position + self.forward();
-        self.view = Mat4::look_at_rh(self.position, target, Vec3::Y);
+        // La vista usa la posicion del ojo **con** el offset visual; el resto
+        // del juego (fisica, raycast, streaming) sigue usando `position`.
+        let eye = self.position + Vec3::Y * self.view_offset_y;
+        let target = eye + self.forward();
+        self.view = Mat4::look_at_rh(eye, target, Vec3::Y);
+    }
+
+    /// Compensa visualmente un salto vertical (auto-step): la vista se queda
+    /// donde estaba y decae a la nueva altura en [`Self::decay_view_offset`].
+    pub fn add_view_offset(&mut self, dy: f32) {
+        self.view_offset_y += dy;
+    }
+
+    /// Decae el offset visual del escalon. Llamar una vez por paso de fisica.
+    pub fn decay_view_offset(&mut self, dt: f32) {
+        if self.view_offset_y.abs() < 1e-3 {
+            self.view_offset_y = 0.0;
+        } else {
+            self.view_offset_y *= (-24.0 * dt).exp();
+        }
+    }
+
+    /// Quita cualquier offset visual (spawn/teleport).
+    pub fn reset_view_offset(&mut self) {
+        self.view_offset_y = 0.0;
+    }
+
+    /// Offset visual actual del ojo (negativo = la vista va por debajo de la
+    /// posicion fisica tras subir un escalon). Diagnostico/tests.
+    pub fn view_offset_y(&self) -> f32 {
+        self.view_offset_y
     }
 
     /// Recalcula la matriz de proyeccion. `aspect` es ancho/alto de la ventana.

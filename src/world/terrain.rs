@@ -572,7 +572,7 @@ impl TerrainGenerator {
                         == Some(DecorationKind::Boulder)
                     && let Some(gy) = (0..surface).rev().find(|&y| column.get(x, y, z).is_solid())
                 {
-                    place_boulder(&mut column, x, gy + 1, z, variant);
+                    place_boulder(&mut column, x, gy + 1, z, variant, biome, false);
                 }
             }
         }
@@ -748,7 +748,7 @@ impl TerrainGenerator {
                         == Some(DecorationKind::Boulder)
                     && column.get(x, height.saturating_sub(1), z).is_solid()
                 {
-                    place_boulder(&mut column, x, height, z, variant);
+                    place_boulder(&mut column, x, height, z, variant, biome, false);
                 }
             }
         }
@@ -935,18 +935,28 @@ impl TerrainGenerator {
                     column.push_water_surface(x, z, top);
                 }
 
-                // Decoracion de rocas.
+                // Decoracion de rocas. En Larion solo en laderas/montana: antes
+                // salian rocas sueltas por llanuras y desiertos (ruido visual).
                 if !s.ocean
                     && (2..=13).contains(&x)
                     && (2..=13).contains(&z)
                     && top_solid.is_some()
+                    && (self.generator_config < 2 || slope >= 2 || s.mountain > 0.15)
                     && self
                         .decorator
                         .decide(wx, wz, &terrain_sample_from_larion(&s), height, slope)
                         == Some(DecorationKind::Boulder)
                 {
                     let ground = top_solid.map_or(height as usize, |t| t + 1);
-                    place_boulder(&mut column, x, ground, z, variant);
+                    place_boulder(
+                        &mut column,
+                        x,
+                        ground,
+                        z,
+                        variant,
+                        biome_mat,
+                        self.generator_config >= 2,
+                    );
                 }
             }
         }
@@ -962,7 +972,15 @@ impl TerrainGenerator {
                     let s = grid[idx(gx, gz)];
                     let ground = h_of(&s);
                     let slope = slope_at(gx, gz, ground);
-                    self.trees.plan(wx, wz, s.biome, ground, slope)
+                    // El arbol debe seguir el **material** de la columna (bioma
+                    // mezclado), no solo el primario: antes un roble podia
+                    // nacer sobre arena de un parche secundario de desierto.
+                    let biome = if self.generator_config >= 2 {
+                        self.larion_material_biome(&s, wx, wz, &lcfg)
+                    } else {
+                        s.biome
+                    };
+                    self.trees.plan(wx, wz, biome, ground, slope)
                 } else if self.trees.maybe(wx, wz) {
                     let s = self.larion_sample_with_window(wx, wz, hydro_ref);
                     let ground = (s.height.round() as i32).clamp(lo, hi);
@@ -980,7 +998,12 @@ impl TerrainGenerator {
                             .max()
                             .unwrap_or(0)
                     };
-                    self.trees.plan(wx, wz, s.biome, ground, slope)
+                    let biome = if self.generator_config >= 2 {
+                        self.larion_material_biome(&s, wx, wz, &lcfg)
+                    } else {
+                        s.biome
+                    };
+                    self.trees.plan(wx, wz, biome, ground, slope)
                 } else {
                     None
                 };
@@ -1009,8 +1032,31 @@ impl TerrainGenerator {
         if b.primary == b.secondary {
             return b.primary;
         }
-        let within = (lcfg.biome_blend_lo..=lcfg.biome_blend_hi).contains(&b.mix);
-        if within && hash01(wx, wz) < b.mix {
+        let lo = lcfg.biome_blend_lo;
+        let hi = lcfg.biome_blend_hi;
+        if !(lo..=hi).contains(&b.mix) {
+            return b.primary;
+        }
+        // v1 conserva byte a byte el hash por columna historico
+        // (`test_column_hash_unchanged_v1`).
+        if self.generator_config < 2 {
+            return if hash01(wx, wz) < b.mix {
+                b.secondary
+            } else {
+                b.primary
+            };
+        }
+        // v2: antes esto era `hash01(wx, wz) < mix`, un hash **por columna**,
+        // asi que la frontera de bioma se veia como un tablero de ajedrez de
+        // arena y hierba. Usamos un Perlin de baja frecuencia (parches de ~30
+        // bloques) para que la mezcla sea espacialmente coherente.
+        let t = ((b.mix - lo) / (hi - lo).max(1e-4)).clamp(0.0, 1.0);
+        let noise = self
+            .surface_detail
+            .get([wx as f64 * 0.035, wz as f64 * 0.035])
+            * 0.5
+            + 0.5;
+        if noise < t as f64 {
             b.secondary
         } else {
             b.primary
@@ -1261,14 +1307,44 @@ fn hash_u32(x: i32, z: i32) -> u32 {
 
 /// Coloca una **roca** (FASE 7) sobre la superficie: un bloque base, a veces uno
 /// encima y a veces un apoyo al lado. Material segun el ruido de superficie.
-fn place_boulder(column: &mut Column, x: usize, ground: usize, z: usize, variant: f64) {
+fn place_boulder(
+    column: &mut Column,
+    x: usize,
+    ground: usize,
+    z: usize,
+    variant: f64,
+    biome: Biome,
+    coherent: bool,
+) {
     if ground >= WORLD_HEIGHT {
         return;
     }
-    let block = if variant > 0.5 {
-        Block::CoarseDirt
+    // Material coherente con el bioma: una roca gris en medio de un desierto
+    // canta demasiado. `coherent = false` conserva el material historico
+    // (mundos v1) byte a byte.
+    let block = if !coherent {
+        if variant > 0.5 {
+            Block::CoarseDirt
+        } else {
+            Block::Stone
+        }
     } else {
-        Block::Stone
+        match biome {
+            Biome::Desert | Biome::Savanna | Biome::Tundra | Biome::Taiga => {
+                if variant > 0.2 {
+                    Block::Gravel
+                } else {
+                    Block::Stone
+                }
+            }
+            _ => {
+                if variant > 0.5 {
+                    Block::CoarseDirt
+                } else {
+                    Block::Stone
+                }
+            }
+        }
     };
     column.set(x, ground, z, block);
     let h = hash_u32(x as i32 * 53 + 11, z as i32 * 29 + 5);

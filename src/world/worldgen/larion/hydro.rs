@@ -173,12 +173,18 @@ impl HydroWindow {
         let mut water = vec![0.0f32; n];
         for i in 0..n {
             let lake = filled[i] > h0[i] + 0.25;
-            // Todo el **cauce** (no solo la linea de flujo D8) se llena hasta
-            // la superficie del priority-flood. Antes solo la mascara
-            // `flow > river_min_flow` recibia agua: el V excavado era ancho
-            // pero el agua quedaba en una lama de 1-2 bloques en el fondo (el
-            // "rio" estrecho de la captura). Minecraft llena el canal completo.
-            let channel = dist[i] <= width[i];
+            // Todo el **cauce excavado** (no solo la linea de flujo D8) se
+            // llena hasta la superficie del priority-flood. Antes solo la
+            // mascara `flow > river_min_flow` recibia agua: el V era ancho pero
+            // el agua quedaba en una lama de 1-2 bloques en el fondo.
+            //
+            // Exigimos profundidad de incision (`v_depth > 0.75`): en el borde
+            // del canal el V es casi plano y el agua aparecia como charcos
+            // sueltos sobre la llanura (la captura del desierto).
+            let depth = math::lerp(cfg.river_min_depth, cfg.river_max_depth, flow01[i].sqrt());
+            let t = (dist[i] / width[i].max(1.0)).clamp(0.0, 1.0);
+            let carve = depth * (1.0 - t * t).powi(2);
+            let channel = dist[i] <= width[i] && carve > 0.75;
             if lake || channel {
                 water[i] = filled[i];
             }
