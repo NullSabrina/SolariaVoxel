@@ -28,7 +28,7 @@ use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 use super::generator::GeneratorKind;
 use super::worldgen::decoration::{DecorationKind, Decorator};
 use super::worldgen::graph::{Graph, Program, default_density_graph, default_height_graph};
-use super::worldgen::larion::{LarionConfig, LarionGenerator, LarionSample};
+use super::worldgen::larion::{Aquifer, AquiferFluid, LarionConfig, LarionGenerator, LarionSample};
 use super::worldgen::trees::{MARGIN, TreePlacer};
 use super::worldgen::{
     LandClass, LandformProfile, TerrainSample, WorldGen, WorldGenConfig, biomes, math,
@@ -811,6 +811,9 @@ impl TerrainGenerator {
         let lcfg = *larion.config();
         let cfg = self.worldgen.config();
         let (lo, hi) = self.height_bounds();
+        // Acuiferos P0.2 (solo v2; v1 conserva el hash historico).
+        let aquifer_sim =
+            (self.generator_config >= 2).then(|| Aquifer::new(larion.seed(), lcfg.sea_level));
 
         // Una ventana por columna: el halo cubre la columna y el margen de
         // decoracion. Sin esto, una columna en el borde de ventana expulsaria
@@ -852,7 +855,13 @@ impl TerrainGenerator {
                 let height = h_of(&s);
                 let hydro_at = hydro_ref.map(|w| w.sample(wx as f32, wz as f32));
                 let slope = slope_at(x as i32, z as i32, height);
-                let aquifer = self.aquifer_level(wx, wz);
+                // v2: las cuevas se cavan secas y luego decide `Aquifer`; v1
+                // conserva la tabla de agua historica.
+                let cave_aquifer = if self.generator_config >= 2 {
+                    0
+                } else {
+                    self.aquifer_level(wx, wz)
+                };
                 let variant = self.surface_variant(wx, wz);
                 let has_caves = self.has_caves(wx, wz);
                 let caves_ctx = has_caves.then(|| self.caves.context(wx, wz, s.mountain));
@@ -866,18 +875,35 @@ impl TerrainGenerator {
                         continue;
                     }
                     if let Some(ctx) = &caves_ctx {
-                        match self.caves.carve(ctx, wx, y as i32, wz, height, aquifer) {
+                        match self
+                            .caves
+                            .carve(ctx, wx, y as i32, wz, height, cave_aquifer)
+                        {
                             Carve::Air => {
-                                if Self::is_lava_here(&self.caves, ctx, wx, y, wz, height, aquifer)
-                                {
+                                if Self::is_lava_here(
+                                    &self.caves,
+                                    ctx,
+                                    wx,
+                                    y,
+                                    wz,
+                                    height,
+                                    cave_aquifer,
+                                ) {
                                     column.set(x, y, z, Block::Lava);
                                     column.set(x, y - 1, z, Block::Obsidian);
                                 }
                                 continue;
                             }
                             Carve::Water => {
-                                if Self::is_lava_here(&self.caves, ctx, wx, y, wz, height, aquifer)
-                                {
+                                if Self::is_lava_here(
+                                    &self.caves,
+                                    ctx,
+                                    wx,
+                                    y,
+                                    wz,
+                                    height,
+                                    cave_aquifer,
+                                ) {
                                     column.set(x, y, z, Block::Lava);
                                     column.set(x, y - 1, z, Block::Obsidian);
                                     continue;
@@ -901,6 +927,23 @@ impl TerrainGenerator {
                     );
                     column.set(x, y, z, block);
                     top_solid = Some(y);
+                }
+
+                // Acuiferos (P0.2): rellena solo **aire subterraneo** (cuevas).
+                // El agua de superficie (mar/rio/lago) va despues y tiene
+                // prioridad; una barrera de acuifero se convierte en piedra.
+                if let Some(aquifer) = aquifer_sim.as_ref() {
+                    for y in 0..height.clamp(0, WORLD_HEIGHT as i32) as usize {
+                        if column.get(x, y, z) != Block::Air {
+                            continue;
+                        }
+                        let a = aquifer.sample(wx, y as i32, wz, height);
+                        if a.barrier {
+                            column.set(x, y, z, Block::Stone);
+                        } else if a.fluid == AquiferFluid::Water && y as i32 <= a.level {
+                            column.set(x, y, z, Block::Water);
+                        }
+                    }
                 }
 
                 // Agua (mar, rio o lago) por encima del techo solido real.

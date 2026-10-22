@@ -24,6 +24,7 @@
 //! `erosion`, `height`, `rivers` y `density`; el ruido en `noise`; la spline en
 //! `spline`.
 
+pub mod aquifer;
 pub mod biome;
 pub mod climate;
 pub mod config;
@@ -35,6 +36,7 @@ pub mod noise;
 pub mod rivers;
 pub mod spline;
 
+pub use aquifer::{Aquifer, AquiferFluid, AquiferSample};
 pub use biome::{BiomeBlend, BiomeNode, BiomeSelector};
 pub use climate::ClimatePoint;
 pub use config::{HydroConfig, LARION_CONFIG_VERSION, LarionConfig, LarionConfigError};
