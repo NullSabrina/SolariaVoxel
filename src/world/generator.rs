@@ -13,7 +13,9 @@
 /// * `2`: hidrologia P0.1 + acuiferos (v0.48-v0.51). Congelada: los mundos
 ///   creados entonces deben seguir generando los mismos chunks.
 /// * `3`: arboles organicos, cuevas worm, ruido SIMD y `density_youth` (v0.52).
-pub const CURRENT_GENERATOR_CONFIG: u32 = 3;
+/// * `4`: biomas mas amplios/guiados por clima, relieve por bioma y agua
+///   contenida (v0.53).
+pub const CURRENT_GENERATOR_CONFIG: u32 = 4;
 
 /// Version del pipeline historico (v0.48.0): conserva byte a byte la generacion
 /// Larion anterior a P0.1.

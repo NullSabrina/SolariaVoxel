@@ -973,6 +973,7 @@ impl TerrainGenerator {
                         } else {
                             0.0
                         },
+                        self.generator_config >= 4,
                     );
                     column.set(x, y, z, block);
                     top_solid = Some(y);
@@ -1260,6 +1261,7 @@ fn larion_surface_block(
     snow_temperature: f32,
     coherent: bool,
     ecotone: f32,
+    rich: bool,
 ) -> Block {
     if y + 1 == height && height > 200 {
         return if temperature < snow_temperature {
@@ -1267,6 +1269,11 @@ fn larion_surface_block(
         } else {
             Block::Stone
         };
+    }
+    // config 4: el desierto no es una alfombra de arena; tiene pedreras y
+    // costras de grava que rompen la llanura.
+    if rich && y + 1 == height && biome == Biome::Desert && variant < -0.72 {
+        return Block::Gravel;
     }
     surface_block(y, height, biome, variant, ecotone, slope, cfg, coherent)
 }

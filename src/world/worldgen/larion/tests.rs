@@ -270,7 +270,17 @@ pub fn baseline_hash() -> u64 {
 /// `version = 2`. Una sola ventana mantiene el test barato; cubre ruido escalar,
 /// hidrologia (priority-flood, perfil de cauce), clima, bioma y densidad.
 pub fn baseline_hash_v2() -> u64 {
-    let g = LarionGenerator::with_version(13_371, LarionConfig::default(), 2);
+    baseline_hash_grid(2)
+}
+
+/// Igual que [`baseline_hash_v2`] pero para `version = 3` (SIMD, arboles
+/// organicos y `density_youth`). Congela config 3 antes de abrir config 4.
+pub fn baseline_hash_v3() -> u64 {
+    baseline_hash_grid(3)
+}
+
+fn baseline_hash_grid(version: u32) -> u64 {
+    let g = LarionGenerator::with_version(13_371, LarionConfig::default(), version);
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     for z in 0..32 {
         for x in 0..32 {
@@ -331,6 +341,39 @@ fn test_column_hash_unchanged_v2() {
         "la columna v2 cambio (0x{got:016x} != 0x{BASELINE_HASH_V2:016x}); \
          mueve el cambio a generator_config >= 3"
     );
+}
+
+/// Imprime el baseline v3. Ejecutar **una vez**:
+/// `cargo test print_baseline_hash_v3 --release -- --ignored --nocapture`
+#[test]
+#[ignore = "se ejecuta a mano para rellenar BASELINE_HASH_V3"]
+fn print_baseline_hash_v3() {
+    let h = baseline_hash_v3();
+    println!("BASELINE_HASH_V3 (hex) = 0x{h:016x}");
+    println!("BASELINE_HASH_V3 (dec) = {h}");
+}
+
+#[test]
+fn test_column_hash_unchanged_v3() {
+    // v3 esta congelada: los mundos creados en v0.52 no deben cambiar cuando
+    // abramos config 4 (biomas/agua). Si falla, el cambio debe ir en `>= 4`.
+    const BASELINE_HASH_V3: u64 = 0x5275_2280_661b_58b3;
+    let got = baseline_hash_v3();
+    assert_eq!(
+        got, BASELINE_HASH_V3,
+        "la columna v3 cambio (0x{got:016x} != 0x{BASELINE_HASH_V3:016x}); \
+         mueve el cambio a generator_config >= 4"
+    );
+}
+
+#[test]
+fn config_4_ajusta_las_regiones_climaticas() {
+    let v3 = LarionGenerator::with_version(1, LarionConfig::default(), 3);
+    let v4 = LarionGenerator::with_version(1, LarionConfig::default(), 4);
+    assert_eq!(v4.config_version(), 4);
+    // Frecuencia mayor = regiones climaticas mas pequenas (mas variedad).
+    assert!(v4.config().temperature_scale > v3.config().temperature_scale);
+    assert!(v4.config().humidity_scale > v3.config().humidity_scale);
 }
 
 #[test]

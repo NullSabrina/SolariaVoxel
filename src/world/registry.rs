@@ -112,8 +112,6 @@ pub struct BlockDefinition {
     pub light_emission: u8,
     /// ¿Aparece en el inventario/hotbar para colocarlo?
     pub item: bool,
-    /// Dureza relativa. **Reservado**: aun no se usa (no hay tiempos de minado).
-    pub hardness: f32,
 }
 
 /// Todos los bloques conocidos, en orden de id. Es la lista canonica: `from_u8`
@@ -159,7 +157,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: false,
-        hardness: 0.0,
     },
     BlockDefinition {
         id: 1,
@@ -172,7 +169,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 0.6,
     },
     BlockDefinition {
         id: 2,
@@ -184,7 +180,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 0.5,
     },
     BlockDefinition {
         id: 3,
@@ -196,7 +191,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 1.5,
     },
     BlockDefinition {
         id: 4,
@@ -208,7 +202,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 0.5,
     },
     BlockDefinition {
         id: 5,
@@ -221,7 +214,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 2.0,
     },
     BlockDefinition {
         id: 6,
@@ -234,7 +226,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 0.2,
     },
     BlockDefinition {
         id: 7,
@@ -246,7 +237,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 14,
         item: true,
-        hardness: 0.0,
     },
     BlockDefinition {
         id: 8,
@@ -258,7 +248,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 0.4,
     },
     BlockDefinition {
         id: 9,
@@ -270,7 +259,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::Water,
         light_emission: 0,
         item: true,
-        hardness: 0.0,
     },
     BlockDefinition {
         id: 10,
@@ -282,7 +270,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 2.0,
     },
     BlockDefinition {
         id: 11,
@@ -295,7 +282,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 2.5,
     },
     BlockDefinition {
         id: 12,
@@ -307,7 +293,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 0.5,
     },
     BlockDefinition {
         id: 13,
@@ -319,7 +304,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 0.6,
     },
     BlockDefinition {
         id: 14,
@@ -332,7 +316,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 0.6,
     },
     BlockDefinition {
         id: 15,
@@ -344,7 +327,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::Lava,
         light_emission: 15,
         item: true,
-        hardness: 0.0,
     },
     BlockDefinition {
         id: 16,
@@ -356,7 +338,6 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         fluid: FluidKind::None,
         light_emission: 0,
         item: true,
-        hardness: 10.0,
     },
 ];
 

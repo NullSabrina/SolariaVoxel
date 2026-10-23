@@ -181,10 +181,23 @@ impl Block {
         self.render_kind() == RenderKind::Opaque
     }
 
-    /// Dureza relativa. **Reservado** para los tiempos de minado (aun no usada).
+    /// Dureza de diseno (0..=10). El sistema de minado aun no la usa para
+    /// calcular tiempos, pero es la fuente de verdad del balance.
     #[inline]
     pub fn hardness(self) -> f32 {
-        registry::definition(self).hardness
+        super::mining::profile(self).hardness as f32
+    }
+
+    /// Resistencia a explosiones (0..=10).
+    #[inline]
+    pub fn blast_resistance(self) -> u8 {
+        super::mining::profile(self).blast_resistance
+    }
+
+    /// Pico minimo para que el bloque suelte drop.
+    #[inline]
+    pub fn tool_tier(self) -> super::mining::ToolTier {
+        super::mining::profile(self).tool_tier
     }
 
     /// Que tile del atlas usa cada cara de este bloque.

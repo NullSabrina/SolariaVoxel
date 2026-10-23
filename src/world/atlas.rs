@@ -194,17 +194,53 @@ fn try_load_pixels() -> Option<Vec<u8>> {
     load_png_rgba(ATLAS_PATH, WIDTH, HEIGHT)
 }
 
+/// Resuelve un asset relativo probando, en orden: el directorio actual, la
+/// carpeta del ejecutable, sus ancestros (hasta 3 niveles) y la raiz del repo en
+/// desarrollo. Asi el binario funciona tanto desde la raiz como desde
+/// `target/release`, incluso si se abre con doble clic.
+fn resolve_asset_path(path: &str) -> Option<std::path::PathBuf> {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        return p.is_file().then(|| p.to_path_buf());
+    }
+
+    let mut bases: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        bases.push(cwd);
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        bases.push(dir.to_path_buf());
+        let mut cur = dir;
+        for _ in 0..3 {
+            let Some(parent) = cur.parent() else { break };
+            bases.push(parent.to_path_buf());
+            cur = parent;
+        }
+    }
+    bases.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+
+    bases
+        .into_iter()
+        .map(|base| base.join(p))
+        .find(|c| c.is_file())
+}
+
 /// Decodifica un PNG a RGBA8 (lo comparten GUI y cielo).
 pub(crate) fn load_png_rgba(path: &str, width: u32, height: u32) -> Option<Vec<u8>> {
-    let file = std::fs::File::open(path).ok()?;
+    let resolved = resolve_asset_path(path)?;
+    let file = std::fs::File::open(&resolved).ok()?;
     let decoder = png::Decoder::new(std::io::BufReader::new(file));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0u8; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
     if info.width != width || info.height != height {
         eprintln!(
-            "[png] {path} mide {}x{} (esperado {width}x{height}); ignorado",
-            info.width, info.height
+            "[png] {} mide {}x{} (esperado {width}x{height}); ignorado",
+            resolved.display(),
+            info.width,
+            info.height
         );
         return None;
     }
@@ -604,6 +640,12 @@ fn tile_color(tile: u32, x: u32, y: u32) -> [u8; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resuelve_los_assets_del_repo() {
+        assert!(resolve_asset_path(ATLAS_PATH).is_some());
+        assert!(resolve_asset_path("assets/no-existe.png").is_none());
+    }
 
     #[test]
     fn las_matrices_16x16_estan_bien_formadas() {

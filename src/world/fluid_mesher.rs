@@ -19,12 +19,12 @@ use crate::world::water::MAX_LEVEL;
 
 /// Altura de la superficie (0..1) de una celda de nivel `level`.
 ///
-/// No llena el bloque: deja 2/16 libres arriba, asi la superficie queda **por
-/// debajo** del borde del bloque (como Minecraft) y se ve que es liquido, no un
-/// cubo macizo.
+/// Minecraft usa `(nivel + 1) / 9`: una fuente (nivel 0 en MC) mide **8/9** y
+/// deja 1/9 libre arriba. Aqui `level = MAX_LEVEL` es la fuente, asi que la
+/// formula equivalente es `level / MAX_LEVEL * (8/9)`.
 #[inline]
 pub fn surface_height(level: u8) -> f32 {
-    (level.min(MAX_LEVEL) as f32 / MAX_LEVEL as f32) * (14.0 / 16.0)
+    (level.min(MAX_LEVEL) as f32 / MAX_LEVEL as f32) * (8.0 / 9.0)
 }
 
 /// Nivel maximo de las celdas de agua que comparten la esquina `(x+dx, z+dz)`,
@@ -102,14 +102,22 @@ where
                     continue;
                 }
                 let (xi, yi, zi) = (x as i32, y as i32, z as i32);
-                let (sky, block_light) = light(xi, yi, zi);
-                let sky_f = sky as f32 / MAX_LIGHT as f32;
-                let block_f = block_light as f32 / MAX_LIGHT as f32;
+                let (mut sky, mut block_light) = light(xi, yi, zi);
                 let (xf, yf, zf) = (x as f32, y as f32, z as f32);
 
                 // Se decide **antes** si la celda aporta geometria: una celda
                 // rodeada de agua/solido no calcula esquinas (P2-18).
                 let above_water = level(xi, yi + 1, zi) > 0;
+                // En una columna de agua, la luz de la celda superior ilumina
+                // igual la pared; tomar el maximo evita bandas horizontales
+                // entre dos bloques apilados.
+                if above_water {
+                    let (sky_above, block_above) = light(xi, yi + 1, zi);
+                    sky = sky.max(sky_above);
+                    block_light = block_light.max(block_above);
+                }
+                let sky_f = sky as f32 / MAX_LIGHT as f32;
+                let block_f = block_light as f32 / MAX_LIGHT as f32;
                 let above_solid = query(xi, yi + 1, zi).is_solid();
                 let emit_top = !above_water && !above_solid;
                 let dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)];
@@ -216,12 +224,13 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn la_altura_de_superficie_es_nivel_entre_ocho_menos_dos_px() {
-        assert!((surface_height(8) - 0.875).abs() < 1e-6);
-        assert!((surface_height(4) - 0.4375).abs() < 1e-6);
-        assert!((surface_height(1) - 0.109_375).abs() < 1e-6);
-        // Niveles 8 y 4 -> 4/8 del alto de agua (0.875 - 0.4375 = 0.4375).
-        assert!((surface_height(8) - surface_height(4) - 0.4375).abs() < 1e-6);
+    fn la_altura_de_superficie_sigue_la_regla_de_minecraft() {
+        // 8 niveles -> altura (nivel/8) * 8/9, como (nivel_MC+1)/9.
+        assert!((surface_height(8) - 8.0 / 9.0).abs() < 1e-6);
+        assert!((surface_height(4) - 4.0 / 9.0).abs() < 1e-6);
+        assert!((surface_height(1) - 1.0 / 9.0).abs() < 1e-6);
+        // Niveles 8 y 4 -> 4/9 del alto de agua.
+        assert!((surface_height(8) - surface_height(4) - 4.0 / 9.0).abs() < 1e-6);
     }
 
     #[test]
@@ -236,21 +245,21 @@ mod tests {
         let (vertices, indices) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
         assert!(!vertices.is_empty() && indices.len() % 3 == 0);
 
-        // Alturas presentes: 0.0 (base), 0.4375 (nivel 4) y 0.875 (nivel 8).
+        // Alturas presentes: 0.0 (base), 4/9 (nivel 4) y 8/9 (nivel 8).
         let mut ys: Vec<f32> = vertices.iter().map(|v| v.position[1]).collect();
         ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
         ys.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
         let h8 = ys
             .iter()
             .copied()
-            .find(|y| (y - 0.875).abs() < 1e-4)
+            .find(|y| (y - 8.0 / 9.0).abs() < 1e-4)
             .expect("falta la superficie de nivel 8");
         let h4 = ys
             .iter()
             .copied()
-            .find(|y| (y - 0.4375).abs() < 1e-4)
+            .find(|y| (y - 4.0 / 9.0).abs() < 1e-4)
             .expect("falta la superficie de nivel 4");
-        assert!(((h8 - h4) - 0.4375).abs() < 1e-4, "diferencia {h8}-{h4}");
+        assert!(((h8 - h4) - 4.0 / 9.0).abs() < 1e-4, "diferencia {h8}-{h4}");
     }
 
     #[test]
@@ -287,9 +296,36 @@ mod tests {
     }
 
     #[test]
+    fn el_agua_apilada_usa_la_luz_mas_alta() {
+        // Dos bloques de agua verticales: la cara lateral del de abajo debe
+        // tomar la luz del bloque de arriba (mas clara) para no crear una banda.
+        let mut levels: HashMap<(i32, i32, i32), u8> = HashMap::new();
+        levels.insert((0, 0, 0), 8);
+        levels.insert((0, 1, 0), 8);
+        let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
+        let query = |_x: i32, _y: i32, _z: i32| Block::Air;
+        let light = |_x: i32, y: i32, _z: i32| {
+            if y >= 1 { (15u8, 0u8) } else { (5u8, 0u8) }
+        };
+        let (v, _) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
+        let lower_side = v
+            .iter()
+            .filter(|v| v.position[1] < 1.0 && v.position[0] > 0.5)
+            .collect::<Vec<_>>();
+        assert!(
+            !lower_side.is_empty(),
+            "sin caras laterales del bloque bajo"
+        );
+        assert!(
+            lower_side.iter().all(|v| (v.sky - 1.0).abs() < 1e-6),
+            "la cara baja no tomo la luz del bloque de arriba"
+        );
+    }
+
+    #[test]
     fn las_caras_laterales_parciales_no_comprimen_la_textura() {
-        // P2-19: una celda de nivel 4 mide 0.4375; el borde inferior de la cara
-        // lateral debe usar v=0.4375 (no 1.0) para no aplastar la textura.
+        // P2-19: una celda de nivel 4 mide 4/9; el borde inferior de la cara
+        // lateral debe usar v=4/9 (no 1.0) para no aplastar la textura.
         let mut levels: HashMap<(i32, i32, i32), u8> = HashMap::new();
         levels.insert((0, 0, 0), 4);
         let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
@@ -301,7 +337,7 @@ mod tests {
             .find(|v| (v.position[0] - 1.0).abs() < 1e-4 && v.position[1].abs() < 1e-4)
             .expect("falta el vertice inferior de la cara +X");
         assert!(
-            (bottom.uv[1] - 0.4375).abs() < 1e-3,
+            (bottom.uv[1] - 4.0 / 9.0).abs() < 1e-3,
             "v inferior {} (se esperaba 0.4375)",
             bottom.uv[1]
         );

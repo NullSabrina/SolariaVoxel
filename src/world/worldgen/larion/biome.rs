@@ -42,6 +42,58 @@ pub struct BiomeBlend {
 /// climaticas), continentalidad matiza, erosion y relieve desempatan.
 const BASE_WEIGHTS: [f32; 5] = [1.0, 1.0, 0.55, 0.60, 0.30];
 
+/// Pesos de config 4: el bioma lo decide **el clima**, no el relieve. Asi una
+/// montana dentro de un bosque sigue siendo bosque; la erosion y los picos solo
+/// desempatan. Evita los parches de tundra/taiga por altura.
+/// Biomas que deben ganar area (desierto, llanura, pantano, tundra).
+const WEIGHTS_COMMON: [f32; 5] = [0.70, 0.70, 0.14, 0.14, 0.07];
+/// Bosque y taiga: area media.
+const WEIGHTS_MID: [f32; 5] = [1.10, 1.10, 0.22, 0.22, 0.11];
+/// Sabana: el clima calido-seco es muy amplio; se estrecha para no comerse el
+/// resto de biomas.
+const WEIGHTS_DOMINANT: [f32; 5] = [1.20, 1.20, 0.24, 0.24, 0.12];
+
+/// Nodos de config 4: objetivos recolocados sobre la distribucion real de
+/// clima (poca humedad extrema, temperatura en U por la banda latitudinal).
+/// Buscan que los siete biomas aparezcan con frecuencia parecida.
+pub const DEFAULT_BIOME_NODES_V4: [BiomeNode; 7] = [
+    BiomeNode {
+        biome: Biome::Desert,
+        target: [0.80, 0.34, 0.66, 0.82, 0.25],
+        weights: WEIGHTS_COMMON,
+    },
+    BiomeNode {
+        biome: Biome::Savanna,
+        target: [0.78, 0.52, 0.72, 0.70, 0.35],
+        weights: WEIGHTS_DOMINANT,
+    },
+    BiomeNode {
+        biome: Biome::Plains,
+        target: [0.55, 0.52, 0.72, 0.92, 0.22],
+        weights: WEIGHTS_COMMON,
+    },
+    BiomeNode {
+        biome: Biome::Forest,
+        target: [0.50, 0.74, 0.84, 0.42, 0.50],
+        weights: WEIGHTS_MID,
+    },
+    BiomeNode {
+        biome: Biome::Swamp,
+        target: [0.55, 0.86, 0.56, 1.00, 0.12],
+        weights: WEIGHTS_COMMON,
+    },
+    BiomeNode {
+        biome: Biome::Taiga,
+        target: [0.22, 0.60, 0.86, 0.44, 0.62],
+        weights: WEIGHTS_MID,
+    },
+    BiomeNode {
+        biome: Biome::Tundra,
+        target: [0.12, 0.42, 0.80, 0.28, 0.58],
+        weights: WEIGHTS_COMMON,
+    },
+];
+
 /// Nodos por defecto: un punto por bioma, repartidos por el espacio de
 /// parametros. Son datos calibrables.
 pub const DEFAULT_BIOME_NODES: [BiomeNode; 7] = [
@@ -82,6 +134,31 @@ pub const DEFAULT_BIOME_NODES: [BiomeNode; 7] = [
     },
 ];
 
+/// Altura por bioma (config 4): pantanos bajos y planos, llanuras/sabanas mas
+/// planas, desierto suavemente aplanado. Se mezcla con el bioma secundario para
+/// que la transicion no tenga un escalon.
+pub fn height_modifier(blend: BiomeBlend, height: f32, sea_level: f32) -> f32 {
+    let primary = height_for_biome(blend.primary, height, sea_level);
+    let secondary = height_for_biome(blend.secondary, height, sea_level);
+    let t = (blend.mix * 2.0).clamp(0.0, 1.0);
+    primary + (secondary - primary) * t
+}
+
+fn height_for_biome(biome: Biome, height: f32, sea_level: f32) -> f32 {
+    match biome {
+        // Pantano: pegado al nivel del mar y aplanado (charcas y orillas).
+        Biome::Swamp => sea_level + 1.0 + (height - sea_level).clamp(-1.0, 14.0) * 0.55,
+        // Llanura: relieve suave.
+        Biome::Plains => sea_level + (height - sea_level) * 0.80,
+        // Sabana: algo mas plana que el bosque.
+        Biome::Savanna => sea_level + (height - sea_level) * 0.85,
+        // Desierto: dunas bajas, sin grandes cuestas.
+        Biome::Desert => sea_level + (height - sea_level) * 0.92,
+        // Bosque y biomas frios conservan su relieve.
+        Biome::Forest | Biome::Taiga | Biome::Tundra => height,
+    }
+}
+
 /// Selector de biomas: distancia ponderada O(N) con N ~ 8-12 nodos. Barato y
 /// sin tablas precalculadas.
 pub struct BiomeSelector {
@@ -99,6 +176,12 @@ impl BiomeSelector {
     /// Selector con los nodos por defecto (siete biomas del mundo).
     pub fn with_defaults() -> Self {
         Self::new(DEFAULT_BIOME_NODES)
+    }
+
+    /// Selector de config 4: nodos recolocados al clima real y peso mucho mayor
+    /// del clima frente al relieve (biomas amplios y coherentes).
+    pub fn with_defaults_v4() -> Self {
+        Self::new(DEFAULT_BIOME_NODES_V4)
     }
 
     /// Numero de nodos.
@@ -158,6 +241,39 @@ mod tests {
             temperature: t,
             humidity: h,
         }
+    }
+
+    #[test]
+    fn el_modificador_de_altura_aplana_llanura_y_baja_pantano() {
+        let sea = 64.0;
+        let plains = BiomeBlend {
+            primary: Biome::Plains,
+            secondary: Biome::Plains,
+            mix: 0.0,
+        };
+        let swamp = BiomeBlend {
+            primary: Biome::Swamp,
+            secondary: Biome::Swamp,
+            mix: 0.0,
+        };
+        let forest = BiomeBlend {
+            primary: Biome::Forest,
+            secondary: Biome::Forest,
+            mix: 0.0,
+        };
+        assert!(height_modifier(plains, 100.0, sea) < 100.0);
+        assert!(height_modifier(swamp, 80.0, sea) < 80.0);
+        assert_eq!(height_modifier(forest, 100.0, sea), 100.0);
+        // La mezcla entre dos biomas queda entre sus dos alturas.
+        let mixed = BiomeBlend {
+            primary: Biome::Swamp,
+            secondary: Biome::Forest,
+            mix: 0.25,
+        };
+        let a = height_modifier(swamp, 80.0, sea);
+        let b = height_modifier(forest, 80.0, sea);
+        let m = height_modifier(mixed, 80.0, sea);
+        assert!(m > a.min(b) && m < a.max(b));
     }
 
     #[test]

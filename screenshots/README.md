@@ -120,3 +120,10 @@ ejecutable en modo demo (ver `README.md`).
 | ------- | ----------- |
 | `larion_13371_height_v1.png` | Relieve Larion v1 (pipeline historico, byte a byte). |
 | `larion_13371_height_v2.png` | Relieve Larion v2: hidrologia, arboles organicos y `density_youth`. |
+
+## Biomas y agua (`v0.53`)
+
+| Captura | Que muestra |
+| ------- | ----------- |
+| `larion_13371_biome_v4.png` | Mapa de biomas de config 4: regiones climaticas coherentes y rios contenidos. |
+| `v0.53_ocean.png` | Superficie de agua con ruido 3D continuo y normales perturbadas (reflejos en movimiento). |

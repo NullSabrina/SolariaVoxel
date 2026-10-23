@@ -51,6 +51,7 @@ pub use spline::{Spline, SplineError};
 
 use std::f32::consts::TAU;
 
+use crate::world::terrain::Biome;
 use crate::world::worldgen::math;
 
 use self::height::{ComposedHeight, HeightInputs};
@@ -119,13 +120,23 @@ impl LarionGenerator {
     }
 
     /// Igual que [`LarionGenerator::with_config`] pero eligiendo la version del
-    /// pipeline. Los mundos existentes usan 1 o 2; los nuevos, 3.
+    /// pipeline. Los mundos existentes usan 1-3; los nuevos, 4.
     pub fn with_version(seed: u32, config: LarionConfig, version: u32) -> Self {
-        let config = if config.validate().is_ok() {
+        let mut config = if config.validate().is_ok() {
             config
         } else {
             LarionConfig::default()
         };
+        // config 4: regiones climaticas mas amplias y menos contraste extremo.
+        // El clima manda en el bioma (ver `BiomeSelector::with_defaults_v4`).
+        if version >= 4 {
+            config.temperature_scale = 1.0 / 700.0;
+            config.humidity_scale = 1.0 / 650.0;
+            config.climate_contrast = 1.5;
+            // Menos arroyos: solo los cauces con caudal real llevan agua. Antes
+            // cada linea de drenaje generaba un rio de 2 bloques.
+            config.hydro.river_min_flow = 0.10;
+        }
         let s = |k: u32| {
             seed.wrapping_mul(0x9E37_79B9)
                 .wrapping_add(k.wrapping_mul(0x85EB_CA6B))
@@ -196,7 +207,11 @@ impl LarionGenerator {
                 config.density_octaves,
                 config.overhang_amplitude,
             ),
-            selector: BiomeSelector::with_defaults(),
+            selector: if version >= 4 {
+                BiomeSelector::with_defaults_v4()
+            } else {
+                BiomeSelector::with_defaults()
+            },
             config_version: version.max(1),
             hydro: HydroCache::default(),
             config,
@@ -455,6 +470,18 @@ impl LarionGenerator {
         };
         let blend = self.selector.select(&climate);
 
+        // config 4: el relieve depende del bioma (pantanos bajos, llanuras y
+        // sabanas planas, desierto suave). Se aplica despues de elegir el bioma
+        // para no realimentar el clima.
+        let composed = if self.config_version >= 4 {
+            let mut c = composed;
+            c.height = biome::height_modifier(blend, c.height, cfg.sea_level)
+                .clamp(cfg.min_height, cfg.max_height);
+            c
+        } else {
+            composed
+        };
+
         // Mascara de montana (cresta x interior x tierra, atenuada por erosion).
         let mountain = (peaks01 * composed.interior * composed.landness * (1.0 - erosion * 0.85))
             .clamp(0.0, 1.0);
@@ -490,7 +517,24 @@ impl LarionGenerator {
                 if water < 0.0 || !water.is_finite() {
                     water = 0.0;
                 }
-                if height < cfg.sea_level {
+                if self.config_version >= 4 {
+                    // Solo se fuerza el nivel del mar si la columna es oceanica
+                    // o la hidrologia ya la considera mojada. Antes, cualquier
+                    // depresion interior bajo el mar se convertia en un "mar"
+                    // aunque no tuviera conexion.
+                    let oceanic = composed.landness < 0.25;
+                    if height < cfg.sea_level && (oceanic || water > 0.0) {
+                        water = water.max(cfg.sea_level);
+                    }
+                    // Un desierto seco no inventa lagos en cada hueco. Los
+                    // cauces con caudal real (rios) se conservan.
+                    if !oceanic
+                        && blend.primary == Biome::Desert
+                        && hydro.flow <= cfg.hydro.river_min_flow
+                    {
+                        water = 0.0;
+                    }
+                } else if height < cfg.sea_level {
                     water = water.max(cfg.sea_level);
                 }
                 let tree_density = tree_density_value(
@@ -570,6 +614,14 @@ impl LarionGenerator {
     /// Temperatura efectiva: banda latitudinal en Z + ruido, contraste y lapse.
     fn temperature_at(&self, x: f32, z: f32, composed: &ComposedHeight, cfg: &LarionConfig) -> f32 {
         let band = 0.5 + 0.5 * (z * TAU / cfg.latitude_band as f32).cos();
+        // config 4: comprime la banda latitudinal hacia el centro. Con la banda
+        // pura, casi toda el area cae en los extremos (frio/calor) y los biomas
+        // templados (llanura/bosque/pantano) quedan en minoria.
+        let band = if self.config_version >= 4 {
+            0.5 + (band - 0.5) * 0.55
+        } else {
+            band
+        };
         let n = self.temperature.sample(x as f64, z as f64) as f32 * 0.5 + 0.5;
         let raw = band * 0.7 + n * 0.3;
         let contraste = math::saturate(0.5 + (raw - 0.5) * cfg.climate_contrast);

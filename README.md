@@ -8,26 +8,39 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.52.1` — atlas CC0 y worldgen orgánico
+## Estado actual: `v0.53.0` — biomas coherentes y agua contenida
 
+- **Biomas v4** (`generator_config = 4`): el selector pesa mucho mas el clima que
+  el relieve (`WEIGHTS_*`), las regiones climaticas se ajustan a ~700 bloques,
+  la banda latitudinal se comprime para que llanura/bosque/pantano no queden en
+  minoria y cada bioma modifica el relieve (pantano bajo, llanura/sabana planas,
+  desierto suave). El desierto gana pedreras de grava.
+- **Agua v4**: solo se fuerza el nivel del mar en columnas oceanicas o ya
+  mojadas por hidrologia; se eliminan lagos secos en desierto, se sube el umbral
+  de caudal (menos arroyos) y el de lago (menos charcos). **v3 queda congelada**
+  con `test_column_hash_unchanged_v3`.
+- **Render de agua**: ruido **3D en espacio de mundo** (sin costura entre cara
+  superior y laterales ni bandas al apilar), luz lateral tomada del bloque de
+  arriba, altura de fuente **8/9** como Minecraft y normales perturbadas para
+  que los reflejos se muevan.
 - **Atlas 32x32 CC0** (`v0.52.0`): el atlas pasa de 16x16 procedural a **32x32**
   compuesto desde texturas CC0 de Minetest Game (`tools/gen_atlas.ps1`), cargado
   como **texture array** con mipmaps por capa (`atlas::mip_chain`). Hojas
   densificadas (~13% de huecos) y cara lateral de hierba compuesta
   (tierra + overlay), sin transparencias accidentales. Bloque de antorcha con
   **modelo cuboide JSON** (`world/block_model.rs`).
-- **Árboles orgánicos P0.3** (`generator_config = 3`): colocación **Poisson
+- **Árboles orgánicos P0.3** (`generator_config >= 3`): colocación **Poisson
   determinista** + esqueleto de ramas por *Space Colonization* voxelizado. La
   copa ya no es un elipsoide: tiene troncos ramificados de 1–2 bloques y cruza
   chunks entera. El camino legacy (`v1`) se conserva byte a byte.
 - **Cuevas P1.4**: red de **worms** (Bézier + conectores) que garantiza
   conectividad entre sistemas; `examples/cave_connectivity.rs` mide la componente
-  mayor. `CaveSystem::new_with_worms` se activa con `generator_config = 3`.
-- **Larion v3 / P1.1 y P1.3**: ruido 2D por lotes con **SIMD** (`quick-noise`,
+  mayor. `CaveSystem::new_with_worms` se activa con `generator_config >= 3`.
+- **Larion v4 / P1.1 y P1.3**: ruido 2D por lotes con **SIMD** (`quick-noise`,
   despacho runtime AVX2/AVX512/SSE) cuantizado para determinismo, geografía por
   rejilla y `density_youth` (banda y amplitud variables: voladizos solo en
-  montaña joven). **v2 queda congelada** (`test_column_hash_unchanged_v2`)
-  para los mundos de v0.48–v0.51; `Legacy16` y `Graph` **no cambian**.
+  montaña joven). **v2 y v3 quedan congeladas**
+  (`test_column_hash_unchanged_v2` y `..._v3`); `Legacy16` y `Graph` **no cambian**.
 - **Auditoría P0/P1/P2 cerrada** (`v0.48.0`): un `world.vf` ilegible ya **no** se
   abre como mundo vacío ni sobrescribe el `.bak`; se recupera automáticamente
   desde `world.vf.bak` (el dañado queda en `world.vf.corrupt`). Además:
@@ -41,7 +54,7 @@ versionado del mundo y la generacion procedural.
   (priority-flood + D8 + acumulación + *stream power* + deposición) cacheada y
   muestreada bilinealmente, sin costuras dentro de la ventana. Los mundos
   existentes sin `generator_config` siguen en **1** (pipeline histórico byte a
-  byte); los nuevos nacen en 3 (v0.52 anade el camino organico).
+  byte); los nuevos nacen en 4 (v0.53: biomas y agua).
 - **Generador Larion** (`v0.47.0`, MEGA PROMPT 4): tercer camino de generación
   (`GeneratorKind::Larion`, en `world/worldgen/larion/`) con **continentalidad +
   domain warping horizontal**, **erosión** que decide la forma del relieve,
@@ -64,7 +77,7 @@ versionado del mundo y la generacion procedural.
   camino `graph`.
 
 Versiones: `GENERATOR_VERSION = 22` · `FORMAT_VERSION = 7` ·
-`LARION_CONFIG_VERSION = 1` · `Cargo.toml = 0.52.1`.
+`LARION_CONFIG_VERSION = 1` · `Cargo.toml = 0.53.0`.
 
 - **Overlay F3** (`v0.27.0`): pantalla de diagnostico en pantalla (dos columnas)
   con una **fuente bitmap 5x7** propia.
@@ -318,6 +331,7 @@ modulo `render` habla con la GPU.
 | --------- | --------- |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Como se organiza el motor por dentro; flujo de un frame; invariantes. |
 | [`docs/worldgen.md`](./docs/worldgen.md) | Pipeline de generacion de mundo y estado de las fases. |
+| [`docs/materials.md`](./docs/materials.md) | Catalogo de rocas, tierras y maderas: dureza, resistencia, pico y drops. |
 | [`docs/performance.md`](./docs/performance.md) | Benchmarks y memoria medidos, por fase. |
 | [`DECISIONS.md`](./DECISIONS.md) | Registro historico de decisiones (que, por que, alternativas). |
 | [`assets/README.md`](./assets/README.md) | Que es cada recurso y cuales son canonicos. |

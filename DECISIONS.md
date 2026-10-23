@@ -4763,6 +4763,78 @@ protege la salida de v2 (comparada columna a columna contra `v0.51.0` en 3
 semillas). `FractalField2D` / `RidgedField2D` / `SimdFractal2D`,
 `SIMD_FBM_GAIN = 0.65`, `NOISE_QUANT = 4096`.
 
+## v0.52.1 - Catalogo de materiales y perfil de minado
+
+### 2026-10-22 - `MiningProfile` separado del registro de bloques
+
+**Decision.** Las stats de gameplay (dureza 0-10, resistencia a explosiones y
+pico minimo) viven en `src/world/mining.rs`, indexadas por `Block::id()`. El
+catalogo completo de rocas, tierras y maderas vive en `docs/materials.md`.
+`BlockDefinition` deja de tener `hardness`: `Block::hardness`,
+`Block::blast_resistance` y `Block::tool_tier` delegan en `MINING`.
+
+**Motivo.** El registro describe identidad/render (ids, tiles, flags) y no debe
+crecer con balance. La tabla separada permite anadir rocas nuevas sin tocar la
+definicion grafica, y el `hardness` anterior era un `f32` sin uso (el minado es
+instantaneo), asi que duplicaba el concepto.
+
+**Consecuencia.** `ToolTier` (`None..Special`) y `MiningProfile`; tests de
+longitud contra `registry::COUNT`, rangos 0..=10 y tiers de obsidiana/piedra/
+tierras. El catalogo de 69 materiales queda como especificacion de diseno: solo
+los 17 bloques actuales tienen perfil hasta que existan texturas/ids.
+
+## v0.53.0 - Biomas coherentes y agua contenida
+
+### 2026-10-22 - Biomas guiados por clima (config 4)
+
+**Decision.** `CURRENT_GENERATOR_CONFIG = 4`. La seleccion de bioma usa pesos
+por nodo: el clima pesa `1.0/1.0` y el relieve solo `0.14-0.24`. Las escalas
+climaticas pasan a `1/700` (temperatura) y `1/650` (humedad), la banda
+latitudinal se comprime hacia el centro (`0.55`) y cada bioma modifica la altura
+(pantano bajo y plano, llanura/sabana planas, desierto suave). El desierto gana
+pedreras de grava.
+
+**Motivo.** El selector 5D anterior pesaba mucho continentalidad/erosion/picos,
+asi que una montana dentro de un bosque cambiaba el bioma. Ademas, la banda
+latitudinal en U dejaba llanura/bosque/pantano en minoria (Savanna 72 % en la
+semilla 13371) y el jugador veia un solo bioma durante miles de bloques.
+
+**Consecuencia.** `BiomeSelector::with_defaults_v4`, `DEFAULT_BIOME_NODES_V4`,
+`WEIGHTS_COMMON/MID/DOMINANT` y `biome::height_modifier`. Test
+`config_4_ajusta_las_regiones_climaticas`; `test_column_hash_unchanged_v3`
+congela v3.
+
+### 2026-10-22 - Agua: solo donde la hidrologia la sostiene (config 4)
+
+**Decision.** En v4 el nivel del mar solo se fuerza si `landness < 0.25` o la
+hidrologia ya marca agua. Se eliminan lagos en desierto sin caudal real, se sube
+`river_min_flow` a `0.10` y el umbral de lago a `2.0` bloques.
+
+**Motivo.** Cualquier depresion interior bajo el mar se convertia en un "mar"
+aunque no tuviera conexion. El umbral de lago de `0.25` llenaba cada hoyo y el
+caudal minimo de `0.02` generaba un arroyo por cada linea de drenaje.
+
+**Consecuencia.** `compose_with_geo` (rama v4) y `HydroWindow::build`. El agua de
+v3 no cambia (`test_column_hash_unchanged_v3`). En una muestra de 8192 bloques,
+el agua interior baja de 34,6 % a 25,3 % y el agua en desierto de 233 a 1
+columnas.
+
+### 2026-10-22 - Render de agua continuo (3D, 8/9 y normales)
+
+**Decision.** El shader de agua muestrea ruido de valor **3D** en espacio de
+mundo para todas las caras, perturba la normal de la superficie con su gradiente
+y usa altura de fuente `8/9` (Minecraft). Las caras laterales de una columna
+toman la luz maxima entre su celda y la de arriba.
+
+**Motivo.** La cara superior usaba UV `xz` y las laterales `(x+z, y)`: el ruido
+no coincidia en la arista (costura) y no habia continuidad vertical al apilar
+agua. La luz por celda creaba bandas horizontales y la altura `14/16` no era la
+de Minecraft.
+
+**Consecuencia.** `water.wgsl` (`hash31`/`value_noise3`),
+`fluid_mesher::surface_height` y el maximo de luz. Tests de alturas, rampas, UV
+parcial y luz apilada.
+
 ## Plantilla para nuevas entradas
 
 ```

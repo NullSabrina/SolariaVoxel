@@ -59,7 +59,7 @@ fn main() {
     let pixels = arg_or(&args, 2, 512).clamp(16, 4096) as usize;
     let step = arg_or(&args, 3, 6).clamp(1, 128) as i32;
     let layer = args.get(4).cloned().unwrap_or_else(|| "height".to_string());
-    let version = arg_or(&args, 5, 1).clamp(1, 2) as u32;
+    let version = arg_or(&args, 5, 1).clamp(1, 4) as u32;
 
     let g = LarionGenerator::with_version(seed, LarionConfig::default(), version);
     let cfg = *g.config();

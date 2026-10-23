@@ -226,8 +226,14 @@ impl HydroWindow {
             }
         }
         let mut water = vec![0.0f32; n];
+        // config 4: un charco de 0.25 bloques en cada depresion no es un lago.
+        let lake_threshold = if generator.config_version() >= 4 {
+            2.0
+        } else {
+            0.25
+        };
         for i in 0..n {
-            let lake = filled[i] > h0[i] + 0.25;
+            let lake = filled[i] > h0[i] + lake_threshold;
             // Todo el **cauce excavado** (no solo la linea de flujo D8) se
             // llena hasta la superficie del priority-flood. Antes solo la
             // mascara `flow > river_min_flow` recibia agua: el V era ancho pero

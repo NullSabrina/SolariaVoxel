@@ -56,24 +56,33 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return output;
 }
 
-// Ruido de valor 2D **continuo** (hash en la rejilla + interpolacion suave).
-// No es periodico: a diferencia de repetir el tile del atlas, no tiene costura
-// cada N bloques, asi que se puede desplazar con el tiempo sin lineas.
-fn hash21(p: vec2<f32>) -> f32 {
-    var q = fract(p * vec2<f32>(123.34, 345.45));
+// Ruido de valor 3D **continuo** (hash en la rejilla + interpolacion suave).
+// Se muestrea en espacio de mundo para todas las caras: la cara superior y las
+// laterales comparten el mismo campo, sin costura en la arista ni bandas al
+// apilar agua.
+fn hash31(p: vec3<f32>) -> f32 {
+    var q = fract(p * vec3<f32>(123.34, 345.45, 567.89));
     q += dot(q, q + 34.345);
-    return fract(q.x * q.y);
+    return fract(q.x * q.y * q.z);
 }
 
-fn value_noise(p: vec2<f32>) -> f32 {
+fn value_noise3(p: vec3<f32>) -> f32 {
     let i = floor(p);
     let f = fract(p);
     let u = f * f * (3.0 - 2.0 * f);
-    let a = hash21(i);
-    let b = hash21(i + vec2<f32>(1.0, 0.0));
-    let c = hash21(i + vec2<f32>(0.0, 1.0));
-    let d = hash21(i + vec2<f32>(1.0, 1.0));
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    let c000 = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
+    let c100 = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
+    let c010 = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
+    let c110 = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
+    let c001 = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
+    let c101 = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
+    let c011 = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
+    let c111 = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
+    let x00 = mix(c000, c100, u.x);
+    let x10 = mix(c010, c110, u.x);
+    let x01 = mix(c001, c101, u.x);
+    let x11 = mix(c011, c111, u.x);
+    return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
 }
 
 @fragment
@@ -83,7 +92,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // La normal se obtiene de las derivadas de la posicion en pantalla: la
     // superficie interpolada ya es una rampa, y dpdx/dpdy dan su inclinacion
     // real por pixel (sin necesitar normales por vertice). Se calcula ANTES del
-    // color porque decide que plano usar para las UV.
+    // color porque decide que plano usar para el tinte.
     let view_dir = normalize(uniforms.camera_pos - input.world_pos);
     var n = cross(dpdx(input.world_pos), dpdy(input.world_pos));
     if (dot(n, n) < 1.0e-8) {
@@ -96,34 +105,37 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         normal = -normal;
     }
 
-    // UV en **espacio de mundo**, derivadas de `world_pos` (no del UV local del
-    // vertice). Asi dos chunks adyacentes comparten fase en el borde aunque el
-    // mesher cambie, y las caras laterales (que antes usaban 0..1 por bloque)
-    // tambien quedan continuas.
     let is_top = normal.y > 0.5;
-    let side_uv = vec2<f32>(input.world_pos.x + input.world_pos.z, input.world_pos.y);
-    let surf_uv = select(side_uv, input.world_pos.xz, is_top);
 
-    // Color base del tile de agua: una sola muestra **fija**. Antes se hacia
-    // scroll del atlas (`uv + time`), pero el tile (16x16) NO es periodico y
-    // cada repeticion dejaba una costura recta que se movia con el agua: eso
-    // eran las "grietas" que dejaban ver el fondo. La animacion ahora es un
-    // campo de ruido continuo en mundo, sin repeticion.
+    // Color base del tile de agua: una sola muestra **fija**. La animacion es un
+    // campo de ruido continuo en **3D mundo**, sin repeticion ni costura entre
+    // la cara superior y las laterales.
     let base = textureSample(atlas, atlas_sampler, vec2<f32>(0.5, 0.5), input.tile);
 
     // Dos capas de ruido a distinta velocidad y direccion: corriente.
-    let flow_a = surf_uv * 0.32 + vec2<f32>(t * 0.060, t * 0.025);
-    let flow_b = surf_uv * 0.21 + vec2<f32>(-t * 0.040, t * 0.055);
-    let ripple = (value_noise(flow_a) - 0.5) * 0.35
-        + (value_noise(flow_b) - 0.5) * 0.25;
+    let flow_a = input.world_pos * 0.32 + vec3<f32>(t * 0.060, t * 0.025, t * 0.010);
+    let flow_b = input.world_pos * 0.21 + vec3<f32>(-t * 0.040, t * 0.055, -t * 0.015);
+    let ripple = (value_noise3(flow_a) - 0.5) * 0.35
+        + (value_noise3(flow_b) - 0.5) * 0.25;
+
+    // Perturba la normal con el gradiente del ruido solo en la superficie: los
+    // reflejos especulares se mueven y el agua deja de parecer una lamina
+    // plastica. Las paredes mantienen la normal vertical (sin brillos raros).
+    if (is_top) {
+        let e = 0.06;
+        let h0 = value_noise3(flow_a);
+        let hx = value_noise3(flow_a + vec3<f32>(e, 0.0, 0.0));
+        let hz = value_noise3(flow_a + vec3<f32>(0.0, 0.0, e));
+        normal = normalize(normal + vec3<f32>((h0 - hx) * 4.0, 0.0, (h0 - hz) * 4.0));
+    }
     // Color base con un minimo azul: en sombra/noche el tile puede quedar casi
     // negro y el agua se lee como un agujero.
     var color = max(base.rgb, vec3<f32>(0.06, 0.15, 0.30)) * (1.0 + ripple);
 
-    // Tinte por nivel de agua: la fuente (nivel 8) llega con `fract(y) ~ 0.875`
+    // Tinte por nivel de agua: la fuente (nivel 8) llega con `fract(y) ~ 8/9`
     // y se ve mas clara; el flujo (1..7) queda mas oscuro. Solo en la cara
     // superior: en las laterales `fract(y)` no representa el nivel.
-    let level01 = clamp(fract(input.world_pos.y) / 0.875, 0.0, 1.0);
+    let level01 = clamp(fract(input.world_pos.y) / (8.0 / 9.0), 0.0, 1.0);
     let level_tint = select(1.0, mix(0.78, 1.10, level01), is_top);
     color = color * level_tint;
 

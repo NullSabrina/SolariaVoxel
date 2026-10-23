@@ -129,7 +129,7 @@ impl ChunkPos {
 
 /// Ficha del mundo.
 ///
-/// La version del **pipeline** Larion (`generator_config = 1/2/3`) no vive aqui:
+/// La version del **pipeline** Larion (`generator_config = 1/2/3/4`) no vive aqui:
 /// esta en `WorldMeta` (`level.json`) para no cambiar el layout bincode de
 /// `FORMAT_VERSION = 7`. `generator_version` sigue siendo informativo.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
