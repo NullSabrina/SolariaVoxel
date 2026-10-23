@@ -28,7 +28,9 @@ use super::chunk::{CHUNK_SIZE, Column, WORLD_HEIGHT};
 use super::generator::GeneratorKind;
 use super::worldgen::decoration::{DecorationKind, Decorator};
 use super::worldgen::graph::{Graph, Program, default_density_graph, default_height_graph};
-use super::worldgen::larion::{Aquifer, AquiferFluid, LarionConfig, LarionGenerator, LarionSample};
+use super::worldgen::larion::{
+    Aquifer, AquiferFluid, LarionConfig, LarionGenerator, LarionSample, WaterKind,
+};
 use super::worldgen::trees::{MARGIN, ORGANIC_MARGIN, TreePlacer};
 use super::worldgen::{
     LandClass, LandformProfile, TerrainSample, WorldGen, WorldGenConfig, biomes, math,
@@ -304,6 +306,7 @@ impl TerrainGenerator {
                     mountain: s.mountain_mask,
                     river_proximity: s.river_proximity,
                     surface_water: s.surface_water,
+                    water_kind: WaterKind::None,
                     hydro_erosion: 0.0,
                     tree_density: 0.0,
                     biome: s.biome,
@@ -566,6 +569,7 @@ impl TerrainGenerator {
                 // Bioma unico (Fase B del Prompt 1): ambos caminos usan la misma
                 // fuente de verdad, `WorldGen`; el grafo ya no decide bioma.
                 let biome = geo.biome;
+                column.set_water_tile(super::atlas::water_tile(biome));
                 let variant = self.surface_variant(wx, wz);
                 // Ecotono: 1 en la frontera de la celda de bioma, 0 en el interior.
                 let ecotone = ecotone_strength(geo.cell_edge);
@@ -670,6 +674,7 @@ impl TerrainGenerator {
                 // Geografia (FASE 1/2) + clima/bioma (FASE 3) del WorldGen.
                 let geo = grid[idx(x as i32, z as i32)];
                 let biome = geo.biome;
+                column.set_water_tile(super::atlas::water_tile(biome));
                 let height = (geo.base_height.round() as i32).clamp(MIN_HEIGHT, MAX_HEIGHT);
                 // Pendiente: maxima diferencia de altura con las 4 vecinas.
                 let slope = {
@@ -908,6 +913,7 @@ impl TerrainGenerator {
                 let has_caves = self.has_caves(wx, wz);
                 let caves_ctx = has_caves.then(|| self.caves.context(wx, wz, s.mountain));
                 let biome_mat = self.larion_material_biome(&s, wx, wz, &lcfg);
+                column.set_water_tile(super::atlas::water_tile(s.biome));
 
                 let band = lcfg.density_band.ceil() as i32;
                 let top_scan = (height + band + 1).clamp(0, WORLD_HEIGHT as i32);
@@ -996,10 +1002,13 @@ impl TerrainGenerator {
                     }
                 }
 
-                // Agua (mar, rio o lago) por encima del techo solido real.
+                // Agua (mar, rio o lago) por encima del techo solido real. En
+                // config 4 solo se rellena si la columna tiene una clasificacion
+                // valida; un `surface_water` residual ya no inunda tierra seca.
                 let water_top = s.surface_water.max(0.0).round() as usize;
                 let start = top_solid.map_or(0, |t| t + 1);
-                if water_top > start {
+                let classified = self.generator_config < 4 || s.water_kind != WaterKind::None;
+                if water_top > start && classified {
                     for y in start..water_top.min(WORLD_HEIGHT) {
                         if column.get(x, y, z) == Block::Air {
                             column.set(x, y, z, Block::Water);
@@ -1016,6 +1025,7 @@ impl TerrainGenerator {
                     && h.waterfall > lcfg.hydro.waterfall_min
                     && h.dist < h.width
                     && h.water > 0.0
+                    && classified
                 {
                     let top = (h.water.round() as i32).clamp(0, WORLD_HEIGHT as i32 - 1) as usize;
                     let base =
@@ -1026,6 +1036,26 @@ impl TerrainGenerator {
                         }
                     }
                     column.push_water_surface(x, z, top);
+                }
+
+                // Flores de superficie (config 4): solo en tierra seca, suelo
+                // vegetal y pendiente suave. Se colocan despues del agua para
+                // que una columna inundada no reciba una flor.
+                if self.generator_config >= 4
+                    && s.water_kind == WaterKind::None
+                    && (2..=13).contains(&x)
+                    && (2..=13).contains(&z)
+                    && slope <= 1
+                    && matches!(biome_mat, Biome::Plains | Biome::Forest | Biome::Swamp)
+                    && let Some(top) = top_solid
+                    && top + 1 < WORLD_HEIGHT
+                    && matches!(column.get(x, top, z), Block::Grass | Block::Podzol)
+                    && column.get(x, top + 1, z) == Block::Air
+                {
+                    let h = hash01(wx.wrapping_mul(0x9E37), wz.wrapping_mul(0x85EB));
+                    if h < 0.035 {
+                        column.set(x, top + 1, z, Block::Flower);
+                    }
                 }
 
                 // Decoracion de rocas. En Larion solo en laderas/montana: antes
@@ -1573,6 +1603,29 @@ mod tests {
         // Prerequisito para generar columnas en hilos de trabajo.
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<TerrainGenerator>();
+    }
+
+    #[test]
+    fn el_agua_de_la_columna_usa_el_tile_del_bioma() {
+        let g = TerrainGenerator::with_kind_and_config(13_371, GeneratorKind::Larion, 4);
+        let mut swamp = None;
+        let mut cold = None;
+        'find: for z in (-4096..4096).step_by(128) {
+            for x in (-4096..4096).step_by(128) {
+                match g.sample(x, z).biome {
+                    Biome::Swamp => swamp = swamp.or(Some((x, z))),
+                    Biome::Taiga | Biome::Tundra => cold = cold.or(Some((x, z))),
+                    _ => {}
+                }
+                if swamp.is_some() && cold.is_some() {
+                    break 'find;
+                }
+            }
+        }
+        let (x, z) = swamp.expect("sin pantano en la muestra");
+        assert_eq!(g.generate_column(x, z).water_tile(), 19);
+        let (x, z) = cold.expect("sin taiga/tundra en la muestra");
+        assert_eq!(g.generate_column(x, z).water_tile(), 20);
     }
 
     #[test]

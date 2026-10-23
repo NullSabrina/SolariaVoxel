@@ -36,8 +36,8 @@ pub fn mesh_column(column: &Column, origin: [f32; 3]) -> Vec<SectionMesh> {
                 let block = column.get(x, y, z);
                 let section = &mut per_section[y / CHUNK_SIZE];
 
-                // La antorcha no es un cubo: se dibuja como dos quads cruzados.
-                if block == Block::Torch {
+                // La antorcha y la flor no son cubos: dos quads cruzados.
+                if block == Block::Torch || block == Block::Flower {
                     let (sky, block_light) = light_pair(column, x, y, z);
                     emit_torch(
                         &mut section.0,
@@ -100,8 +100,8 @@ pub fn mesh_section(column: &Column, section: usize, origin: [f32; 3]) -> Sectio
             for x in 0..CHUNK_SIZE {
                 let block = column.get(x, y, z);
 
-                // La antorcha no es un cubo: se dibuja como dos quads cruzados.
-                if block == Block::Torch {
+                // La antorcha y la flor no son cubos: dos quads cruzados.
+                if block == Block::Torch || block == Block::Flower {
                     let (sky, block_light) = light_pair(column, x, y, z);
                     emit_torch(
                         &mut vertices,

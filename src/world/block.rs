@@ -95,6 +95,8 @@ pub enum Block {
     Lava,
     /// Obsidiana: roca formada bajo las pozas de lava; dura y oscura.
     Obsidian,
+    /// Flor decorativa: visible, no solida, modelo de dos planos cruzados.
+    Flower,
 }
 
 impl Default for Block {

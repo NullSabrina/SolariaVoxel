@@ -8,17 +8,23 @@ versionado del mundo y la generacion procedural.
 > Objetivo a largo plazo: un mundo de voxeles jugable que consuma **< 500 MB de
 > RAM**, construido en micro-versiones pequenas (cada una jugable y commiteada).
 
-## Estado actual: `v0.53.0` — biomas coherentes y agua contenida
+## Estado actual: `v0.53.1` — biomas coherentes y agua contenida
 
 - **Biomas v4** (`generator_config = 4`): el selector pesa mucho mas el clima que
   el relieve (`WEIGHTS_*`), las regiones climaticas se ajustan a ~700 bloques,
   la banda latitudinal se comprime para que llanura/bosque/pantano no queden en
   minoria y cada bioma modifica el relieve (pantano bajo, llanura/sabana planas,
   desierto suave). El desierto gana pedreras de grava.
-- **Agua v4**: solo se fuerza el nivel del mar en columnas oceanicas o ya
-  mojadas por hidrologia; se eliminan lagos secos en desierto, se sube el umbral
-  de caudal (menos arroyos) y el de lago (menos charcos). **v3 queda congelada**
-  con `test_column_hash_unchanged_v3`.
+- **Agua v4**: `WaterKind` clasifica **Ocean/River/Lake/Wetland/None**; solo se
+  rellena una columna con clasificacion valida. Se eliminan lagos de sabana seca,
+  se sube el umbral de caudal (menos arroyos), el de lago (menos charcos) y se
+  descartan componentes de agua de menos de 24 celdas. `water_audit` mide agua
+  interior, anomalias y (con `3d`) columnas reales; **v3 queda congelada** con
+  `test_column_hash_unchanged_v3`.
+- **Contenido por bioma**: `flower` decorativa (cutout, dos planos cruzados) en
+  llanura/bosque/pantano y **agua teñida** (pantano verde, frio azul) con los
+  tiles 19-21 del atlas; `Column::water_tile` evita re-muestrear el bioma al
+  meshear.
 - **Render de agua**: ruido **3D en espacio de mundo** (sin costura entre cara
   superior y laterales ni bandas al apilar), luz lateral tomada del bloque de
   arriba, altura de fuente **8/9** como Minecraft y normales perturbadas para
@@ -77,7 +83,7 @@ versionado del mundo y la generacion procedural.
   camino `graph`.
 
 Versiones: `GENERATOR_VERSION = 22` · `FORMAT_VERSION = 7` ·
-`LARION_CONFIG_VERSION = 1` · `Cargo.toml = 0.53.0`.
+`LARION_CONFIG_VERSION = 1` · `Cargo.toml = 0.53.1`.
 
 - **Overlay F3** (`v0.27.0`): pantalla de diagnostico en pantalla (dos columnas)
   con una **fuente bitmap 5x7** propia.
@@ -226,12 +232,20 @@ Preview del **grafo de densidad** (altura + corte de densidad, offline):
 cargo run --release --example graph_preview -- 13371 384 4
 ```
 
-Preview del **generador Larion** (altura/bioma/erosion/continental/pendiente/rio
-y corte vertical de densidad, offline):
+Preview del **generador Larion** (altura/bioma/erosion/continental/pendiente/rio/
+agua y corte vertical de densidad, offline):
 
 ```bash
 cargo run --release --example larion_preview -- 13371 512 40 height
+cargo run --release --example larion_preview -- 13371 512 6 water 4
 cargo run --release --example larion_preview -- 13371 512 6 density
+```
+
+Auditoria de **agua superficial** (clases, agua interior, lagos, anomalias):
+
+```bash
+cargo run --release --example water_audit -- 13371 2048 32 4
+cargo run --release --example water_audit -- 13371 512 32 4 3d
 ```
 
 Regenerar las **texturas del cubo** del sol/luna (`assets/sun.png`, `assets/moon.png`):

@@ -126,4 +126,6 @@ ejecutable en modo demo (ver `README.md`).
 | Captura | Que muestra |
 | ------- | ----------- |
 | `larion_13371_biome_v4.png` | Mapa de biomas de config 4: regiones climaticas coherentes y rios contenidos. |
+| `larion_13371_water_v4.png` | Mapa de agua por origen (oceano/rio/lago/humedal/seco) con `WaterKind`. |
 | `v0.53_ocean.png` | Superficie de agua con ruido 3D continuo y normales perturbadas (reflejos en movimiento). |
+| `v0.53_flowers.png` | Banco de flores (`Block::Flower`) en llanura: cutout, dos planos cruzados y tile 21. |

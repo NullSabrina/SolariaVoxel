@@ -224,12 +224,12 @@ where
         }
     }
 
-    // Antorchas: modelo 3D (palo + llama), no entra en el greedy porque cada
-    // una es un objeto fino, no una cara de cubo.
+    // Antorchas y flores: modelos de planos cruzados, no entran en el greedy.
     for y in y_start..y_end {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                if query(x as i32, y as i32, z as i32) != Block::Torch {
+                let block = query(x as i32, y as i32, z as i32);
+                if block != Block::Torch && block != Block::Flower {
                     continue;
                 }
                 let (sky, block_light) = light(x as i32, y as i32, z as i32);
@@ -242,7 +242,7 @@ where
                     x,
                     y,
                     z,
-                    Block::Torch,
+                    block,
                     sky_f,
                     block_f,
                 );
@@ -525,6 +525,16 @@ mod tests {
         assert_eq!(vertices.len(), 8, "dos planos cruzados");
         assert_eq!(indices.len(), 24);
         assert!(vertices.iter().all(|v| v.tile == 8));
+    }
+
+    #[test]
+    fn la_flor_se_dibuja_como_cruz_con_su_tile() {
+        let mut column = Column::empty();
+        column.set(8, 8, 8, Block::Flower);
+        let (vertices, indices) = greedy_column(&column, [0.0; 3]);
+        assert_eq!(vertices.len(), 8, "dos planos cruzados");
+        assert_eq!(indices.len(), 24);
+        assert!(vertices.iter().all(|v| v.tile == 21));
     }
 
     #[test]

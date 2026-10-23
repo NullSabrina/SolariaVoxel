@@ -41,7 +41,7 @@ pub use biome::{BiomeBlend, BiomeNode, BiomeSelector};
 pub use climate::ClimatePoint;
 pub use config::{HydroConfig, LARION_CONFIG_VERSION, LarionConfig, LarionConfigError};
 pub use density::DensityField;
-pub use height::LarionSample;
+pub use height::{LarionSample, WaterKind};
 pub use hydro::{CELL, HALO, HydroCache, HydroSample, HydroWindow, MAX_WINDOWS, WINDOW};
 pub use noise::{
     Fractal2D, Fractal3D, FractalField2D, Ridged2D, RidgedField2D, ScalarField2D, SimdFractal2D,
@@ -486,7 +486,7 @@ impl LarionGenerator {
         let mountain = (peaks01 * composed.interior * composed.landness * (1.0 - erosion * 0.85))
             .clamp(0.0, 1.0);
 
-        let (height, river_proximity, surface_water, hydro_erosion, tree_density) =
+        let (height, river_proximity, surface_water, hydro_erosion, tree_density, water_kind) =
             if self.config_version >= 2 {
                 // P0.1: drenaje global + perfil en V del cauce.
                 let hydro = match window {
@@ -513,11 +513,22 @@ impl LarionGenerator {
                 // Antes se exigia `water > height + 0.25`, lo que descartaba el
                 // agua de un rio cuyo nivel coincide con la superficie: el canal
                 // quedaba seco salvo una lama central.
+                let is_river = hydro.dist <= hydro.width && hydro.water > 0.0;
                 let mut water = hydro.water;
                 if water < 0.0 || !water.is_finite() {
                     water = 0.0;
                 }
                 if self.config_version >= 4 {
+                    // El relieve del bioma ya modifico `composed.height`; un rio
+                    // debe bajar su lamina con el, o quedaria colgando sobre la
+                    // orilla. Lagos y oceanos conservan su cota (un pantano mas
+                    // bajo simplemente tiene agua mas profunda).
+                    if is_river && water > 0.0 {
+                        water += composed.height - geo.composed.height;
+                        if water < 0.0 {
+                            water = 0.0;
+                        }
+                    }
                     // Solo se fuerza el nivel del mar si la columna es oceanica
                     // o la hidrologia ya la considera mojada. Antes, cualquier
                     // depresion interior bajo el mar se convertia en un "mar"
@@ -528,14 +539,50 @@ impl LarionGenerator {
                     }
                     // Un desierto seco no inventa lagos en cada hueco. Los
                     // cauces con caudal real (rios) se conservan.
-                    if !oceanic
-                        && blend.primary == Biome::Desert
-                        && hydro.flow <= cfg.hydro.river_min_flow
-                    {
+                    if !oceanic && blend.primary == Biome::Desert && !is_river {
                         water = 0.0;
+                    }
+                    // Lagos: solo en climas humedos/frios o a suficiente altura.
+                    // El priority-flood llena cualquier depresion; sin este
+                    // filtro, cada hueco de sabana seca se volvia una laguna.
+                    if !oceanic && !is_river && water > 0.0 {
+                        let lake_ok = height > cfg.sea_level + 70.0
+                            || match blend.primary {
+                                Biome::Forest | Biome::Taiga | Biome::Tundra | Biome::Swamp => true,
+                                Biome::Plains => humidity > 0.55,
+                                Biome::Savanna => humidity > 0.62,
+                                Biome::Desert => false,
+                            };
+                        if !lake_ok {
+                            water = 0.0;
+                        }
                     }
                 } else if height < cfg.sea_level {
                     water = water.max(cfg.sea_level);
+                }
+                let water_kind = if self.config_version >= 4 {
+                    if water <= 0.0 {
+                        WaterKind::None
+                    } else if composed.landness < 0.25 && height < cfg.sea_level {
+                        WaterKind::Ocean
+                    } else if is_river && water > height + 0.01 {
+                        WaterKind::River
+                    } else if water > height + 0.01 {
+                        if blend.primary == Biome::Swamp {
+                            WaterKind::Wetland
+                        } else {
+                            WaterKind::Lake
+                        }
+                    } else {
+                        // La hidrologia tiene una cota de lago/rio cercana, pero
+                        // esta columna esta por encima del agua: es tierra seca.
+                        WaterKind::None
+                    }
+                } else {
+                    WaterKind::None
+                };
+                if self.config_version >= 4 && water_kind == WaterKind::None {
+                    water = 0.0;
                 }
                 let tree_density = tree_density_value(
                     blend.primary,
@@ -545,7 +592,14 @@ impl LarionGenerator {
                     temperature,
                     Some((hydro.dist, hydro.width, hydro.water)),
                 );
-                (height, proximity, water, (-hydro.dh).max(0.0), tree_density)
+                (
+                    height,
+                    proximity,
+                    water,
+                    (-hydro.dh).max(0.0),
+                    tree_density,
+                    water_kind,
+                )
             } else {
                 // v1: comportamiento historico, byte a byte. NO tocar el orden de
                 // las muestras de ruido.
@@ -589,7 +643,14 @@ impl LarionGenerator {
                     temperature,
                     None,
                 ) * (1.0 - 0.8 * river_proximity);
-                (carved, river_proximity, surface_water, 0.0, tree_density)
+                (
+                    carved,
+                    river_proximity,
+                    surface_water,
+                    0.0,
+                    tree_density,
+                    WaterKind::None,
+                )
             };
 
         LarionSample {
@@ -603,6 +664,7 @@ impl LarionGenerator {
             mountain,
             river_proximity,
             surface_water,
+            water_kind,
             hydro_erosion,
             tree_density,
             biome: blend.primary,

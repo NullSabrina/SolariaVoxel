@@ -30,7 +30,7 @@ pub const WIDTH: u32 = COLS * TILE;
 pub const HEIGHT: u32 = ROWS * TILE;
 
 /// Nombres estables de los tiles, en orden de indice.
-pub const TILE_NAMES: [&str; 19] = [
+pub const TILE_NAMES: [&str; 22] = [
     "grass_top",
     "grass_side",
     "dirt",
@@ -50,7 +50,21 @@ pub const TILE_NAMES: [&str; 19] = [
     "podzol_top",
     "lava",
     "obsidian",
+    "water_swamp",
+    "water_cold",
+    "flower_red",
 ];
+
+/// Tile de agua segun el bioma: pantano verdoso, frio azul intenso, resto azul
+/// normal. El shader usa el color central del tile como tinte base.
+pub fn water_tile(biome: crate::world::terrain::Biome) -> u32 {
+    use crate::world::terrain::Biome;
+    match biome {
+        Biome::Swamp => 19,
+        Biome::Taiga | Biome::Tundra => 20,
+        _ => 10,
+    }
+}
 
 /// Paleta global de 32 colores. Familias ordenadas de oscuro a claro.
 const PALETTE: [[u8; 3]; 32] = [
@@ -284,6 +298,7 @@ fn matrix_for(tile: u32) -> Option<&'static [&'static str; 16]> {
         5 => Some(&WOOD_SIDE),
         7 => Some(&LEAVES),
         8 => Some(&TORCH),
+        21 => Some(&FLOWER),
         _ => None,
     }
 }
@@ -438,6 +453,26 @@ const TORCH: [&str; 16] = [
     ".......gg.......",
     ".......gg.......",
     ".......gg.......",
+];
+
+/// Flor roja/amarilla para la decoracion de llanuras/bosques/pantanos.
+const FLOWER: [&str; 16] = [
+    "................",
+    "................",
+    "......vv........",
+    ".....vttv.......",
+    "....vttttv......",
+    "....vttutv......",
+    ".....vttv.......",
+    "......vv........",
+    ".......l........",
+    ".......l........",
+    "......ll........",
+    ".......l........",
+    ".......l........",
+    "......lll.......",
+    ".......l........",
+    "................",
 ];
 
 fn matrix_color(ch: char) -> [u8; 4] {
@@ -633,6 +668,21 @@ fn tile_color(tile: u32, x: u32, y: u32) -> [u8; 4] {
                 p((sel(x, y, 8, 18, &[1, 2, 7, 7]) + (g / 2)).clamp(1, 7))
             }
         }
+        // 19/20: variantes de agua por bioma (el shader muestrea el color base).
+        19 => {
+            if y % 8 < 2 {
+                [90, 120, 92, 200]
+            } else {
+                [72, 104, 78, 200]
+            }
+        }
+        20 => {
+            if y % 8 < 2 {
+                [70, 95, 210, 200]
+            } else {
+                [52, 72, 190, 200]
+            }
+        }
         _ => [0, 0, 0, 0],
     }
 }
@@ -668,9 +718,9 @@ mod tests {
                 for x in 0..TILE {
                     let i = (((row * TILE + y) * WIDTH + (col * TILE + x)) * 4) as usize;
                     let alpha = pixels[i + 3];
-                    if tile == 8 || tile == 7 {
+                    if tile == 8 || tile == 7 || tile == 21 {
                         assert!(alpha == 0 || alpha == 255, "tile {tile} alfa {alpha}");
-                    } else if tile == 10 {
+                    } else if tile == 10 || tile == 19 || tile == 20 {
                         assert!(alpha > 0 && alpha < 255, "agua debe ser translucida");
                     } else {
                         assert_eq!(alpha, 255, "tile {tile} pixel ({x},{y})");
@@ -678,6 +728,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn el_agua_se_tine_por_bioma() {
+        use crate::world::terrain::Biome;
+        assert_eq!(water_tile(Biome::Swamp), 19);
+        assert_eq!(water_tile(Biome::Taiga), 20);
+        assert_eq!(water_tile(Biome::Tundra), 20);
+        assert_eq!(water_tile(Biome::Plains), 10);
+        assert_eq!(water_tile(Biome::Desert), 10);
     }
 
     #[test]

@@ -3,11 +3,13 @@
 ## Texturas de bloque
 
 1. **Fuente**: PNG 16x16 CC0 de Minetest Game en
-   `assets/src/textures/minetest/`. La fuente editable completa del atlas esta
-   en `assets/src/textures/blocks.aseprite` (LibreSprite).
+   `assets/src/textures/minetest/` + fuentes propias en
+   `assets/src/textures/solaria_*.png` (flor y agua de pantano/fria). La fuente
+   editable completa del atlas esta en `assets/src/textures/blocks.aseprite`
+   (LibreSprite).
 2. **Construccion**: `tools/gen_atlas.ps1` compone un atlas de **256x96**
-   (8 columnas x 3 filas de tiles **32x32**), escala cada fuente 2x con
-   nearest-neighbor y genera:
+   (8 columnas x 3 filas de tiles **32x32**, **22 tiles**), escala cada fuente
+   2x con nearest-neighbor y genera:
    - `assets/atlas.png`
    - `assets/atlas.json` (`indice -> nombre, x, y, w, h`)
 3. **Runtime**: `world/atlas.rs` trocea el PNG en capas y `render/pipeline.rs`

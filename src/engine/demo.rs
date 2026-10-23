@@ -63,6 +63,11 @@ pub fn biomes_active() -> bool {
     std::env::var("SOLARIA_BIOMES").is_ok()
 }
 
+/// ¿Mostrar el banco de flores? (`SOLARIA_FLOWERS`).
+pub fn flowers_active() -> bool {
+    std::env::var("SOLARIA_FLOWERS").is_ok()
+}
+
 /// ¿Mostrar una vista de oceano? (`SOLARIA_OCEAN`).
 pub fn ocean_active() -> bool {
     std::env::var("SOLARIA_OCEAN").is_ok()
@@ -107,6 +112,34 @@ pub fn build_overview(camera: &mut Camera) {
     camera.yaw_deg = 0.0;
     camera.pitch_deg = -52.0;
     camera.update_view();
+}
+
+/// Banco de flores (`SOLARIA_FLOWERS=1`): aplana una parcela de hierba y coloca
+/// flores en ajedrez para verificar el bloque cutout y su tile en el atlas.
+pub fn build_flowers(renderer: &mut Renderer, camera: &mut Camera) {
+    let cx = camera.position.x.floor() as i32;
+    let cz = camera.position.z.floor() as i32;
+    let feet = (camera.position.y - EYE_HEIGHT).floor() as i32;
+    let mut edits: Vec<([i32; 3], Block)> = Vec::new();
+    for dz in -4..=4 {
+        for dx in -4..=4 {
+            edits.push(([cx + dx, feet, cz + dz], Block::Grass));
+            edits.push(([cx + dx, feet + 1, cz + dz], Block::Air));
+            if (dx + dz).rem_euclid(2) == 0 {
+                edits.push(([cx + dx, feet + 1, cz + dz], Block::Flower));
+            }
+        }
+    }
+    renderer.set_blocks(&edits);
+    camera.position = Vec3::new(
+        cx as f32 + 0.5,
+        feet as f32 + EYE_HEIGHT + 1.6,
+        cz as f32 + 4.2,
+    );
+    camera.yaw_deg = 0.0;
+    camera.pitch_deg = -18.0;
+    camera.update_view();
+    println!("[engine] demo: banco de flores en ({cx},{feet},{cz})");
 }
 
 /// Escena para **verificar la colision horizontal**: una pared solida delante y

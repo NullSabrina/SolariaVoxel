@@ -116,6 +116,10 @@ pub struct Column {
     /// usa `World::wake_column_water` para encolar el agua generada al cargar la
     /// columna y que se asiente sola. Evita re-escanear la columna entera.
     water_surface: Vec<[u8; 3]>,
+    /// Tile del atlas para el agua de esta columna (tinte por bioma). `0` =
+    /// sin asignar (columna cargada de un guardado antiguo): se usa el agua
+    /// normal (tile 10).
+    water_tile: u32,
 }
 
 impl Column {
@@ -130,7 +134,24 @@ impl Column {
             flow_cells: None,
             emitters: None,
             water_surface: Vec::new(),
+            water_tile: 0,
         }
+    }
+
+    /// Tile de agua de la columna (10 si no se asigno, p. ej. guardado antiguo).
+    #[inline]
+    pub fn water_tile(&self) -> u32 {
+        if self.water_tile == 0 {
+            10
+        } else {
+            self.water_tile
+        }
+    }
+
+    /// Asigna el tile de agua de la columna (tinte por bioma).
+    #[inline]
+    pub fn set_water_tile(&mut self, tile: u32) {
+        self.water_tile = tile;
     }
 
     /// Registra la celda de agua de superficie de `(x, z)` a la altura `y`.

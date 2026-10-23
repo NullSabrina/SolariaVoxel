@@ -83,6 +83,7 @@ pub fn item_color(block: Block) -> [f32; 3] {
         Block::Water => [0.20, 0.45, 0.85],
         Block::Lava => [0.90, 0.35, 0.10],
         Block::Obsidian => [0.10, 0.09, 0.14],
+        Block::Flower => [0.85, 0.25, 0.20],
         Block::Air => [0.70, 0.70, 0.70],
     }
 }

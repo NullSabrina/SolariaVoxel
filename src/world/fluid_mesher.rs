@@ -13,7 +13,7 @@
 //! interior del agua no genera geometria.
 
 use crate::render::mesh::Vertex;
-use crate::world::block::{Block, Face};
+use crate::world::block::Block;
 use crate::world::chunk::{CHUNK_SIZE, MAX_LIGHT, WORLD_HEIGHT};
 use crate::world::water::MAX_LEVEL;
 
@@ -74,10 +74,12 @@ fn push_quad(
 ///   -1 / 16 para mirar el chunk vecino); `0` = sin agua.
 /// * `query(x,y,z)` — bloque (`is_solid` decide si una cara lateral queda oculta).
 /// * `light(x,y,z)` — `(cielo, bloque)` 0..15 de la celda.
-pub fn fluid_section<L, Q, G>(
+/// * `tile(x,z)` — tile de agua segun el bioma (azul, pantano o frio).
+pub fn fluid_section<L, Q, G, T>(
     level: &L,
     query: &Q,
     light: &G,
+    tile: &T,
     section: usize,
     origin: [f32; 3],
 ) -> (Vec<Vertex>, Vec<u32>)
@@ -85,6 +87,7 @@ where
     L: Fn(i32, i32, i32) -> u8 + ?Sized,
     Q: Fn(i32, i32, i32) -> Block + ?Sized,
     G: Fn(i32, i32, i32) -> (u8, u8) + ?Sized,
+    T: Fn(i32, i32) -> u32 + ?Sized,
 {
     // P2-18: una seccion normal no deberia reasignar varias veces.
     let mut vertices = Vec::with_capacity(512);
@@ -92,7 +95,6 @@ where
     let (ox, oy, oz) = (origin[0], origin[1], origin[2]);
     let y_start = section * CHUNK_SIZE;
     let y_end = (y_start + CHUNK_SIZE).min(WORLD_HEIGHT);
-    let tile = Block::Water.face_tile(Face::PosY) as u32;
 
     for y in y_start..y_end {
         for z in 0..CHUNK_SIZE {
@@ -102,6 +104,7 @@ where
                     continue;
                 }
                 let (xi, yi, zi) = (x as i32, y as i32, z as i32);
+                let cell_tile = tile(xi, zi);
                 let (mut sky, mut block_light) = light(xi, yi, zi);
                 let (xf, yf, zf) = (x as f32, y as f32, z as f32);
 
@@ -157,7 +160,15 @@ where
                         [ox + xf + 1.0, oz + zf + 1.0],
                         [ox + xf, oz + zf + 1.0],
                     ];
-                    push_quad(&mut vertices, &mut indices, p, uv, sky_f, block_f, tile);
+                    push_quad(
+                        &mut vertices,
+                        &mut indices,
+                        p,
+                        uv,
+                        sky_f,
+                        block_f,
+                        cell_tile,
+                    );
                 }
 
                 // Caras laterales expuestas (no contra agua ni contra solido).
@@ -209,7 +220,15 @@ where
                     let hv0 = (p[0][1] - base).clamp(0.0, 1.0);
                     let hv1 = (p[1][1] - base).clamp(0.0, 1.0);
                     let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, hv1], [0.0, hv0]];
-                    push_quad(&mut vertices, &mut indices, p, uv, sky_f, block_f, tile);
+                    push_quad(
+                        &mut vertices,
+                        &mut indices,
+                        p,
+                        uv,
+                        sky_f,
+                        block_f,
+                        cell_tile,
+                    );
                 }
             }
         }
@@ -221,7 +240,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::block::Face;
     use std::collections::HashMap;
+
+    fn water_tile(_x: i32, _z: i32) -> u32 {
+        Block::Water.face_tile(Face::PosY) as u32
+    }
 
     #[test]
     fn la_altura_de_superficie_sigue_la_regla_de_minecraft() {
@@ -242,7 +266,7 @@ mod tests {
         let query = |_x: i32, _y: i32, _z: i32| Block::Air;
         let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
 
-        let (vertices, indices) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
+        let (vertices, indices) = fluid_section(&level, &query, &light, &water_tile, 0, [0.0; 3]);
         assert!(!vertices.is_empty() && indices.len() % 3 == 0);
 
         // Alturas presentes: 0.0 (base), 4/9 (nivel 4) y 8/9 (nivel 8).
@@ -273,7 +297,7 @@ mod tests {
         let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
         let nquads = |v: &[Vertex]| v.len() / 4;
 
-        let (v, _) = fluid_section(&level, &air, &light, 0, [0.0; 3]);
+        let (v, _) = fluid_section(&level, &air, &light, &water_tile, 0, [0.0; 3]);
         assert_eq!(nquads(&v), 5, "1 celda aislada = 5 caras");
 
         // Solido en +X: la cara +X no se emite (4 caras).
@@ -284,14 +308,14 @@ mod tests {
                 Block::Air
             }
         };
-        let (v, _) = fluid_section(&level, &solid, &light, 0, [0.0; 3]);
+        let (v, _) = fluid_section(&level, &solid, &light, &water_tile, 0, [0.0; 3]);
         assert_eq!(nquads(&v), 4, "cara de agua contra solido");
 
         // Agua de igual nivel en +X: 2 celdas, cada una con 3 laterales (no hay
         // pared entre agua) + su superior = 8 caras.
         levels.insert((1, 0, 0), 8);
         let level2 = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
-        let (v, _) = fluid_section(&level2, &air, &light, 0, [0.0; 3]);
+        let (v, _) = fluid_section(&level2, &air, &light, &water_tile, 0, [0.0; 3]);
         assert_eq!(nquads(&v), 8, "cara de agua contra agua de igual nivel");
     }
 
@@ -307,7 +331,7 @@ mod tests {
         let light = |_x: i32, y: i32, _z: i32| {
             if y >= 1 { (15u8, 0u8) } else { (5u8, 0u8) }
         };
-        let (v, _) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
+        let (v, _) = fluid_section(&level, &query, &light, &water_tile, 0, [0.0; 3]);
         let lower_side = v
             .iter()
             .filter(|v| v.position[1] < 1.0 && v.position[0] > 0.5)
@@ -331,7 +355,7 @@ mod tests {
         let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
         let query = |_x: i32, _y: i32, _z: i32| Block::Air;
         let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
-        let (v, _) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
+        let (v, _) = fluid_section(&level, &query, &light, &water_tile, 0, [0.0; 3]);
         let bottom = v
             .iter()
             .find(|v| (v.position[0] - 1.0).abs() < 1e-4 && v.position[1].abs() < 1e-4)
@@ -367,8 +391,8 @@ mod tests {
         let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
         let level_a = level_at(0);
         let level_b = level_at(16);
-        let (va, _) = fluid_section(&level_a, &query, &light, 0, [0.0, 0.0, 0.0]);
-        let (vb, _) = fluid_section(&level_b, &query, &light, 0, [16.0, 0.0, 0.0]);
+        let (va, _) = fluid_section(&level_a, &query, &light, &water_tile, 0, [0.0, 0.0, 0.0]);
+        let (vb, _) = fluid_section(&level_b, &query, &light, &water_tile, 0, [16.0, 0.0, 0.0]);
 
         // Vertices de la cara superior sobre el plano x = 16, como
         // `[y, z, u, v]` (la UV de mundo es exactamente x, z).
@@ -422,7 +446,7 @@ mod tests {
         let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
         let query = |_x: i32, _y: i32, _z: i32| Block::Air;
         let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
-        let (v, _) = fluid_section(&level, &query, &light, 0, [0.0; 3]);
+        let (v, _) = fluid_section(&level, &query, &light, &water_tile, 0, [0.0; 3]);
         assert!(
             !v.iter()
                 .any(|v| (v.position[0] - 1.0).abs() < 1e-4 && (v.position[1] - 0.875).abs() < 1e-4),
@@ -433,6 +457,22 @@ mod tests {
             v.iter()
                 .any(|v| (v.position[0] - 1.0).abs() < 1e-4 && (v.position[1] - 1.0).abs() < 1e-4),
             "la cara de la cascada no llega al borde del bloque"
+        );
+    }
+
+    #[test]
+    fn el_tile_de_agua_se_elige_por_columna() {
+        let mut levels: HashMap<(i32, i32, i32), u8> = HashMap::new();
+        levels.insert((0, 0, 0), 8);
+        let level = |x: i32, y: i32, z: i32| *levels.get(&(x, y, z)).unwrap_or(&0);
+        let query = |_x: i32, _y: i32, _z: i32| Block::Air;
+        let light = |_x: i32, _y: i32, _z: i32| (15u8, 0u8);
+        let swamp = |_x: i32, _z: i32| 19u32;
+        let (v, _) = fluid_section(&level, &query, &light, &swamp, 0, [0.0; 3]);
+        assert!(!v.is_empty());
+        assert!(
+            v.iter().all(|v| v.tile == 19),
+            "el agua no uso el tile del bioma"
         );
     }
 }

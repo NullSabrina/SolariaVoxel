@@ -2675,6 +2675,8 @@ impl ApplicationHandler for App {
                     demo::build_river(renderer, camera);
                 } else if demo::biomes_active() {
                     demo::build_overview(camera);
+                } else if demo::flowers_active() {
+                    demo::build_flowers(renderer, camera);
                 } else if demo::collide_active() {
                     demo::build_collision(renderer, camera);
                 } else if demo::cave_active() {

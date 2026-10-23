@@ -134,10 +134,11 @@ pub const ALL_BLOCKS: [Block; COUNT] = [
     Block::Podzol,
     Block::Lava,
     Block::Obsidian,
+    Block::Flower,
 ];
 
 /// Numero de bloques conocidos (ids `0..COUNT`).
-pub const COUNT: usize = 17;
+pub const COUNT: usize = 18;
 
 /// Constructor de comodidad: el mismo tile en las 6 caras.
 const fn all(tile: u16) -> FaceTiles {
@@ -339,6 +340,17 @@ pub const BLOCKS: [BlockDefinition; COUNT] = [
         light_emission: 0,
         item: true,
     },
+    BlockDefinition {
+        id: 17,
+        name: "flower",
+        face_tiles: all(21),
+        solid: false,
+        visible: true,
+        render: RenderKind::Cutout,
+        fluid: FluidKind::None,
+        light_emission: 0,
+        item: true,
+    },
 ];
 
 /// Fachada publica del **registro de bloques**: el punto de entrada unico para
@@ -414,7 +426,8 @@ pub fn creative_category(block: Block) -> CreativeCategory {
         | Block::Gravel
         | Block::Snow
         | Block::Wood
-        | Block::Leaves => CreativeCategory::Nature,
+        | Block::Leaves
+        | Block::Flower => CreativeCategory::Nature,
         Block::Torch => CreativeCategory::Decoration,
         Block::Water | Block::Lava => CreativeCategory::Special,
         Block::Air => CreativeCategory::Building,
@@ -453,6 +466,7 @@ pub const PLACEABLE_ITEMS: &[Block] = &[
     Block::Torch,
     Block::Water,
     Block::Lava,
+    Block::Flower,
 ];
 
 /// Cuenta de tiles del atlas: el tile mas alto usado por cualquier cara, mas 1.
@@ -514,7 +528,7 @@ mod tests {
             }
         }
         // El tile mas alto vale TILE_COUNT - 1 (no sobra espacio muerto).
-        assert_eq!(TILE_COUNT, 19);
+        assert_eq!(TILE_COUNT, 22);
     }
 
     #[test]
@@ -574,6 +588,15 @@ mod tests {
         assert_eq!(Block::Wood.face_tile(Face::PosY), 6);
         assert_eq!(Block::CraftingTable.face_tile(Face::NegY), 11);
         assert_eq!(Block::Podzol.face_tile(Face::PosY), 16);
+    }
+
+    #[test]
+    fn la_flor_es_cutout_no_solida_y_tiene_tile() {
+        assert!(!Block::Flower.is_solid());
+        assert!(Block::Flower.is_visible());
+        assert_eq!(Block::Flower.render_kind(), RenderKind::Cutout);
+        assert_eq!(Block::Flower.face_tile(Face::PosY), 21);
+        assert!(!Block::Flower.occludes());
     }
 
     #[test]

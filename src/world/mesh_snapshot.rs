@@ -23,6 +23,8 @@ pub struct SectionSnapshot {
     sky: Vec<u8>,
     block_light: Vec<u8>,
     water: Vec<u8>,
+    /// Tile de agua por columna (18x18, coordenadas locales -1..=16).
+    water_tiles: Vec<u32>,
 }
 
 impl SectionSnapshot {
@@ -33,6 +35,7 @@ impl SectionSnapshot {
             sky: vec![0; n],
             block_light: vec![0; n],
             water: vec![0; n],
+            water_tiles: vec![10; SNAP * SNAP],
         }
     }
 
@@ -68,6 +71,12 @@ impl SectionSnapshot {
     fn water(&self, lx: i32, ly: i32, lz: i32) -> u8 {
         self.water[Self::index(lx, ly, lz)]
     }
+
+    #[inline]
+    fn water_tile(&self, lx: i32, lz: i32) -> u32 {
+        let (x, z) = ((lx + 1) as usize, (lz + 1) as usize);
+        self.water_tiles[z * SNAP + x]
+    }
 }
 
 /// Copia del volumen `18x18x18` alrededor de la seccion `section` de la columna
@@ -77,6 +86,13 @@ pub fn section_snapshot(world: &World, pos: ChunkPos, section: usize) -> Section
     let bz = pos.z * super::chunk::CHUNK_SIZE as i32;
     let by = section as i32 * super::chunk::CHUNK_SIZE as i32;
     let mut snap = SectionSnapshot::empty();
+    // Tile de agua por columna (bioma del mundo) una sola vez por seccion.
+    for lz in -1..=16 {
+        for lx in -1..=16 {
+            let tile = world.water_tile_at(bx + lx, bz + lz);
+            snap.water_tiles[(lz + 1) as usize * SNAP + (lx + 1) as usize] = tile;
+        }
+    }
     for ly in -1..=16 {
         for lz in -1..=16 {
             for lx in -1..=16 {
@@ -114,6 +130,13 @@ pub fn mesh_snapshot(
 
     // El agua del greedy se ignora: la dibuja `fluid_mesher` (rampa continua).
     let (v, i, _, _) = greedy::greedy_section_query(&query, &light, section, origin);
-    let (fwv, fwi) = fluid_mesher::fluid_section(&level, &query, &light, section, origin);
+    let (fwv, fwi) = fluid_mesher::fluid_section(
+        &level,
+        &query,
+        &light,
+        &|x, z| snap.water_tile(x, z),
+        section,
+        origin,
+    );
     (v, i, fwv, fwi)
 }

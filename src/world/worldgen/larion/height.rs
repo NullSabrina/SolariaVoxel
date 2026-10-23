@@ -12,6 +12,23 @@ use super::spline::Spline;
 use crate::world::terrain::Biome;
 use crate::world::worldgen::math;
 
+/// **Origen** del agua superficial de una columna (config 4). Un unico `f32`
+/// no distingue mar de rio, lago o tierra seca; este enum es la fuente de verdad
+/// para el escritor de bloques, las metricas y los previews.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaterKind {
+    /// Sin agua superficial.
+    None,
+    /// Mar/plataforma conectada a la costa.
+    Ocean,
+    /// Cauce con caudal y ancho.
+    River,
+    /// Cuerpo de agua embalsado (cuenca/priority-flood).
+    Lake,
+    /// Suelo saturado de pantano (agua somera).
+    Wetland,
+}
+
 /// Muestra geografica de una columna Larion, antes de convertirla a bloques.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LarionSample {
@@ -36,6 +53,9 @@ pub struct LarionSample {
     pub river_proximity: f32,
     /// Nivel hasta el que llenar agua (0 = sin agua).
     pub surface_water: f32,
+    /// Origen del agua superficial. En versiones 1-3 se deja en `None` para no
+    /// cambiar su comportamiento; en config 4 clasifica mar/rio/lago/humedal.
+    pub water_kind: WaterKind,
     /// Erosion hidrica aplicada (`>= 0`), de la ventana P0.1. En `version=1`
     /// vale 0: el pipeline historico no tiene esta etapa.
     pub hydro_erosion: f32,

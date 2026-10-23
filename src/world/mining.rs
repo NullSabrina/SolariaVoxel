@@ -64,6 +64,7 @@ pub const MINING: [MiningProfile; super::registry::COUNT] = [
     p(1, 1, ToolTier::None),     // 14 podzol
     p(0, 0, ToolTier::None),     // 15 lava
     p(9, 10, ToolTier::Diamond), // 16 obsidian
+    p(0, 0, ToolTier::None),     // 17 flower
 ];
 
 /// Perfil de un bloque. Nunca falla: todo `Block` tiene entrada.

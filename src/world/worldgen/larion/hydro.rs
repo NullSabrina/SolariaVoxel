@@ -228,7 +228,7 @@ impl HydroWindow {
         let mut water = vec![0.0f32; n];
         // config 4: un charco de 0.25 bloques en cada depresion no es un lago.
         let lake_threshold = if generator.config_version() >= 4 {
-            2.0
+            4.0
         } else {
             0.25
         };
@@ -262,6 +262,13 @@ impl HydroWindow {
                 // una pared de agua vertical (captura v0.50).
                 water[i] = h0[i] + dh[i];
             }
+        }
+
+        // config 4: un charco de 2 celdas no es un lago. Se eliminan componentes
+        // de agua menores que `MIN_LAKE_CELLS` (24 celdas ~ 384 m²). Los rios
+        // largos y los lagos reales superan el umbral.
+        if generator.config_version() >= 4 {
+            remove_small_water_components(&mut water, size, 24);
         }
 
         Self {
@@ -660,6 +667,44 @@ fn neighbor_delta(i: usize, n: usize, size: usize) -> (i32, i32) {
     )
 }
 
+/// Elimina componentes de agua de menos de `min_cells` celdas (4-conectadas).
+/// Los rios/lagos reales son grandes; los charcos de priority-flood, no.
+fn remove_small_water_components(water: &mut [f32], size: usize, min_cells: usize) {
+    let n = size * size;
+    let mut seen = vec![false; n];
+    let mut component = Vec::new();
+    let mut stack = Vec::new();
+    for start in 0..n {
+        if seen[start] || water[start] <= 0.0 {
+            continue;
+        }
+        component.clear();
+        stack.clear();
+        stack.push(start);
+        seen[start] = true;
+        while let Some(i) = stack.pop() {
+            component.push(i);
+            let (x, z) = (i % size, i / size);
+            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let (nx, nz) = (x as i32 + dx, z as i32 + dz);
+                if nx < 0 || nz < 0 || nx >= size as i32 || nz >= size as i32 {
+                    continue;
+                }
+                let ni = nz as usize * size + nx as usize;
+                if !seen[ni] && water[ni] > 0.0 {
+                    seen[ni] = true;
+                    stack.push(ni);
+                }
+            }
+        }
+        if component.len() < min_cells {
+            for &i in &component {
+                water[i] = 0.0;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -863,6 +908,32 @@ mod tests {
              se exige 95%. Revisar el relleno de depresiones / el borde de la ventana.",
             pct * 100.0
         );
+    }
+
+    #[test]
+    fn elimina_charcos_pero_conserva_lagos_grandes() {
+        let size = 8;
+        let mut water = vec![0.0f32; size * size];
+        // Lago grande 5x5 = 25 celdas: se conserva.
+        for z in 0..5 {
+            for x in 0..5 {
+                water[z * size + x] = 90.0;
+            }
+        }
+        // Charco de 2 celdas en la esquina opuesta: se elimina.
+        water[7 * size + 7] = 70.0;
+        water[7 * size + 6] = 70.0;
+        // Charca de 2x2 = 4 celdas: se elimina.
+        for z in 6..8 {
+            for x in 0..2 {
+                water[z * size + x] = 80.0;
+            }
+        }
+        remove_small_water_components(&mut water, size, 24);
+        assert_eq!(water[7 * size + 7], 0.0, "charco de 2 celdas");
+        assert_eq!(water[6 * size], 0.0, "charca de 4 celdas");
+        assert_eq!(water[0], 90.0, "el lago grande desaparecio");
+        assert_eq!(water.iter().filter(|w| **w > 0.0).count(), 25);
     }
 
     #[test]

@@ -158,6 +158,14 @@ impl World {
         self.generator.biome_at(x, z)
     }
 
+    /// Tile de agua del bioma de la columna `(x, z)`. Lee la columna cargada
+    /// (no vuelve a muestrear el mundo): las columnas viejas sin tile usan 10.
+    pub fn water_tile_at(&self, x: i32, z: i32) -> u32 {
+        let g = CHUNK_SIZE as i32;
+        let pos = ChunkPos::new(x.div_euclid(g), z.div_euclid(g));
+        self.column(pos).map_or(10, |c| c.water_tile())
+    }
+
     /// Radio de render actual.
     pub fn view_radius(&self) -> i32 {
         self.view.render_radius

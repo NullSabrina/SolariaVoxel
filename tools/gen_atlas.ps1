@@ -6,7 +6,7 @@ Add-Type -AssemblyName System.Drawing
 
 $size = 32
 $cols = 8
-$tiles = 19
+$tiles = 22
 $rows = [math]::Ceiling($tiles / $cols)
 $width = $cols * $size
 $height = $rows * $size
@@ -30,6 +30,9 @@ $map = @{
   15 = "default_gravel.png"
   17 = "default_lava.png"
   18 = "default_obsidian.png"
+  19 = "solaria_water_swamp.png"
+  20 = "solaria_water_cold.png"
+  21 = "solaria_flower_red.png"
 }
 
 $bmp = New-Object System.Drawing.Bitmap $width, $height, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -40,6 +43,10 @@ $g.Clear([System.Drawing.Color]::Transparent)
 
 function Draw-Tile([int]$tile, [string]$file) {
   $path = Join-Path $srcDir $file
+  if (-not (Test-Path -LiteralPath $path)) {
+    # Fuentes propias (flor/agua tintada) viven un nivel arriba de minetest/.
+    $path = Join-Path (Join-Path $Root "assets/src/textures") $file
+  }
   if (-not (Test-Path -LiteralPath $path)) { return }
   $img = [System.Drawing.Image]::FromFile($path)
   $x = ($tile % $cols) * $size
@@ -124,6 +131,8 @@ function SetAlpha([int]$tile, [int]$a) {
   }
 }
 SetAlpha 10 200
+SetAlpha 19 200
+SetAlpha 20 200
 # Hojas: la fuente CC0 trae ~37% de huecos y el cutout se veia demasiado
 # transparente. Rellenamos la mayoria con verdes oscuros de la propia hoja y
 # conservamos ~15% de huecos (por pixel-fuente, en bloques de 2x2) para que la

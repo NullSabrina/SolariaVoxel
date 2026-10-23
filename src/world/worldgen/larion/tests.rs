@@ -367,6 +367,49 @@ fn test_column_hash_unchanged_v3() {
 }
 
 #[test]
+fn config_4_clasifica_el_agua_superficial() {
+    let g = LarionGenerator::with_version(13_371, LarionConfig::default(), 4);
+    let sea = g.config().sea_level;
+    let mut kinds = [0u32; 5];
+    for z in 0..32 {
+        for x in 0..32 {
+            let s = g.sample((x as f64 - 16.0) * 64.0, (z as f64 - 16.0) * 64.0);
+            kinds[match s.water_kind {
+                WaterKind::None => 0,
+                WaterKind::Ocean => 1,
+                WaterKind::River => 2,
+                WaterKind::Lake => 3,
+                WaterKind::Wetland => 4,
+            }] += 1;
+            match s.water_kind {
+                WaterKind::None => {
+                    assert_eq!(s.surface_water, 0.0, "tierra seca con agua en ({x},{z})");
+                }
+                WaterKind::Ocean => {
+                    assert!(
+                        s.height <= sea + 1.0,
+                        "oceano sobre tierra alta en ({x},{z}): {}",
+                        s.height
+                    );
+                    assert!(s.surface_water >= sea - 0.01, "oceano bajo el mar");
+                }
+                WaterKind::River | WaterKind::Lake | WaterKind::Wetland => {
+                    assert!(
+                        s.surface_water >= s.height - 0.51,
+                        "agua por debajo del lecho en ({x},{z}): {} < {}",
+                        s.surface_water,
+                        s.height
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(kinds.iter().sum::<u32>(), 32 * 32);
+    assert!(kinds[0] > 0, "no hay tierra seca en la muestra");
+    assert!(kinds[1] + kinds[2] + kinds[3] + kinds[4] > 0, "no hay agua");
+}
+
+#[test]
 fn config_4_ajusta_las_regiones_climaticas() {
     let v3 = LarionGenerator::with_version(1, LarionConfig::default(), 3);
     let v4 = LarionGenerator::with_version(1, LarionConfig::default(), 4);

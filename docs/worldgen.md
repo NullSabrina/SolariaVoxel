@@ -173,8 +173,9 @@ radio perturbado por un Perlin 3D y recorte por distancia al tronco.
 - **Colocacion con margen (camino A)**: cada chunk recorre `-MARGIN..16+MARGIN`
   (`MARGIN = 4`) y dibuja solo su parte; un arbol que cruza una frontera se
   genera entero en ambos chunks. El tronco tiene prioridad sobre las hojas.
-- **Contrato de hojas**: `visible && !solid` (se atraviesan) pero
-  `blocks_fluid() == true` (el agua no las borra) y el mesher solo emite sus caras
+- **Contrato de hojas**: `solid == true` (no se atraviesan) pero
+  `occludes() == false` (cutout, no ocultan la cara vecina) y
+  `blocks_fluid() == true` (el agua no las borra); el mesher solo emite sus caras
   contra aire.
 - **Deuda**: tronco inclinado de la acacia y variantes de tile de hoja (exigen
   atlas/registro).
@@ -197,3 +198,55 @@ de codigo cableado:
 - Preview offline: `cargo run --example graph_preview -- <seed> <px> <bpp>`.
 - Pendiente: rios/acuifero del grafo; `Cache2D` y evaluacion en retícula del resto
   de canales.
+
+## Agua superficial y biomas (config 4, v0.53)
+
+`generator_config = 4` separa el **origen** del agua superficial de su cota. Antes
+un unico `surface_water: f32` mezclaba mar, rio, lago y tierra seca; ahora
+`LarionSample::water_kind` distingue:
+
+- `Ocean`: conectado a la costa, cota de mar.
+- `River`: dentro del cauce (`dist <= width`), cota ligada al relieve final.
+- `Lake`: cuerpo embalsado por priority-flood en clima humedo/frio o altura.
+- `Wetland`: agua somera de pantano.
+- `None`: tierra seca (se fuerza `surface_water = 0`).
+
+Invariantes que el escritor de bloques y `water_audit` comprueban:
+
+1. Una columna `None` no recibe agua aunque la hidrologia tenga una cota cercana.
+2. Un `Ocean` solo aparece si `landness < 0.25` y la altura esta en/bajo el mar.
+3. Un `River` mantiene la lamina por encima del lecho; si el bioma baja el
+   relieve, la cota del rio baja con el.
+4. Un `Lake` exige agua por encima del terreno y un clima/altura que lo justifique.
+5. El agua de cuevas/acuiferos se escribe en su propio dominio y no se mezcla con
+   la clasificacion superficial.
+
+Ademas, config 4 descarta componentes de agua de **menos de 24 celdas**
+(~384 m²) para que un charco de priority-flood no cuente como lago.
+
+El **relieve por bioma** (`biome::height_modifier`) se aplica despues de elegir
+el bioma y antes de fijar la cota del rio; los lagos conservan su cota de
+priority-flood (un pantano mas bajo tiene agua mas profunda, no una lamina
+flotante).
+
+Contenido por bioma:
+
+- `Block::Flower`: cutout, no solida, dos planos cruzados (tile 21). Se coloca
+  deterministicamente en llanura/bosque/pantano, sobre hierba/podzol y pendiente
+  suave, solo en tierra seca.
+- El agua usa el tile del bioma (10 normal, 19 pantano, 20 frio). La eleccion se
+  guarda en `Column::water_tile` al generar y el snapshot de meshing la lee sin
+  volver a muestrear el mundo.
+
+Herramientas:
+
+```bash
+cargo run --release --example larion_preview -- 13371 512 6 water 4
+cargo run --release --example water_audit -- 13371 2048 32 4
+cargo run --release --example water_audit -- 13371 512 32 4 3d
+```
+
+`water_audit` imprime el reparto por origen, el agua interior y las anomalias
+(`seco_con_cota`, `rio_bajo_lecho`, `oceano_alto`, `no_finito`). Con `3d` genera
+columnas reales y comprueba que el agua escrita coincide con `WaterKind`. En la
+semilla 13371, config 4 paso de ~34% de agua interior a ~9,5% (muestra 8192/64).

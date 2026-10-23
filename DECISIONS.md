@@ -4835,6 +4835,59 @@ de Minecraft.
 `fluid_mesher::surface_height` y el maximo de luz. Tests de alturas, rampas, UV
 parcial y luz apilada.
 
+### 2026-10-22 - `WaterKind`: clasificar el agua superficial por origen
+
+**Decision.** `LarionSample` gana `water_kind` (`None/Ocean/River/Lake/Wetland`)
+para config 4. El escritor de bloques solo rellena si la columna tiene una
+clasificacion valida; `surface_water` se fuerza a `0` cuando la columna es seca.
+Los lagos de priority-flood se limitan a clima humedo/frio, altura suficiente o
+pantano. La cota de un rio se desplaza con el modificador de altura del bioma.
+
+**Motivo.** Un unico `f32` no distinguia mar, rio y lago. Una columna de tierra
+alta podia conservar la cota de un lago cercano (`surface_water=56`,
+`height=64`): el relleno no la inundaba por el orden del bucle, pero la
+clasificacion y las metricas eran falsas. Ademas, el priority-flood llenaba cada
+depresion de sabana seca, produciendo lagunas artificiales.
+
+**Consecuencia.** `WaterKind`, `water_audit`, preview `water`, invariantes en
+`config_4_clasifica_el_agua_superficial`. En la semilla 13371 el agua interior
+baja de ~22% a ~6% y los lagos de ~12% a ~4%; v1-3 no cambian
+(`test_column_hash_unchanged_v3`).
+
+### 2026-10-22 - Contenido por bioma: flores y agua teñida
+
+**Decision.** Se anaden tres tiles al atlas: `water_swamp` (19), `water_cold`
+(20) y `flower_red` (21). `Block::Flower` es un bloque cutout no solido que se
+dibuja con dos planos cruzados y se coloca en llanura/bosque/pantano sobre
+hierba/podzol, pendiente suave y tierra seca. El agua elige tile por bioma
+(10/19/20); `Column::water_tile` lo guarda al generar y `SectionSnapshot` lo lee
+sin re-muestrear el bioma.
+
+**Motivo.** Los biomas compartian el mismo color de agua y no tenian flora
+propia; el jugador no podia distinguir un pantano de una llanura solo por el
+suelo. La eleccion por columna evita pagar `biome_at` (muestreo completo) por
+cada celda al meshear.
+
+**Consecuencia.** `atlas.png` 22 tiles, `TILE_NAMES`, `atlas.json`, fallback
+procedural, `tools/gen_atlas.ps1` y `assets/src/textures/solaria_*.png`.
+`Block::Flower` en registro/mining/lang/UI/mesher; placement v4 en
+`terrain.rs`. Tests de tile por bioma, flor cutout y cruz. `Column` sigue
+siendo compatible con guardados antiguos (tile 0 -> agua normal).
+
+### 2026-10-22 - Lagos minimos y auditoria 3D
+
+**Decision.** En config 4 se eliminan componentes de agua 4-conectadas de menos
+de 24 celdas (~384 m²). `water_audit` gana el modo `3d`, que genera columnas
+reales y compara el agua escrita con `WaterKind`.
+
+**Motivo.** El priority-flood puede dejar charcos de 1-3 celdas que no son
+lagos. La auditoria 2D no demuestra que el escritor de bloques respete la
+clasificacion; el modo 3D cierra esa brecha.
+
+**Consecuencia.** `remove_small_water_components` en `hydro.rs`, test de
+componentes, y `audit_3d` en `examples/water_audit.rs` (0 anomalias en 64
+columnas de la semilla 13371).
+
 ## Plantilla para nuevas entradas
 
 ```

@@ -10,14 +10,15 @@
 //! ```
 //!
 //! `layer`:
-//! * `height` (defecto), `biome`, `erosion`, `continental`, `slope`, `river`.
+//! * `height` (defecto), `biome`, `erosion`, `continental`, `slope`, `river`,
+//!   `water` (origen del agua: oceano/rio/lago/humedal/seco).
 //! * `density` — corte vertical (X-Y) de la densidad 3D cerca de una montana.
 
 use std::collections::HashMap;
 use std::io::BufWriter;
 
 use solaria_voxel::world::terrain::{Biome, SEA_LEVEL};
-use solaria_voxel::world::worldgen::larion::{LarionConfig, LarionGenerator};
+use solaria_voxel::world::worldgen::larion::{LarionConfig, LarionGenerator, WaterKind};
 
 fn arg_or(args: &[String], i: usize, default: i64) -> i64 {
     args.get(i)
@@ -100,6 +101,7 @@ fn render_map(
     let mut heights: Vec<i32> = Vec::with_capacity(pixels * pixels);
     let mut n_ocean = 0u64;
     let mut n_river = 0u64;
+    let mut n_water = [0u64; 5];
     let mut biome_counts: HashMap<Biome, u64> = HashMap::new();
     let mut land = 0u64;
     let mut f_erosion = Vec::new();
@@ -125,6 +127,13 @@ fn render_map(
             if s.surface_water > s.height + 0.5 {
                 n_river += 1;
             }
+            n_water[match s.water_kind {
+                WaterKind::None => 0,
+                WaterKind::Ocean => 1,
+                WaterKind::River => 2,
+                WaterKind::Lake => 3,
+                WaterKind::Wetland => 4,
+            }] += 1;
             f_erosion.push((s.erosion * 255.0) as u8);
             f_cont.push((s.continentalness * 255.0) as u8);
             f_peaks.push((s.peaks * 1000.0) as i32);
@@ -152,6 +161,13 @@ fn render_map(
                         shade(biome_color(s.biome), h)
                     }
                 }
+                "water" => match s.water_kind {
+                    WaterKind::None => shade(biome_color(s.biome), h),
+                    WaterKind::Ocean => ocean_color(h),
+                    WaterKind::River => [50, 180, 240],
+                    WaterKind::Lake => [35, 80, 200],
+                    WaterKind::Wetland => [60, 150, 120],
+                },
                 _ => height_color(h),
             };
             put(img, pixels, px, py, color);
@@ -165,6 +181,14 @@ fn render_map(
         100.0 * n_ocean as f64 / total,
         100.0 * land as f64 / total,
         100.0 * n_river as f64 / total
+    );
+    println!(
+        "[larion] agua por origen: seco {:.1}% | oceano {:.1}% | rio {:.1}% | lago {:.1}% | humedal {:.1}%",
+        100.0 * n_water[0] as f64 / total,
+        100.0 * n_water[1] as f64 / total,
+        100.0 * n_water[2] as f64 / total,
+        100.0 * n_water[3] as f64 / total,
+        100.0 * n_water[4] as f64 / total
     );
     println!(
         "[larion] altura min/p01/p50/p95/p99/max = {}/{}/{}/{}/{}/{} (mar {SEA_LEVEL})",

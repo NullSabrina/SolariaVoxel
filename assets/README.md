@@ -4,10 +4,11 @@
 
 | Archivo | Tamano | Uso |
 | ------- | ------ | --- |
-| `atlas.png` | 256x96 | Atlas de bloques **32x32** (8 columnas x 3 filas). Fuente: texturas CC0 de Minetest Game + derivados, escaladas 2x. Lo carga `world/atlas.rs`; si falta, cae al fallback procedural. |
+| `atlas.png` | 256x96 | Atlas de bloques **32x32** (8 columnas x 3 filas, **22 tiles**). Fuente: texturas CC0 de Minetest Game + derivados propios (agua de pantano/fria y flor), escaladas 2x. Lo carga `world/atlas.rs`; si falta, cae al fallback procedural. |
 | `atlas.json` | - | Manifiesto de tiles: `indice -> nombre, x, y, w, h`. |
 | `src/textures/blocks.aseprite` | - | Fuente editable del atlas en LibreSprite. |
 | `src/textures/minetest/*.png` | 16x16 | Fuente **CC0** de Minetest Game usada para construir el atlas (grass, dirt, stone, sand, tree, leaves, water, snow, torch, lava, obsidian...). |
+| `src/textures/solaria_*.png` | 16x16 | Fuentes propias: `solaria_flower_red.png` (flor) y `solaria_water_swamp/cold.png` (tintes de agua por bioma). Editables en LibreSprite. |
 | `gui.png` | 256x256 | Arte de interfaz 2D con **bisel** estilo Minecraft: hotbar, ranuras (normal/hover/seleccionada), panel, botones (normal/hover/pulsado/desactivado), pestana, flecha, mirilla y atenuador. Pintado en **LibreSprite**; regenerable con `tools/gen_gui.js`. Si falta, el motor cae al procedural de `render/gui.rs`. |
 | `gui.json` | - | Manifiesto **legible** de regiones de `gui.png`. La fuente de verdad son las constantes de `src/render/gui.rs`; un test exige que coincidan. |
 | `src/ui/gui.aseprite` | - | **Salida generada** por `tools/gen_gui.js` (no versionada). No es una fuente requerida: el arte editable se repinta con el script. |
